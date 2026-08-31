@@ -1,0 +1,17 @@
+[package]
+name = "bd2-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+bd2-core.workspace = true
+bd2-data.workspace = true
+pyo3 = { version = "0.29.2", features = ["extension-module", "abi3-py313"] }
+rayon = "1.11"
+serde_json.workspace = true

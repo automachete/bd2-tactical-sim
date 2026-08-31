@@ -1,0 +1,26 @@
+[workspace]
+members = ["crates/bd2-core", "crates/bd2-data", "crates/bd2-py"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.97"
+
+[workspace.dependencies]
+bd2-core = { path = "crates/bd2-core" }
+bd2-data = { path = "crates/bd2-data" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+
+[profile.bench]
+lto = "thin"
+codegen-units = 1
+

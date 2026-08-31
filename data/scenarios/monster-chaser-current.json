@@ -1,0 +1,893 @@
+{
+  "scenario_id": "monster-chaser-10072-level-6",
+  "rules": {
+    "mode": "MONSTER_CHASER",
+    "grid": {
+      "rows": 3,
+      "depths": 4,
+      "deployment_limit": 5,
+      "blocked": []
+    },
+    "initial_sp": [
+      15,
+      0
+    ],
+    "sp_cap": null,
+    "recovery_after_team_turn": [
+      0,
+      0
+    ],
+    "first_side": "PLAYER",
+    "max_game_turns": 20,
+    "chain_reset_on_team_turn": true,
+    "allow_formation_change": true,
+    "allow_manual_commands": [
+      true,
+      false
+    ]
+  },
+  "units": [
+    {
+      "unit_id": 1,
+      "character_id": "Lathel",
+      "side": "PLAYER",
+      "position": {
+        "row": 0,
+        "depth": 0
+      },
+      "costume_loadout": [
+        {
+          "costume_id": "Lathel_1",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Lathel_2",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Lathel_4",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Lathel_5",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Lathel_6",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Lathel_3",
+          "enhancement": 5,
+          "burst_level": 3,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        }
+      ],
+      "stat_overrides": null,
+      "equipment_modifiers": {},
+      "ai_priority": [
+        "Lathel_3",
+        "Lathel_4",
+        "Lathel_1",
+        "Lathel_2",
+        "Lathel_5",
+        "Lathel_6"
+      ],
+      "party_no": 1,
+      "hp_owner": null,
+      "weak_point_bonus_bp": 0,
+      "can_act": true
+    },
+    {
+      "unit_id": 2,
+      "character_id": "Justia",
+      "side": "PLAYER",
+      "position": {
+        "row": 1,
+        "depth": 0
+      },
+      "costume_loadout": [
+        {
+          "costume_id": "Justia_2",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Justia_1",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Justia_3",
+          "enhancement": 5,
+          "burst_level": 3,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Justia_4",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Justia_5",
+          "enhancement": 5,
+          "burst_level": 3,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        }
+      ],
+      "stat_overrides": null,
+      "equipment_modifiers": {},
+      "ai_priority": [
+        "Justia_5",
+        "Justia_1",
+        "Justia_3",
+        "Justia_4",
+        "Justia_2"
+      ],
+      "party_no": 1,
+      "hp_owner": null,
+      "weak_point_bonus_bp": 0,
+      "can_act": true
+    },
+    {
+      "unit_id": 3,
+      "character_id": "Scheherazade",
+      "side": "PLAYER",
+      "position": {
+        "row": 2,
+        "depth": 0
+      },
+      "costume_loadout": [
+        {
+          "costume_id": "Scheherazade_1",
+          "enhancement": 5,
+          "burst_level": 3,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Scheherazade_2",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Scheherazade_3",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Scheherazade_4",
+          "enhancement": 5,
+          "burst_level": 3,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        }
+      ],
+      "stat_overrides": null,
+      "equipment_modifiers": {},
+      "ai_priority": [
+        "Scheherazade_4",
+        "Scheherazade_1",
+        "Scheherazade_3",
+        "Scheherazade_2"
+      ],
+      "party_no": 1,
+      "hp_owner": null,
+      "weak_point_bonus_bp": 0,
+      "can_act": true
+    },
+    {
+      "unit_id": 4,
+      "character_id": "Gray",
+      "side": "PLAYER",
+      "position": {
+        "row": 0,
+        "depth": 1
+      },
+      "costume_loadout": [
+        {
+          "costume_id": "Gray_1",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Gray_3",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Gray_2",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Gray_4",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        }
+      ],
+      "stat_overrides": null,
+      "equipment_modifiers": {},
+      "ai_priority": [
+        "Gray_1",
+        "Gray_2",
+        "Gray_3",
+        "Gray_4"
+      ],
+      "party_no": 1,
+      "hp_owner": null,
+      "weak_point_bonus_bp": 0,
+      "can_act": true
+    },
+    {
+      "unit_id": 5,
+      "character_id": "Celia",
+      "side": "PLAYER",
+      "position": {
+        "row": 2,
+        "depth": 1
+      },
+      "costume_loadout": [
+        {
+          "costume_id": "Celia_1",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Celia_2",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Celia_3",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        }
+      ],
+      "stat_overrides": null,
+      "equipment_modifiers": {},
+      "ai_priority": [
+        "Celia_3",
+        "Celia_1",
+        "Celia_2"
+      ],
+      "party_no": 1,
+      "hp_owner": null,
+      "weak_point_bonus_bp": 0,
+      "can_act": true
+    },
+    {
+      "unit_id": 101,
+      "character_id": "Sylvia",
+      "side": "PLAYER",
+      "position": {
+        "row": 0,
+        "depth": 0
+      },
+      "costume_loadout": [
+        {
+          "costume_id": "Sylvia_1",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Sylvia_3",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Sylvia_2",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Sylvia_4",
+          "enhancement": 5,
+          "burst_level": 3,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        }
+      ],
+      "stat_overrides": null,
+      "equipment_modifiers": {},
+      "ai_priority": [
+        "Sylvia_2",
+        "Sylvia_1",
+        "Sylvia_3",
+        "Sylvia_4"
+      ],
+      "party_no": 2,
+      "hp_owner": null,
+      "weak_point_bonus_bp": 0,
+      "can_act": true
+    },
+    {
+      "unit_id": 102,
+      "character_id": "Rubia",
+      "side": "PLAYER",
+      "position": {
+        "row": 1,
+        "depth": 0
+      },
+      "costume_loadout": [
+        {
+          "costume_id": "Rubia_1",
+          "enhancement": 5,
+          "burst_level": 3,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Rubia_2",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Rubia_3",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Rubia_4",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        }
+      ],
+      "stat_overrides": null,
+      "equipment_modifiers": {},
+      "ai_priority": [
+        "Rubia_3",
+        "Rubia_1",
+        "Rubia_4",
+        "Rubia_2"
+      ],
+      "party_no": 2,
+      "hp_owner": null,
+      "weak_point_bonus_bp": 0,
+      "can_act": true
+    },
+    {
+      "unit_id": 103,
+      "character_id": "Eclipse",
+      "side": "PLAYER",
+      "position": {
+        "row": 2,
+        "depth": 0
+      },
+      "costume_loadout": [
+        {
+          "costume_id": "Eclipse_1",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Eclipse_2",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Eclipse_3",
+          "enhancement": 5,
+          "burst_level": 3,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Eclipse_4",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        }
+      ],
+      "stat_overrides": null,
+      "equipment_modifiers": {},
+      "ai_priority": [
+        "Eclipse_1",
+        "Eclipse_2",
+        "Eclipse_3",
+        "Eclipse_4"
+      ],
+      "party_no": 2,
+      "hp_owner": null,
+      "weak_point_bonus_bp": 0,
+      "can_act": true
+    },
+    {
+      "unit_id": 104,
+      "character_id": "Teresse",
+      "side": "PLAYER",
+      "position": {
+        "row": 0,
+        "depth": 1
+      },
+      "costume_loadout": [
+        {
+          "costume_id": "Teresse_1",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Teresse_2",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Teresse_3",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        }
+      ],
+      "stat_overrides": null,
+      "equipment_modifiers": {},
+      "ai_priority": [
+        "Teresse_1",
+        "Teresse_3",
+        "Teresse_2"
+      ],
+      "party_no": 2,
+      "hp_owner": null,
+      "weak_point_bonus_bp": 0,
+      "can_act": true
+    },
+    {
+      "unit_id": 105,
+      "character_id": "Liatris",
+      "side": "PLAYER",
+      "position": {
+        "row": 2,
+        "depth": 1
+      },
+      "costume_loadout": [
+        {
+          "costume_id": "Liatris_1",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Liatris_2",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "Liatris_3",
+          "enhancement": 5,
+          "burst_level": 0,
+          "potential_mask": 7,
+          "permanent_potential_enabled": true,
+          "costume_link_target": null
+        }
+      ],
+      "stat_overrides": null,
+      "equipment_modifiers": {},
+      "ai_priority": [
+        "Liatris_2",
+        "Liatris_3",
+        "Liatris_1"
+      ],
+      "party_no": 2,
+      "hp_owner": null,
+      "weak_point_bonus_bp": 0,
+      "can_act": true
+    },
+    {
+      "unit_id": 1001,
+      "character_id": "fiend:10072",
+      "side": "ENEMY",
+      "position": {
+        "row": 1,
+        "depth": 0
+      },
+      "costume_loadout": [
+        {
+          "costume_id": "fiend:10072:hunt-72-skill-1",
+          "enhancement": 0,
+          "burst_level": 0,
+          "potential_mask": 0,
+          "permanent_potential_enabled": false,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "fiend:10072:hunt-72-skill-2",
+          "enhancement": 0,
+          "burst_level": 0,
+          "potential_mask": 0,
+          "permanent_potential_enabled": false,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "fiend:10072:hunt-72-skill-3",
+          "enhancement": 0,
+          "burst_level": 0,
+          "potential_mask": 0,
+          "permanent_potential_enabled": false,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "fiend:10072:hunt-72-skill-4",
+          "enhancement": 0,
+          "burst_level": 0,
+          "potential_mask": 0,
+          "permanent_potential_enabled": false,
+          "costume_link_target": null
+        },
+        {
+          "costume_id": "fiend:10072:hunt-72-skill-5",
+          "enhancement": 0,
+          "burst_level": 0,
+          "potential_mask": 0,
+          "permanent_potential_enabled": false,
+          "costume_link_target": null
+        }
+      ],
+      "stat_overrides": {
+        "max_hp": 230000000,
+        "attack": 0,
+        "magic": 352,
+        "crit_rate_bp": 0,
+        "crit_damage_bp": 0,
+        "defense_bp": 2000,
+        "magic_resist_bp": 2000,
+        "property_damage_bp": 10000,
+        "outgoing_damage_bp": 0,
+        "incoming_damage_bp": 0,
+        "amplification_bp": 0
+      },
+      "equipment_modifiers": {},
+      "ai_priority": [
+        "fiend:10072:hunt-72-skill-1",
+        "fiend:10072:hunt-72-skill-2",
+        "fiend:10072:hunt-72-skill-3",
+        "fiend:10072:hunt-72-skill-4",
+        "fiend:10072:hunt-72-skill-5"
+      ],
+      "party_no": 1,
+      "hp_owner": null,
+      "weak_point_bonus_bp": 0,
+      "can_act": true
+    },
+    {
+      "unit_id": 1002,
+      "character_id": "fiend:10072",
+      "side": "ENEMY",
+      "position": {
+        "row": 0,
+        "depth": 1
+      },
+      "costume_loadout": [],
+      "stat_overrides": {
+        "max_hp": 230000000,
+        "attack": 0,
+        "magic": 352,
+        "crit_rate_bp": 0,
+        "crit_damage_bp": 0,
+        "defense_bp": 2000,
+        "magic_resist_bp": 2000,
+        "property_damage_bp": 10000,
+        "outgoing_damage_bp": 0,
+        "incoming_damage_bp": 0,
+        "amplification_bp": 0
+      },
+      "equipment_modifiers": {},
+      "ai_priority": [],
+      "party_no": 1,
+      "hp_owner": 1001,
+      "weak_point_bonus_bp": 10000,
+      "can_act": false
+    },
+    {
+      "unit_id": 1003,
+      "character_id": "fiend:10072",
+      "side": "ENEMY",
+      "position": {
+        "row": 2,
+        "depth": 1
+      },
+      "costume_loadout": [],
+      "stat_overrides": {
+        "max_hp": 230000000,
+        "attack": 0,
+        "magic": 352,
+        "crit_rate_bp": 0,
+        "crit_damage_bp": 0,
+        "defense_bp": 2000,
+        "magic_resist_bp": 2000,
+        "property_damage_bp": 10000,
+        "outgoing_damage_bp": 0,
+        "incoming_damage_bp": 0,
+        "amplification_bp": 0
+      },
+      "equipment_modifiers": {},
+      "ai_priority": [],
+      "party_no": 1,
+      "hp_owner": 1001,
+      "weak_point_bonus_bp": 0,
+      "can_act": false
+    },
+    {
+      "unit_id": 1004,
+      "character_id": "fiend:10072",
+      "side": "ENEMY",
+      "position": {
+        "row": 0,
+        "depth": 2
+      },
+      "costume_loadout": [],
+      "stat_overrides": {
+        "max_hp": 230000000,
+        "attack": 0,
+        "magic": 352,
+        "crit_rate_bp": 0,
+        "crit_damage_bp": 0,
+        "defense_bp": 2000,
+        "magic_resist_bp": 2000,
+        "property_damage_bp": 10000,
+        "outgoing_damage_bp": 0,
+        "incoming_damage_bp": 0,
+        "amplification_bp": 0
+      },
+      "equipment_modifiers": {},
+      "ai_priority": [],
+      "party_no": 1,
+      "hp_owner": 1001,
+      "weak_point_bonus_bp": 10000,
+      "can_act": false
+    },
+    {
+      "unit_id": 1005,
+      "character_id": "fiend:10072",
+      "side": "ENEMY",
+      "position": {
+        "row": 1,
+        "depth": 2
+      },
+      "costume_loadout": [],
+      "stat_overrides": {
+        "max_hp": 230000000,
+        "attack": 0,
+        "magic": 352,
+        "crit_rate_bp": 0,
+        "crit_damage_bp": 0,
+        "defense_bp": 2000,
+        "magic_resist_bp": 2000,
+        "property_damage_bp": 10000,
+        "outgoing_damage_bp": 0,
+        "incoming_damage_bp": 0,
+        "amplification_bp": 0
+      },
+      "equipment_modifiers": {},
+      "ai_priority": [],
+      "party_no": 1,
+      "hp_owner": 1001,
+      "weak_point_bonus_bp": 0,
+      "can_act": false
+    },
+    {
+      "unit_id": 1006,
+      "character_id": "fiend:10072",
+      "side": "ENEMY",
+      "position": {
+        "row": 2,
+        "depth": 2
+      },
+      "costume_loadout": [],
+      "stat_overrides": {
+        "max_hp": 230000000,
+        "attack": 0,
+        "magic": 352,
+        "crit_rate_bp": 0,
+        "crit_damage_bp": 0,
+        "defense_bp": 2000,
+        "magic_resist_bp": 2000,
+        "property_damage_bp": 10000,
+        "outgoing_damage_bp": 0,
+        "incoming_damage_bp": 0,
+        "amplification_bp": 0
+      },
+      "equipment_modifiers": {},
+      "ai_priority": [],
+      "party_no": 1,
+      "hp_owner": 1001,
+      "weak_point_bonus_bp": 10000,
+      "can_act": false
+    },
+    {
+      "unit_id": 1007,
+      "character_id": "fiend:10072",
+      "side": "ENEMY",
+      "position": {
+        "row": 0,
+        "depth": 3
+      },
+      "costume_loadout": [],
+      "stat_overrides": {
+        "max_hp": 230000000,
+        "attack": 0,
+        "magic": 352,
+        "crit_rate_bp": 0,
+        "crit_damage_bp": 0,
+        "defense_bp": 2000,
+        "magic_resist_bp": 2000,
+        "property_damage_bp": 10000,
+        "outgoing_damage_bp": 0,
+        "incoming_damage_bp": 0,
+        "amplification_bp": 0
+      },
+      "equipment_modifiers": {},
+      "ai_priority": [],
+      "party_no": 1,
+      "hp_owner": 1001,
+      "weak_point_bonus_bp": 0,
+      "can_act": false
+    },
+    {
+      "unit_id": 1008,
+      "character_id": "fiend:10072",
+      "side": "ENEMY",
+      "position": {
+        "row": 2,
+        "depth": 3
+      },
+      "costume_loadout": [],
+      "stat_overrides": {
+        "max_hp": 230000000,
+        "attack": 0,
+        "magic": 352,
+        "crit_rate_bp": 0,
+        "crit_damage_bp": 0,
+        "defense_bp": 2000,
+        "magic_resist_bp": 2000,
+        "property_damage_bp": 10000,
+        "outgoing_damage_bp": 0,
+        "incoming_damage_bp": 0,
+        "amplification_bp": 0
+      },
+      "equipment_modifiers": {},
+      "ai_priority": [],
+      "party_no": 1,
+      "hp_owner": 1001,
+      "weak_point_bonus_bp": 10000,
+      "can_act": false
+    }
+  ],
+  "monster_chaser": {
+    "monster_id": "10072",
+    "cumulative_hp_by_level": [
+      6380,
+      1910000,
+      12300000,
+      42600000,
+      108000000,
+      230000000,
+      432000000,
+      742000000,
+      1190000000,
+      1820000000,
+      2670000000,
+      3780000000,
+      5200000000,
+      6990000000,
+      9190000000,
+      11800000000,
+      15100000000,
+      18900000000,
+      23400000000,
+      28700000000,
+      34800000000,
+      41800000000,
+      49900000000,
+      59000000000,
+      69300000000
+    ],
+    "selected_level": 6,
+    "party_limit": 2,
+    "turn_sp_recovery": 5
+  }
+}

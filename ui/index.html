@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BD2 Tactical Lab</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <p class="eyebrow">BROWNDUST2 SIMULATION ENVIRONMENT</p>
+        <h1>Tactical Lab</h1>
+      </div>
+      <div class="status-strip">
+        <span id="mode">—</span><span id="turn">—</span><span id="device">—</span>
+      </div>
+    </header>
+    <main>
+      <section class="arena-panel">
+        <div class="arena-head">
+          <div><small>PLAYER SP</small><strong id="player-sp">0</strong></div>
+          <div class="active-side" id="active-side">LOADING</div>
+          <div><small>ENEMY SP</small><strong id="enemy-sp">0</strong></div>
+        </div>
+        <div class="battlefield">
+          <div><h2>PLAYER</h2><div class="grid" id="player-grid"></div></div>
+          <div><h2>ENEMY</h2><div class="grid enemy" id="enemy-grid"></div></div>
+        </div>
+        <div class="terminal hidden" id="terminal"></div>
+      </section>
+      <aside>
+        <section class="controls">
+          <div class="section-title"><span>TURN PLAN</span><span id="seed"></span></div>
+          <div id="commands"></div>
+          <div class="button-row">
+            <button class="primary" id="execute">ターン実行</button>
+            <button id="ai-step">AIに任せる</button>
+            <button id="reset">リセット</button>
+          </div>
+        </section>
+        <section class="log-panel">
+          <div class="section-title"><span>EVENT STREAM</span><span id="event-count">0</span></div>
+          <ol id="events"></ol>
+        </section>
+      </aside>
+    </main>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
+

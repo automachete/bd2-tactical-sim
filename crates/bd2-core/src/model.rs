@@ -1,0 +1,1079 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde::{Deserialize, Serialize};
+
+pub type UnitId = u32;
+pub type BasisPoints = i32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum Side {
+    Player,
+    Enemy,
+}
+
+impl Side {
+    pub const fn opponent(self) -> Self {
+        match self {
+            Self::Player => Self::Enemy,
+            Self::Enemy => Self::Player,
+        }
+    }
+
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Player => 0,
+            Self::Enemy => 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum Element {
+    Fire,
+    Water,
+    Wind,
+    Light,
+    Dark,
+    #[default]
+    None,
+}
+
+impl Element {
+    pub const fn factor_bp(self, defender: Self) -> BasisPoints {
+        use Element::*;
+        match (self, defender) {
+            (Fire, Wind) | (Wind, Water) | (Water, Fire) | (Light, Dark) | (Dark, Light) => 13_000,
+            (Fire, Water) | (Wind, Fire) | (Water, Wind) => 5_000,
+            _ => 10_000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AttackType {
+    Physical,
+    Magical,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DamageKind {
+    Physical,
+    Magical,
+    Fixed,
+    HpConsumption,
+    Collision,
+    Dot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum TargetSelector {
+    Front,
+    Skip,
+    SelfUnit,
+    AllyFront,
+    NextAllyInOrder,
+    Explicit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Cell {
+    pub row: i8,
+    pub depth: i8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Offset {
+    pub row: i8,
+    pub depth: i8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GridDefinition {
+    pub rows: i8,
+    pub depths: i8,
+    pub deployment_limit: usize,
+    #[serde(default)]
+    pub blocked: BTreeSet<(i8, i8)>,
+}
+
+impl GridDefinition {
+    pub fn standard() -> Self {
+        Self {
+            rows: 3,
+            depths: 4,
+            deployment_limit: 5,
+            blocked: BTreeSet::new(),
+        }
+    }
+
+    pub fn contains(&self, cell: Cell) -> bool {
+        cell.row >= 0
+            && cell.row < self.rows
+            && cell.depth >= 0
+            && cell.depth < self.depths
+            && !self.blocked.contains(&(cell.row, cell.depth))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Stats {
+    pub max_hp: i64,
+    pub attack: i64,
+    pub magic: i64,
+    pub crit_rate_bp: BasisPoints,
+    pub crit_damage_bp: BasisPoints,
+    pub defense_bp: BasisPoints,
+    pub magic_resist_bp: BasisPoints,
+    #[serde(default)]
+    pub property_damage_bp: BasisPoints,
+    #[serde(default)]
+    pub outgoing_damage_bp: BasisPoints,
+    #[serde(default)]
+    pub incoming_damage_bp: BasisPoints,
+    #[serde(default)]
+    pub amplification_bp: BasisPoints,
+}
+
+impl Stats {
+    pub fn validate(&self) -> bool {
+        self.max_hp > 0 && self.attack >= 0 && self.magic >= 0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CharacterDefinition {
+    pub id: String,
+    pub names: BTreeMap<String, String>,
+    pub rarity: u8,
+    pub element: Element,
+    pub attack_type: AttackType,
+    pub target_selector: TargetSelector,
+    pub level_100_awakened: Stats,
+    pub costume_ids: Vec<String>,
+    #[serde(default)]
+    pub source: SourceRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CostumeDefinition {
+    pub id: String,
+    pub character_id: String,
+    pub names: BTreeMap<String, String>,
+    pub range: Vec<Offset>,
+    pub variants: Vec<SkillVariant>,
+    /// Permanent stat nodes unlocked in this costume's potential tree.
+    #[serde(default)]
+    pub permanent_potential_modifiers: StatModifiers,
+    /// Stats granted when this costume is selected as the character's bond.
+    #[serde(default)]
+    pub bonding_modifiers: StatModifiers,
+    /// False means that the source record is preserved but its prose has not
+    /// yet been compiled into lossless executable operations. Such a costume
+    /// is never exposed as a legal action.
+    #[serde(default)]
+    pub executable: bool,
+    #[serde(default)]
+    pub compile_diagnostics: Vec<String>,
+    #[serde(default)]
+    pub source: SourceRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillVariant {
+    pub enhancement: u8,
+    pub burst_level: u8,
+    #[serde(default)]
+    pub potential_mask: u8,
+    pub sp_cost: i32,
+    pub cooldown: u16,
+    pub selector: TargetSelector,
+    #[serde(default)]
+    pub fixed_target_cell: Option<Cell>,
+    #[serde(default)]
+    pub target_all: bool,
+    #[serde(default)]
+    pub range_override: Option<Vec<Offset>>,
+    pub operations: Vec<SkillOperation>,
+    #[serde(default)]
+    pub consume_remaining_sp: bool,
+    #[serde(default = "default_true")]
+    pub executable: bool,
+    #[serde(default)]
+    pub compile_diagnostics: Vec<String>,
+    #[serde(default)]
+    pub preemptive: bool,
+    /// Optional encounter-AI trigger. Triggered skills are resolved immediately
+    /// after the opposing action that makes this condition true.
+    #[serde(default)]
+    pub activation_condition: Option<SkillCondition>,
+    /// Per Monster Chaser party activation cap for a triggered skill.
+    #[serde(default)]
+    pub max_uses_per_party: Option<u16>,
+    /// One-based position in an encounter-controlled boss action cycle.
+    #[serde(default)]
+    pub ai_sequence_index: Option<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SkillOperation {
+    DealDamage {
+        kind: DamageKind,
+        coefficient_bp: BasisPoints,
+        #[serde(default)]
+        reference: Option<StatReference>,
+        #[serde(default)]
+        scaling: Option<DamageScaling>,
+        hits: u16,
+        #[serde(default = "default_true")]
+        can_crit: bool,
+        #[serde(default = "default_true")]
+        can_evade: bool,
+        #[serde(default = "default_chain")]
+        chain_per_hit: u16,
+        #[serde(default)]
+        main_target_bonus_bp: BasisPoints,
+    },
+    Heal {
+        coefficient_bp: BasisPoints,
+        reference: StatReference,
+        #[serde(default)]
+        can_crit: bool,
+        #[serde(default = "default_target_recipient")]
+        recipient: EffectRecipient,
+    },
+    ConsumeHp {
+        coefficient_bp: BasisPoints,
+        reference: StatReference,
+        #[serde(default)]
+        can_kill: bool,
+    },
+    ApplyEffect {
+        effect: EffectSpec,
+    },
+    RemoveEffects {
+        polarity: EffectPolarity,
+        #[serde(default = "default_one")]
+        count: u16,
+    },
+    RemoveEffectsByTag {
+        tag: String,
+    },
+    AbsorbEffectsAndApplyStacks {
+        polarity: EffectPolarity,
+        recipient: EffectRecipient,
+        effect: EffectSpec,
+        max_stacks: u16,
+    },
+    ExtendEffects {
+        polarity: EffectPolarity,
+        duration: u16,
+        recipient: EffectRecipient,
+    },
+    ChangeCooldown {
+        amount: i16,
+        recipient: EffectRecipient,
+    },
+    ChangeCostumeCooldown {
+        amount: i16,
+        costume_id: String,
+    },
+    ChangeSp {
+        amount: i32,
+        side: EffectRecipient,
+    },
+    ChangeSpPerSuccessfulHit {
+        amount: i32,
+        side: EffectRecipient,
+    },
+    Knockback {
+        direction: KnockbackDirection,
+        distance: u8,
+        collision_coefficient_bp: BasisPoints,
+    },
+    Conditional {
+        condition: SkillCondition,
+        operations: Vec<SkillOperation>,
+    },
+    InstantDeath {
+        #[serde(default)]
+        remove_beneficial_effects: bool,
+    },
+    Summon {
+        character_id: String,
+        costume_id: String,
+        count: u8,
+        enhancement: u8,
+        inherit_summoner_stats: bool,
+    },
+    SelfDestruct,
+    ApplyEffectPerMatchingEnemy {
+        effect: EffectSpec,
+        tag: String,
+        stacks_per_unit: u16,
+        max_stacks: u16,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DamageScaling {
+    pub source: DamageScalingSource,
+    pub coefficient_bp_per_unit: BasisPoints,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DamageScalingSource {
+    TargetCount,
+    TargetCountMinusOne,
+    ActorEffectCount { polarity: EffectPolarity },
+    TargetEffectCount { polarity: EffectPolarity },
+    TargetTagStacks { tag: String },
+    SkillSpCost,
+    ExtraSpConsumed,
+}
+
+const fn default_true() -> bool {
+    true
+}
+const fn default_chain() -> u16 {
+    1
+}
+const fn default_one() -> u16 {
+    1
+}
+const fn default_target_recipient() -> EffectRecipient {
+    EffectRecipient::TargetSide
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum StatReference {
+    Attack,
+    Magic,
+    MaxHp,
+    CurrentHp,
+    Fixed,
+    TargetMaxHp,
+    TargetCurrentHp,
+    TargetAttack,
+    TargetMagic,
+    EnergyGuard,
+    ReceivedDamage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum EffectRecipient {
+    ActorSide,
+    TargetSide,
+    ActorTeam,
+    OpponentTeam,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SkillCondition {
+    Any {
+        conditions: Vec<SkillCondition>,
+    },
+    All {
+        conditions: Vec<SkillCondition>,
+    },
+    TargetChainAtLeast {
+        value: u16,
+    },
+    TargetHpAtMost {
+        percent_bp: BasisPoints,
+    },
+    ActorHpAtMost {
+        percent_bp: BasisPoints,
+    },
+    TargetHasTag {
+        tag: String,
+    },
+    TargetLacksTag {
+        tag: String,
+    },
+    ActorHasTag {
+        tag: String,
+    },
+    ActorLacksTag {
+        tag: String,
+    },
+    IsMainTarget,
+    IsNotMainTarget,
+    TargetChainAtMost {
+        value: u16,
+    },
+    TargetChainMultipleOf {
+        value: u16,
+    },
+    TargetChainNotMultipleOf {
+        value: u16,
+    },
+    TargetEffectCountAtLeast {
+        polarity: EffectPolarity,
+        value: u16,
+    },
+    TargetEffectCountAtMost {
+        polarity: EffectPolarity,
+        value: u16,
+    },
+    ActorEffectCountAtLeast {
+        polarity: EffectPolarity,
+        value: u16,
+    },
+    AnyOpponentChainAtLeast {
+        value: u16,
+    },
+    TargetAttackType {
+        attack_type: AttackType,
+    },
+    TargetNotAttackType {
+        attack_type: AttackType,
+    },
+    TargetElement {
+        element: Element,
+    },
+    TargetNotElement {
+        element: Element,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum KnockbackDirection {
+    Back,
+    Front,
+    Up,
+    Down,
+    UpBack,
+    DownBack,
+    UpFront,
+    DownFront,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum EffectPolarity {
+    Beneficial,
+    Harmful,
+    Neutral,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DurationClock {
+    GameTurn,
+    Round,
+    Action,
+    Permanent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EffectSpec {
+    pub effect_id: String,
+    pub polarity: EffectPolarity,
+    pub recipient: EffectRecipient,
+    pub duration: u16,
+    pub duration_clock: DurationClock,
+    pub modifiers: StatModifiers,
+    #[serde(default)]
+    pub tags: BTreeSet<String>,
+    #[serde(default)]
+    pub stack_rule: StackRule,
+    #[serde(default)]
+    pub barrier: Option<BarrierSpec>,
+    #[serde(default)]
+    pub periodic: Option<PeriodicSpec>,
+    #[serde(default)]
+    pub charges: Option<u16>,
+    #[serde(default)]
+    pub counter: Option<CounterSpec>,
+    #[serde(default)]
+    pub revive_hp_bp: Option<BasisPoints>,
+    #[serde(default)]
+    pub max_stacks: Option<u16>,
+    #[serde(default)]
+    pub conditional_outgoing: Vec<ConditionalDamageModifier>,
+    #[serde(default)]
+    pub on_hit_received_allies: Option<Box<EffectSpec>>,
+    /// Typed operations resolved with the defender as actor and attacker as target.
+    #[serde(default)]
+    pub on_hit_received_operations: Vec<SkillOperation>,
+    #[serde(default)]
+    pub on_turn_end_operations: Vec<SkillOperation>,
+    #[serde(default)]
+    pub aura_allies: Option<Box<EffectSpec>>,
+    #[serde(default)]
+    pub aura_opponents: Option<Box<EffectSpec>>,
+    #[serde(default)]
+    pub on_chain_dealt: Option<Box<ChainTriggerSpec>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BarrierSpec {
+    pub coefficient_bp: BasisPoints,
+    pub reference: StatReference,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeriodicSpec {
+    pub kind: DamageKind,
+    pub coefficient_bp: BasisPoints,
+    pub reference: StatReference,
+    #[serde(default = "default_one")]
+    pub stacks: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CounterSpec {
+    pub kind: DamageKind,
+    pub coefficient_bp: BasisPoints,
+    pub reference: StatReference,
+    #[serde(default)]
+    pub target_all: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConditionalDamageModifier {
+    pub condition: SkillCondition,
+    pub amount_bp: BasisPoints,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChainTriggerSpec {
+    pub stack_effect: Box<EffectSpec>,
+    pub threshold: u16,
+    pub threshold_effect: Box<EffectSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct StatModifiers {
+    pub max_hp_flat: i64,
+    pub max_hp_bp: BasisPoints,
+    pub attack_flat: i64,
+    pub attack_bp: BasisPoints,
+    pub magic_flat: i64,
+    pub magic_bp: BasisPoints,
+    pub defense_bp: BasisPoints,
+    pub magic_resist_bp: BasisPoints,
+    pub crit_rate_bp: BasisPoints,
+    pub crit_damage_bp: BasisPoints,
+    pub property_damage_bp: BasisPoints,
+    pub outgoing_damage_bp: BasisPoints,
+    pub incoming_damage_bp: BasisPoints,
+    pub amplification_bp: BasisPoints,
+    pub damage_reduction_bp: BasisPoints,
+    pub physical_damage_reduction_bp: BasisPoints,
+    pub magical_damage_reduction_bp: BasisPoints,
+    pub physical_incoming_damage_bp: BasisPoints,
+    pub magical_incoming_damage_bp: BasisPoints,
+    pub fire_incoming_damage_bp: BasisPoints,
+    pub water_incoming_damage_bp: BasisPoints,
+    pub wind_incoming_damage_bp: BasisPoints,
+    pub light_incoming_damage_bp: BasisPoints,
+    pub dark_incoming_damage_bp: BasisPoints,
+    pub dot_incoming_damage_bp: BasisPoints,
+    pub chain_damage_incoming_bp: BasisPoints,
+    pub evasion_bp: BasisPoints,
+    pub sp_cost_delta: i32,
+    pub cooldown_delta: i16,
+    pub chain_received_delta: i16,
+    pub chain_dealt_delta: i16,
+    pub chain_retention: u16,
+    pub normal_attack_damage_bp: BasisPoints,
+    pub summon_incoming_damage_bp: BasisPoints,
+    pub chain_damage_outgoing_bp: BasisPoints,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum StackRule {
+    #[default]
+    Independent,
+    ReplaceSameSource,
+    KeepStrongest,
+    Extend,
+    Accumulate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct SourceRecord {
+    pub source_id: String,
+    pub source_url: String,
+    pub observed_at: String,
+    pub source_digest: String,
+    #[serde(default)]
+    pub raw_payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MonsterDefinition {
+    pub id: String,
+    pub names: BTreeMap<String, String>,
+    pub element: Element,
+    pub stats_by_level: BTreeMap<u8, Stats>,
+    pub parts: Vec<MonsterPartDefinition>,
+    pub skill_ids: Vec<String>,
+    #[serde(default)]
+    pub immunities: BTreeSet<String>,
+    #[serde(default)]
+    pub source: SourceRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MonsterPartDefinition {
+    pub id: String,
+    pub position: Cell,
+    pub attackable: bool,
+    pub weak_point_bonus_bp: BasisPoints,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Catalog {
+    pub ruleset_id: String,
+    pub characters: BTreeMap<String, CharacterDefinition>,
+    pub costumes: BTreeMap<String, CostumeDefinition>,
+    pub monsters: BTreeMap<String, MonsterDefinition>,
+    pub skills: BTreeMap<String, CostumeDefinition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum BattleMode {
+    Normal,
+    MirrorWar,
+    MonsterChaser,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModeRules {
+    pub mode: BattleMode,
+    pub grid: GridDefinition,
+    pub initial_sp: [i32; 2],
+    pub sp_cap: Option<i32>,
+    pub recovery_after_team_turn: [i32; 2],
+    pub first_side: Side,
+    pub max_game_turns: u32,
+    pub chain_reset_on_team_turn: bool,
+    pub allow_formation_change: bool,
+    pub allow_manual_commands: [bool; 2],
+}
+
+impl ModeRules {
+    pub fn normal() -> Self {
+        Self {
+            mode: BattleMode::Normal,
+            grid: GridDefinition::standard(),
+            initial_sp: [15, 0],
+            sp_cap: None,
+            recovery_after_team_turn: [0, 0],
+            first_side: Side::Player,
+            max_game_turns: 50,
+            chain_reset_on_team_turn: true,
+            allow_formation_change: true,
+            allow_manual_commands: [true, false],
+        }
+    }
+
+    pub fn mirror_war() -> Self {
+        Self {
+            mode: BattleMode::MirrorWar,
+            grid: GridDefinition::standard(),
+            initial_sp: [5, 6],
+            sp_cap: None,
+            recovery_after_team_turn: [6, 6],
+            first_side: Side::Player,
+            max_game_turns: 50,
+            chain_reset_on_team_turn: true,
+            allow_formation_change: false,
+            allow_manual_commands: [false, false],
+        }
+    }
+
+    pub fn monster_chaser() -> Self {
+        let mut rules = Self::normal();
+        rules.mode = BattleMode::MonsterChaser;
+        rules.max_game_turns = 20;
+        rules
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnitSetup {
+    pub unit_id: UnitId,
+    pub character_id: String,
+    pub side: Side,
+    pub position: Cell,
+    pub costume_loadout: Vec<CostumeLoadout>,
+    #[serde(default)]
+    pub stat_overrides: Option<Stats>,
+    #[serde(default)]
+    pub equipment_modifiers: StatModifiers,
+    #[serde(default)]
+    pub ai_priority: Vec<String>,
+    /// Monster Chaser party number. Ordinary battles always use party 1.
+    #[serde(default = "default_party_no")]
+    pub party_no: u8,
+    /// Optional HP pool owner for an attackable boss part.
+    #[serde(default)]
+    pub hp_owner: Option<UnitId>,
+    /// Additional damage received by this boss part, in basis points.
+    #[serde(default)]
+    pub weak_point_bonus_bp: BasisPoints,
+    /// Targetable board object that does not receive an action slot (for boss parts).
+    #[serde(default = "default_true")]
+    pub can_act: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CostumeLoadout {
+    pub costume_id: String,
+    pub enhancement: u8,
+    pub burst_level: u8,
+    #[serde(default = "default_potential_mask")]
+    pub potential_mask: u8,
+    /// Whether the non-skill stat nodes in this costume's potential tree are unlocked.
+    #[serde(default)]
+    pub permanent_potential_enabled: bool,
+    /// At most one loadout entry may name the costume whose bond stats are active.
+    #[serde(default)]
+    pub costume_link_target: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BattleSetup {
+    pub scenario_id: String,
+    pub rules: ModeRules,
+    pub units: Vec<UnitSetup>,
+    #[serde(default)]
+    pub monster_chaser: Option<MonsterChaserSetup>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MonsterChaserSetup {
+    pub monster_id: String,
+    /// Cumulative damage thresholds displayed as each selectable boss level's HP.
+    pub cumulative_hp_by_level: Vec<i64>,
+    pub selected_level: u8,
+    pub party_limit: u8,
+    pub turn_sp_recovery: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveEffect {
+    pub instance_id: u64,
+    pub source_unit_id: UnitId,
+    pub spec: EffectSpec,
+    pub remaining: u16,
+    #[serde(default)]
+    pub barrier_remaining: i64,
+    #[serde(default)]
+    pub charges_remaining: Option<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnitState {
+    pub id: UnitId,
+    pub character_id: String,
+    pub side: Side,
+    pub position: Cell,
+    pub alive: bool,
+    pub hp: i64,
+    pub base_stats: Stats,
+    pub costume_loadout: Vec<CostumeLoadout>,
+    pub cooldowns: BTreeMap<String, u16>,
+    pub effects: Vec<ActiveEffect>,
+    pub ai_priority: Vec<String>,
+    #[serde(default = "default_party_no")]
+    pub party_no: u8,
+    #[serde(default)]
+    pub hp_owner: Option<UnitId>,
+    #[serde(default)]
+    pub weak_point_bonus_bp: BasisPoints,
+    #[serde(default)]
+    pub is_summon: bool,
+    #[serde(default)]
+    pub summoned_by: Option<UnitId>,
+    #[serde(default)]
+    pub triggered_skill_uses: BTreeMap<String, u16>,
+    #[serde(default = "default_true")]
+    pub can_act: bool,
+}
+
+const fn default_party_no() -> u8 {
+    1
+}
+const fn default_potential_mask() -> u8 {
+    0b111
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TeamState {
+    pub side: Side,
+    pub sp: i32,
+    pub action_order: Vec<UnitId>,
+    pub chain_by_target: BTreeMap<UnitId, u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MonsterChaserState {
+    pub monster_id: String,
+    pub selected_level: u8,
+    pub current_level: u8,
+    pub battle_hp_remaining: i64,
+    pub segment_hp_remaining: i64,
+    pub level_hp_segments: Vec<i64>,
+    pub cumulative_damage: i64,
+    pub current_party: u8,
+    pub party_limit: u8,
+    pub turn_sp_recovery: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BattleState {
+    pub ruleset_id: String,
+    pub scenario_id: String,
+    pub rules: ModeRules,
+    pub active_side: Side,
+    pub game_turn: u32,
+    pub round_no: u32,
+    pub action_sequence: u64,
+    pub event_sequence: u64,
+    pub units: BTreeMap<UnitId, UnitState>,
+    pub teams: [TeamState; 2],
+    pub pending_events: Vec<BattleEvent>,
+    pub event_log: Vec<BattleEvent>,
+    pub damage_by_source: BTreeMap<UnitId, i64>,
+    pub rng: crate::DeterministicRng,
+    pub terminal: Option<TerminalResult>,
+    pub monster_chaser: Option<MonsterChaserState>,
+    pub next_effect_instance_id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TeamTurnPlan {
+    pub side: Side,
+    pub order: Vec<UnitId>,
+    pub commands: BTreeMap<UnitId, UnitCommand>,
+    #[serde(default)]
+    pub formation: BTreeMap<UnitId, Cell>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum UnitCommand {
+    NormalAttack,
+    Knockback,
+    UseCostume {
+        costume_id: String,
+        burst_level: u8,
+        #[serde(default)]
+        explicit_target: Option<UnitId>,
+    },
+    Wait,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LegalUnitActions {
+    pub unit_id: UnitId,
+    pub commands: Vec<UnitCommand>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Transition {
+    pub events: Vec<BattleEvent>,
+    pub terminal: Option<TerminalResult>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BattleEvent {
+    pub sequence: u64,
+    pub kind: BattleEventKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum BattleEventKind {
+    BattleStarted {
+        first_side: Side,
+    },
+    TurnStarted {
+        side: Side,
+        turn: u32,
+        sp: i32,
+    },
+    FormationChanged {
+        unit_id: UnitId,
+        from: Cell,
+        to: Cell,
+    },
+    ActionStarted {
+        actor_id: UnitId,
+        command: UnitCommand,
+    },
+    TargetLocked {
+        actor_id: UnitId,
+        target_id: UnitId,
+    },
+    TargetCellLocked {
+        actor_id: UnitId,
+        cell: Cell,
+    },
+    RngRolled {
+        draw_id: u64,
+        purpose: String,
+        threshold_bp: i32,
+        success: bool,
+    },
+    DamageApplied {
+        actor_id: UnitId,
+        target_id: UnitId,
+        amount: i64,
+        hp_before: i64,
+        hp_after: i64,
+        critical: bool,
+        hit: u16,
+    },
+    DamageEvaded {
+        actor_id: UnitId,
+        target_id: UnitId,
+        draw_id: u64,
+    },
+    BarrierAbsorbed {
+        target_id: UnitId,
+        effect_id: String,
+        amount: i64,
+        remaining: i64,
+    },
+    HealApplied {
+        actor_id: UnitId,
+        target_id: UnitId,
+        amount: i64,
+        hp_before: i64,
+        hp_after: i64,
+    },
+    EffectApplied {
+        source_id: UnitId,
+        target_id: UnitId,
+        effect_id: String,
+        instance_id: u64,
+    },
+    EffectExpired {
+        target_id: UnitId,
+        effect_id: String,
+        instance_id: u64,
+    },
+    SpChanged {
+        side: Side,
+        before: i32,
+        after: i32,
+        reason: String,
+    },
+    CooldownChanged {
+        unit_id: UnitId,
+        costume_id: String,
+        before: u16,
+        after: u16,
+    },
+    ChainChanged {
+        side: Side,
+        target_id: UnitId,
+        before: u16,
+        after: u16,
+    },
+    UnitMoved {
+        unit_id: UnitId,
+        from: Cell,
+        to: Cell,
+    },
+    CollisionDamage {
+        moving_id: UnitId,
+        occupant_id: UnitId,
+        amount: i64,
+    },
+    ActionSkipped {
+        actor_id: UnitId,
+        reason: String,
+    },
+    UnitDied {
+        unit_id: UnitId,
+    },
+    UnitRevived {
+        unit_id: UnitId,
+        hp: i64,
+    },
+    UnitSummoned {
+        source_id: UnitId,
+        unit_id: UnitId,
+        character_id: String,
+        position: Cell,
+    },
+    MonsterPartyActivated {
+        party_no: u8,
+        unit_ids: Vec<UnitId>,
+    },
+    MonsterLevelAdvanced {
+        from_level: u8,
+        to_level: u8,
+        carry_damage: i64,
+    },
+    TurnEnded {
+        side: Side,
+        turn: u32,
+    },
+    BattleEnded {
+        result: TerminalResult,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum Outcome {
+    Win,
+    Loss,
+    Draw,
+    ScoreOnly,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalResult {
+    pub outcome: Outcome,
+    pub reason: String,
+    pub turns: u32,
+    pub damage_by_source: BTreeMap<String, i64>,
+    pub defeated_boss_level: Option<u8>,
+    pub carry_damage: i64,
+    pub mode_score: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Observation {
+    pub active_side: Side,
+    pub turn: u32,
+    pub round: u32,
+    pub sp: [i32; 2],
+    pub units: Vec<UnitObservation>,
+    pub action_mask: Vec<Vec<bool>>,
+    pub terminal: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UnitObservation {
+    pub id: UnitId,
+    pub side: Side,
+    pub alive: bool,
+    pub hp_ratio: f32,
+    pub row: i8,
+    pub depth: i8,
+    pub cooldowns: Vec<u16>,
+    pub effect_count: usize,
+}

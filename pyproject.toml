@@ -1,0 +1,49 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "bd2rl"
+version = "0.1.0"
+description = "Deterministic BrownDust2 simulator and GPU reinforcement-learning environment"
+readme = "README.md"
+requires-python = ">=3.13,<3.15"
+dependencies = [
+  "gymnasium>=1.2.2,<2",
+  "numpy>=2.3,<3",
+  "torch==2.13.0",
+  "torchrl>=0.13.3,<0.14",
+  "tensordict>=0.13,<0.15",
+]
+
+[project.optional-dependencies]
+test = [
+  "hypothesis>=6.138,<7",
+  "pytest>=8.4,<9",
+  "pytest-xdist>=3.8,<4",
+  "ruff>=0.12,<1",
+]
+
+[project.scripts]
+bd2-train = "bd2rl.train:main"
+bd2-evaluate = "bd2rl.evaluate:main"
+bd2-gui = "bd2rl.gui:main"
+bd2-device-check = "bd2rl.device_check:main"
+
+[tool.maturin]
+manifest-path = "crates/bd2-py/Cargo.toml"
+python-source = "python"
+module-name = "bd2rl._native"
+features = ["pyo3/extension-module"]
+
+[tool.pytest.ini_options]
+testpaths = ["python/tests"]
+addopts = "-ra --strict-markers"
+markers = ["cuda: requires a CUDA-capable NVIDIA GPU"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

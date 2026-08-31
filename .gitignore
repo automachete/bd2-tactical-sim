@@ -1,0 +1,16 @@
+/target/
+/.venv/
+/dist/
+/build/
+*.pyd
+*.dll
+*.so
+*.dylib
+*.pyc
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+/checkpoints/
+/runs/
+/data/generated/
+
