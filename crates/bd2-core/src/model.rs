@@ -44,10 +44,18 @@ impl Element {
     pub const fn factor_bp(self, defender: Self) -> BasisPoints {
         use Element::*;
         match (self, defender) {
-            (Fire, Wind) | (Wind, Water) | (Water, Fire) | (Light, Dark) | (Dark, Light) => 13_000,
+            (Fire, Wind) | (Wind, Water) | (Water, Fire) | (Light, Dark) | (Dark, Light) => 15_000,
             (Fire, Water) | (Wind, Fire) | (Water, Wind) => 5_000,
             _ => 10_000,
         }
+    }
+
+    pub const fn is_advantageous_against(self, defender: Self) -> bool {
+        use Element::*;
+        matches!(
+            (self, defender),
+            (Fire, Wind) | (Wind, Water) | (Water, Fire) | (Light, Dark) | (Dark, Light)
+        )
     }
 }
 
@@ -153,7 +161,11 @@ pub struct CharacterDefinition {
     pub element: Element,
     pub attack_type: AttackType,
     pub target_selector: TargetSelector,
-    pub level_100_awakened: Stats,
+    /// Unmodified level-100 stats. Engraving and awakening are kept separate
+    /// because BD2DB lets a build enable or disable each progression source.
+    pub level_100: Stats,
+    pub engraving_modifiers: StatModifiers,
+    pub awakening_modifiers: StatModifiers,
     pub costume_ids: Vec<String>,
     #[serde(default)]
     pub source: SourceRecord,
@@ -637,12 +649,238 @@ pub struct MonsterPartDefinition {
     pub weak_point_bonus_bp: BasisPoints,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum EquipmentSlot {
+    Weapon,
+    Armor,
+    Helmet,
+    Jewelry,
+    Gloves,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum EquipmentStat {
+    MaxHpFlat,
+    MaxHpPercent,
+    AttackFlat,
+    AttackPercent,
+    MagicFlat,
+    MagicPercent,
+    Defense,
+    MagicResist,
+    CritRate,
+    CritDamage,
+}
+
+/// One external-catalog equipment archetype.
+///
+/// The current simulator contains crafted UR IV (Legendary) equipment and
+/// five-star character-exclusive UR equipment. Every accepted refinement
+/// score and selectable exclusive main ability is materialized as an exact
+/// modifier record at import time, so the battle core never guesses a live
+/// game formula.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EquipmentDefinition {
+    pub id: String,
+    pub names: BTreeMap<String, String>,
+    pub kind: EquipmentKind,
+    /// BD2DB tier key (`UR4` or `EX UR`).
+    pub tier: String,
+    pub slot: EquipmentSlot,
+    /// Character restriction for exclusive gear. Crafted Legendary gear uses
+    /// `None`.
+    pub owner_character_id: Option<String>,
+    /// Fixed abilities, including the star-scaled exclusive ability, already
+    /// materialized for every supported refinement score.
+    pub modifiers_by_refinement_score: BTreeMap<u8, StatModifiers>,
+    /// Exclusive gear exposes two independently selectable main abilities.
+    /// Crafted Legendary gear keeps both lists empty because its main
+    /// abilities are fixed in `modifiers_by_refinement_score`.
+    pub primary_stat_options: Vec<EquipmentStat>,
+    pub secondary_stat_options: Vec<EquipmentStat>,
+    pub primary_modifiers_by_refinement_score: BTreeMap<u8, BTreeMap<EquipmentStat, StatModifiers>>,
+    pub secondary_modifiers_by_refinement_score:
+        BTreeMap<u8, BTreeMap<EquipmentStat, StatModifiers>>,
+    pub allowed_substats: Vec<EquipmentStat>,
+    pub substat_modifiers: BTreeMap<EquipmentStat, StatModifiers>,
+    #[serde(default)]
+    pub source: SourceRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EquipmentLoadout {
+    pub equipment_id: String,
+    pub refinement_score: u8,
+    pub primary_stat: Option<EquipmentStat>,
+    pub secondary_stat: Option<EquipmentStat>,
+    /// BrownDust2 UR equipment has exactly three independently rerollable
+    /// secondary-stat slots. Duplicate stat kinds are legal.
+    pub substats: Vec<EquipmentStat>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum EquipmentKind {
+    CraftedLegendary,
+    Exclusive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CalculatorDamageType {
+    #[default]
+    Normal,
+    Fixed,
+    HpShield,
+    Hp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CalculatorDefenseType {
+    #[default]
+    None,
+    Defense,
+    MagicResist,
+}
+
+/// Account-wide collection bonuses used by all three current BD2DB
+/// calculators. Values are basis points.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CollectionBonus {
+    pub max_hp_bp: BasisPoints,
+    pub attack_bp: BasisPoints,
+    pub magic_bp: BasisPoints,
+    pub crit_rate_bp: BasisPoints,
+}
+
+impl Default for CollectionBonus {
+    fn default() -> Self {
+        Self {
+            max_hp_bp: 8_000,
+            attack_bp: 8_000,
+            magic_bp: 8_000,
+            crit_rate_bp: 5_000,
+        }
+    }
+}
+
+/// Numeric result of BD2DB's external-buff picker. Keeping the normalized
+/// values makes builds portable without depending on a user's BD2DB account.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ExternalBuffSettings {
+    pub attack_bonus_bp: BasisPoints,
+    pub crit_rate_bp: BasisPoints,
+    pub crit_damage_bp: BasisPoints,
+    pub property_damage_bp: BasisPoints,
+    pub shield_percent_bp: BasisPoints,
+    pub shield_flat: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct CalculatorTargetCondition {
+    pub min_hp: i64,
+    pub min_defense_bp: BasisPoints,
+    pub min_magic_resist_bp: BasisPoints,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CalculatorGearFilters {
+    pub exclusive: bool,
+    pub ur4: bool,
+    pub ur3: bool,
+    pub monster: bool,
+}
+
+impl Default for CalculatorGearFilters {
+    fn default() -> Self {
+        Self {
+            exclusive: true,
+            ur4: true,
+            ur3: true,
+            monster: true,
+        }
+    }
+}
+
+/// Evaluation-only inputs used by BD2DB's option and gear-combination
+/// calculators. They do not override the actual skill, target, or elemental
+/// rules executed by the battle simulator.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EquipmentCalculatorSettings {
+    pub damage_type: CalculatorDamageType,
+    pub elemental_advantage: bool,
+    pub defense_type: CalculatorDefenseType,
+    pub target_condition: CalculatorTargetCondition,
+    pub option_count: u8,
+    pub gear_filters: CalculatorGearFilters,
+    pub world_buff_enabled: bool,
+}
+
+impl Default for EquipmentCalculatorSettings {
+    fn default() -> Self {
+        Self {
+            damage_type: CalculatorDamageType::Normal,
+            elemental_advantage: true,
+            defense_type: CalculatorDefenseType::None,
+            target_condition: CalculatorTargetCondition::default(),
+            option_count: 15,
+            gear_filters: CalculatorGearFilters::default(),
+            world_buff_enabled: false,
+        }
+    }
+}
+
+/// Every non-equipment input that BD2DB applies to a character build.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnitBuildSettings {
+    pub engraving_enabled: bool,
+    pub awakening_enabled: bool,
+    pub collection: CollectionBonus,
+    pub external_buffs: ExternalBuffSettings,
+    pub calculator: EquipmentCalculatorSettings,
+}
+
+impl Default for UnitBuildSettings {
+    fn default() -> Self {
+        Self {
+            engraving_enabled: true,
+            awakening_enabled: true,
+            collection: CollectionBonus::default(),
+            external_buffs: ExternalBuffSettings::default(),
+            calculator: EquipmentCalculatorSettings::default(),
+        }
+    }
+}
+
+impl UnitBuildSettings {
+    /// Neutral settings for monsters, summons, and focused engine tests.
+    pub fn unmodified() -> Self {
+        Self {
+            engraving_enabled: false,
+            awakening_enabled: false,
+            collection: CollectionBonus {
+                max_hp_bp: 0,
+                attack_bp: 0,
+                magic_bp: 0,
+                crit_rate_bp: 0,
+            },
+            external_buffs: ExternalBuffSettings::default(),
+            calculator: EquipmentCalculatorSettings::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Catalog {
     pub ruleset_id: String,
     pub characters: BTreeMap<String, CharacterDefinition>,
     pub costumes: BTreeMap<String, CostumeDefinition>,
     pub monsters: BTreeMap<String, MonsterDefinition>,
+    #[serde(default)]
+    pub equipment: BTreeMap<String, EquipmentDefinition>,
     pub skills: BTreeMap<String, CostumeDefinition>,
 }
 
@@ -715,9 +953,11 @@ pub struct UnitSetup {
     pub position: Cell,
     pub costume_loadout: Vec<CostumeLoadout>,
     #[serde(default)]
+    pub build_settings: UnitBuildSettings,
+    #[serde(default)]
     pub stat_overrides: Option<Stats>,
     #[serde(default)]
-    pub equipment_modifiers: StatModifiers,
+    pub equipment: BTreeMap<EquipmentSlot, EquipmentLoadout>,
     #[serde(default)]
     pub ai_priority: Vec<String>,
     /// Monster Chaser party number. Ordinary battles always use party 1.
@@ -789,9 +1029,22 @@ pub struct UnitState {
     pub alive: bool,
     pub hp: i64,
     pub base_stats: Stats,
+    /// Permanent/equipment combat modifiers that are not baked into `base_stats`.
+    ///
+    /// HP, attack, magic and the fields represented directly by `Stats` are
+    /// applied once while the unit is created.  Runtime-only modifiers such as
+    /// damage reduction, evasion, SP/CT adjustment and chain rules must remain
+    /// available to the battle resolver for the whole encounter.
+    #[serde(default)]
+    pub passive_modifiers: StatModifiers,
     pub costume_loadout: Vec<CostumeLoadout>,
     pub cooldowns: BTreeMap<String, u16>,
     pub effects: Vec<ActiveEffect>,
+    /// Remaining external energy guard configured through BD2DB's shield
+    /// inputs. It is kept separate from skill effects so the exact normalized
+    /// flat/percent source values remain a build input rather than a fake skill.
+    #[serde(default)]
+    pub external_energy_guard: i64,
     pub ai_priority: Vec<String>,
     #[serde(default = "default_party_no")]
     pub party_no: u8,

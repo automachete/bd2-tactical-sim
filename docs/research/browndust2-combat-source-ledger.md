@@ -69,6 +69,10 @@ K-07とK-11のLv.15は各記事掲載時点または当該開催の値であり�
 | D-01 | [BD2DB](https://browndust2-db.souseha.com/en/) | 2026-09-01（サイト更新表示 2026-08-27） | 現行のキャラクター、コスチューム、スキル派生、範囲、潜在力、バースト、ボス開催データ。非公式DBのため数値は実機照合対象 | B+ |
 | D-02 | [BD2DB Characters](https://browndust2-db.souseha.com/en/characters) | 2026-09-01 | ★5プレイアブル61体のLv.100値と155コスチューム。召喚4種は補助エンティティとして別管理 | B+ |
 | D-03 | BD2DB静的データ資産（URLとSHA-256をSQLite `source_snapshots` に保存） | 2026-09-01 | 仇怨のキメラ（風）ID 10072、Lv.1～25の累積HP、8ターゲット部位、4弱点部位、通常S1～S4、条件C1、初期SP15、手番回復SP5 | B+ |
+| D-04 | [BD2DB 装備一覧](https://browndust2-db.souseha.com/ja/weapons) | 2026-09-01 | 伝説UR IV 30種と★5専用UR 61種のID、公式日本語名、部位、所有キャラクター、主能力候補、副能力プロファイル | B+ |
+| D-05 | [BD2DB オプション計算機](https://browndust2-db.souseha.com/ja/option-calculator) | 2026-09-01 | UR IV/EX URのMain/Sub/Refinements、5UR専用Extra値、精錬スコア18既定、外部バフ、ダメージ種別、ワールドバフ | B+ |
+| D-06 | [BD2DB ステータス計算機](https://browndust2-db.souseha.com/ja/stat-calculator) | 2026-09-01 | 刻印、覚醒、コスチューム恒常潜在力・結束、装備、コレクション、外部バフを分離した能力値合成入力 | B+ |
+| D-07 | [BD2DB 装備ピッカー](https://browndust2-db.souseha.com/ja/gear-picker) | 2026-09-01 | 属性有利、対象HP/防御/魔法抵抗、候補数、専用/UR IV/UR III/魔物装備フィルターの既定値と入力範囲 | B+ |
 
 取得処理は第三者JavaScriptを実行せず、構文木からリテラルデータだけを許可リスト方式で読む。同一スナップショットを再生成できるよう、原文ペイロード、URL、取得日、ダイジェストを保存する。
 

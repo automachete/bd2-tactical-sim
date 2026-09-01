@@ -3,6 +3,7 @@
 /dist/
 /build/
 *.pyd
+*.pdb
 *.dll
 *.so
 *.dylib
@@ -13,4 +14,10 @@ __pycache__/
 /checkpoints/
 /runs/
 /data/generated/
-
+/tools/test-results/
+/tools/playwright-report/
+/tools/node_modules/@playwright/
+/tools/node_modules/playwright/
+/tools/node_modules/playwright-core/
+/tools/node_modules/.bin/playwright*
+/tools/node_modules/.bin/playwright-core*

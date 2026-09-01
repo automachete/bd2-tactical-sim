@@ -7,8 +7,9 @@
  */
 import { parse } from "acorn";
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ORIGIN = "https://browndust2-db.souseha.com";
 const tokyoDate = new Intl.DateTimeFormat("en-CA", {
@@ -20,6 +21,12 @@ const tokyoDate = new Intl.DateTimeFormat("en-CA", {
 const RULESET = process.env.BD2_RULESET_ID ?? `bd2-current-${tokyoDate}`;
 const outputIndex = process.argv.indexOf("--out");
 const outputPath = resolve(outputIndex >= 0 ? process.argv[outputIndex + 1] : "data/generated/catalog.json");
+const equipmentOracleIndex = process.argv.indexOf("--equipment-oracle");
+const equipmentOraclePath = equipmentOracleIndex >= 0
+  ? resolve(process.argv[equipmentOracleIndex + 1])
+  : null;
+const toolDirectory = dirname(fileURLToPath(import.meta.url));
+const localizationPath = resolve(toolDirectory, "../data/localization/ja-JP.json");
 
 async function getText(url) {
   const response = await fetch(url, { headers: { "user-agent": "pcg-rpg-research-sync/0.1" } });
@@ -86,6 +93,49 @@ function staticCandidates(text) {
   return candidates;
 }
 
+function resolvedStaticCandidates(text) {
+  const candidates = [];
+  const environment = new Map();
+  const resolveLiteral = (node) => {
+    if (node.type === "Identifier") {
+      if (!environment.has(node.name)) throw new Error(`unknown literal identifier: ${node.name}`);
+      return environment.get(node.name);
+    }
+    if (node.type === "ObjectExpression") {
+      const value = {};
+      for (const property of node.properties) {
+        if (property.type === "SpreadElement") {
+          Object.assign(value, resolveLiteral(property.argument));
+          continue;
+        }
+        if (property.type !== "Property" || property.kind !== "init" || property.method || property.computed) {
+          throw new Error(`unsupported resolved object member: ${property.type}`);
+        }
+        value[propertyName(property)] = resolveLiteral(property.value);
+      }
+      return value;
+    }
+    if (node.type === "ArrayExpression") {
+      return node.elements.map((item) => item === null ? null : resolveLiteral(item));
+    }
+    return literal(node);
+  };
+  for (const statement of moduleAst(text).body) {
+    if (statement.type !== "VariableDeclaration") continue;
+    for (const declaration of statement.declarations) {
+      if (declaration.id.type !== "Identifier" || !declaration.init) continue;
+      try {
+        const value = resolveLiteral(declaration.init);
+        environment.set(declaration.id.name, value);
+        candidates.push({ name: declaration.id.name, value });
+      } catch {
+        // Only already-resolved literal references are accepted.
+      }
+    }
+  }
+  return candidates;
+}
+
 function findCharacterData(text) {
   const result = staticCandidates(text).find(({ value }) =>
     Array.isArray(value)
@@ -118,6 +168,229 @@ function findSummonData(text) {
   return result.value;
 }
 
+function findEquipmentData(text) {
+  const result = staticCandidates(text).find(({ value }) =>
+    Array.isArray(value)
+    && value.length >= 30
+    && value.every((entry) => entry?.weaponId && entry?.part && entry?.tier),
+  );
+  if (!result) throw new Error("equipment data array was not found");
+  return result.value;
+}
+
+function findEquipmentI18n(text) {
+  const result = resolvedStaticCandidates(text).find(({ value }) => {
+    if (!value || Array.isArray(value) || typeof value !== "object") return false;
+    const entries = Object.values(value);
+    return entries.length >= 30
+      && entries.every((entry) => entry?.weaponId && entry?.name_ja && entry?.name_ko);
+  });
+  if (!result) throw new Error("equipment localization map was not found");
+  return result.value;
+}
+
+function findEquipmentStatTables(text) {
+  const result = staticCandidates(text).find(({ value }) => {
+    if (!Array.isArray(value)) return false;
+    const types = new Set(value.map((entry) => entry?.type));
+    return types.has("Main") && types.has("Sub") && types.has("Refinements");
+  });
+  if (!result) throw new Error("equipment calculator stat tables were not found");
+  return Object.fromEntries(result.value.map((entry) => [entry.type, entry.list]));
+}
+
+const EQUIPMENT_STAT_KEYS = {
+  HP: "MAX_HP_FLAT",
+  "HP%": "MAX_HP_PERCENT",
+  ATK: "ATTACK_FLAT",
+  "ATK%": "ATTACK_PERCENT",
+  MATK: "MAGIC_FLAT",
+  "MATK%": "MAGIC_PERCENT",
+  DEF: "DEFENSE",
+  MDEF: "MAGIC_RESIST",
+  CR: "CRIT_RATE",
+  CDMG: "CRIT_DAMAGE",
+};
+
+const SUBSTATS_BY_PROFILE = {
+  atk: ["CDMG", "ATK%", "ATK", "HP%", "HP", "DEF", "MDEF", "CR"],
+  matk: ["CDMG", "MATK%", "MATK", "HP%", "HP", "DEF", "MDEF", "CR"],
+  jewelry: ["CDMG", "ATK%", "ATK", "MATK%", "MATK", "HP%", "HP", "DEF", "MDEF", "CR"],
+};
+
+const EQUIPMENT_SLOTS = {
+  Weapon: "WEAPON",
+  Armor: "ARMOR",
+  Helmet: "HELMET",
+  Jewelry: "JEWELRY",
+  Gloves: "GLOVES",
+};
+
+function numberFromGearTable(value) {
+  const parsed = Number(String(value ?? "").replace("%", ""));
+  if (!Number.isFinite(parsed)) throw new Error(`invalid equipment calculator value: ${value}`);
+  return parsed;
+}
+
+function roundGearValue(value) {
+  return Math.round(Number((Math.abs(value) * 100).toPrecision(15))) / 100 * Math.sign(value);
+}
+
+function modifierForEquipmentStat(key, value) {
+  const modifier = {};
+  const integerValue = Math.round(value);
+  const basisPoints = Math.round(roundGearValue(value) * 100);
+  switch (key) {
+    case "HP": modifier.max_hp_flat = integerValue; break;
+    case "HP%": modifier.max_hp_bp = basisPoints; break;
+    case "ATK": modifier.attack_flat = integerValue; break;
+    case "ATK%": modifier.attack_bp = basisPoints; break;
+    case "MATK": modifier.magic_flat = integerValue; break;
+    case "MATK%": modifier.magic_bp = basisPoints; break;
+    case "DEF": modifier.defense_bp = basisPoints; break;
+    case "MDEF": modifier.magic_resist_bp = basisPoints; break;
+    case "CR": modifier.crit_rate_bp = basisPoints; break;
+    case "CDMG": modifier.crit_damage_bp = basisPoints; break;
+    default: throw new Error(`unsupported equipment stat key: ${key}`);
+  }
+  return modifier;
+}
+
+function mergeModifier(target, value) {
+  for (const [key, amount] of Object.entries(value)) target[key] = (target[key] ?? 0) + amount;
+  return target;
+}
+
+function abilityKeys(value) {
+  const keys = [...String(value).matchAll(/\{([A-Z%]+)\}/g)].map((match) => match[1]);
+  if (keys.length === 0 || keys.some((key) => !EQUIPMENT_STAT_KEYS[key])) {
+    throw new Error(`equipment ability key was not found: ${value}`);
+  }
+  return [...new Set(keys)];
+}
+
+function transformEquipment(rawEquipment, equipmentI18n, tables, source, fiveStarCharacterIds) {
+  const namesById = new Map(Object.values(equipmentI18n).map((entry) => [entry.weaponId, entry]));
+  const definitions = {};
+  const oracleCases = [];
+  const selected = rawEquipment.filter((entry) =>
+    (entry.category === "UR" && entry.tier === "UR4")
+    || (entry.category === "Exclusive"
+      && entry.tier === "EX UR"
+      && fiveStarCharacterIds.has(entry.characterId)));
+  for (const raw of selected) {
+    const exclusive = raw.category === "Exclusive";
+    const tableTier = exclusive ? "EX UR" : "UR4";
+    const main = tables.Main.find((entry) => entry.tier === tableTier);
+    const sub = tables.Sub.find((entry) => entry.tier === tableTier);
+    const refinement = tables.Refinements.find((entry) => entry.tier === tableTier);
+    if (!main || !sub || !refinement) throw new Error(`${tableTier} calculator tables are incomplete`);
+    const firstKeys = abilityKeys(raw.firstAbility);
+    const secondKeys = abilityKeys(raw.secondAbility);
+    const i18n = namesById.get(raw.weaponId) ?? {};
+    const modifiersByScore = {};
+    const primaryModifiersByScore = {};
+    const secondaryModifiersByScore = {};
+    const exclusiveFixed = {};
+    let exclusiveExtra = null;
+    if (exclusive) {
+      const extra = tables.Extra.find((entry) => entry.tier === "5UR");
+      if (!extra) throw new Error("5-star EX UR extra-ability table is incomplete");
+      exclusiveExtra = extra;
+      const extraKey = abilityKeys(raw.extraAbility)[0];
+      mergeModifier(exclusiveFixed, modifierForEquipmentStat(extraKey, numberFromGearTable(extra[extraKey])));
+    }
+    for (let score = 18; score <= 24; score += 1) {
+      const statModifier = (key) => {
+        const baseValue = numberFromGearTable(main[key]);
+        let refinementValue = numberFromGearTable(refinement[key]) * (score + 6);
+        if (["ATK", "MATK"].includes(key)) refinementValue = Math.floor(refinementValue);
+        return modifierForEquipmentStat(key, roundGearValue(baseValue + refinementValue));
+      };
+      if (exclusive) {
+        modifiersByScore[score] = { ...exclusiveFixed };
+        primaryModifiersByScore[score] = Object.fromEntries(firstKeys.map((key) => [
+          EQUIPMENT_STAT_KEYS[key], statModifier(key),
+        ]));
+        secondaryModifiersByScore[score] = Object.fromEntries(secondKeys.map((key) => [
+          EQUIPMENT_STAT_KEYS[key], statModifier(key),
+        ]));
+        for (const primaryKey of firstKeys) {
+          for (const secondaryKey of secondKeys) {
+            const modifiers = {};
+            mergeModifier(modifiers, exclusiveFixed);
+            mergeModifier(modifiers, statModifier(primaryKey));
+            mergeModifier(modifiers, statModifier(secondaryKey));
+            oracleCases.push({
+              equipment_id: raw.weaponId,
+              kind: "EXCLUSIVE",
+              owner_character_id: raw.characterId,
+              slot: EQUIPMENT_SLOTS[raw.part],
+              refinement_score: score,
+              primary_stat: EQUIPMENT_STAT_KEYS[primaryKey],
+              secondary_stat: EQUIPMENT_STAT_KEYS[secondaryKey],
+              modifiers,
+            });
+          }
+        }
+      } else {
+        const firstKey = firstKeys[0];
+        const secondKey = secondKeys[0];
+        const modifiers = {};
+        mergeModifier(modifiers, statModifier(firstKey));
+        mergeModifier(modifiers, modifierForEquipmentStat(secondKey, numberFromGearTable(main[secondKey])));
+        modifiersByScore[score] = modifiers;
+        oracleCases.push({
+          equipment_id: raw.weaponId,
+          kind: "CRAFTED_LEGENDARY",
+          owner_character_id: null,
+          slot: EQUIPMENT_SLOTS[raw.part],
+          refinement_score: score,
+          primary_stat: null,
+          secondary_stat: null,
+          modifiers,
+        });
+      }
+    }
+    const allowedKeys = SUBSTATS_BY_PROFILE[raw.substatType];
+    if (!allowedKeys) throw new Error(`unknown equipment substat profile: ${raw.substatType}`);
+    const substatModifiers = Object.fromEntries(allowedKeys.map((key) => [
+      EQUIPMENT_STAT_KEYS[key],
+      modifierForEquipmentStat(key, numberFromGearTable(sub[key])),
+    ]));
+    definitions[raw.weaponId] = {
+      id: raw.weaponId,
+      names: {
+        "zh-TW": i18n.name ?? raw.name,
+        "zh-CN": i18n.name_CN ?? raw.name,
+        en: i18n.name_en ?? raw.name,
+        ja: i18n.name_ja ?? raw.name,
+        ko: i18n.name_ko ?? raw.name,
+      },
+      kind: exclusive ? "EXCLUSIVE" : "CRAFTED_LEGENDARY",
+      tier: tableTier,
+      slot: EQUIPMENT_SLOTS[raw.part],
+      owner_character_id: exclusive ? raw.characterId : null,
+      modifiers_by_refinement_score: modifiersByScore,
+      primary_stat_options: exclusive ? firstKeys.map((key) => EQUIPMENT_STAT_KEYS[key]) : [],
+      secondary_stat_options: exclusive ? secondKeys.map((key) => EQUIPMENT_STAT_KEYS[key]) : [],
+      primary_modifiers_by_refinement_score: primaryModifiersByScore,
+      secondary_modifiers_by_refinement_score: secondaryModifiersByScore,
+      allowed_substats: allowedKeys.map((key) => EQUIPMENT_STAT_KEYS[key]),
+      substat_modifiers: substatModifiers,
+      source: {
+        ...source,
+        raw_payload: {
+          equipment: raw,
+          localization: i18n,
+          ur4_tables: { main, sub, refinement, extra: exclusiveExtra },
+        },
+      },
+    };
+  }
+  return { definitions, oracleCases };
+}
+
 function percent(value) {
   if (value === undefined || value === null || value === "") return 0;
   return Math.round(Number(String(value).replace(/[％%]/g, "")) * 100);
@@ -146,6 +419,13 @@ function selector(value) {
 function rangeCode(raw) {
   const match = String(raw ?? "007").match(/(?:^|_)(\d{3})$/);
   return match?.[1] ?? "007";
+}
+
+// BD2DB stores range tuples in the rendered board's [depth, row] order.
+// The simulator deliberately names its axes [row, depth] (3 rows x 4 depths),
+// so keeping the source tuple order here transposes every non-symmetric skill.
+function rangeOffsets(ranges, code) {
+  return (ranges[code] ?? [[0, 0]]).map(([depth, row]) => ({ row, depth }));
 }
 
 function scalar(level, token) {
@@ -809,29 +1089,19 @@ function compileOperations(character, costume, level, burstExtras = [], enhancem
   return { operations, diagnostics: [...new Set(diagnostics)] };
 }
 
-function awakenedStats(character) {
+function level100Stats(character) {
   const base = character.maxlevel ?? {};
-  let attack = integer(base.atk);
-  let magic = integer(base.atk);
-  let defense = percent(base.def);
-  let magicResist = percent(base.mr);
-  let propertyDamage = 0;
-  for (const bonus of character.awakening ?? []) {
-    if (bonus.key === "ATK%") attack = Math.floor(attack * (10_000 + percent(bonus.value)) / 10_000);
-    if (bonus.key === "MATK%") magic = Math.floor(magic * (10_000 + percent(bonus.value)) / 10_000);
-    if (bonus.key === "DEF") defense += percent(bonus.value);
-    if (bonus.key === "MR") magicResist += percent(bonus.value);
-    if (bonus.key === "ADMG") propertyDamage += percent(bonus.value);
-  }
   return {
     max_hp: integer(base.hp),
-    attack: attackType(character.atkType) === "PHYSICAL" ? attack : 0,
-    magic: attackType(character.atkType) === "MAGICAL" ? magic : 0,
+    attack: attackType(character.atkType) === "PHYSICAL" ? integer(base.atk) : 0,
+    magic: attackType(character.atkType) === "MAGICAL" ? integer(base.atk) : 0,
     crit_rate_bp: percent(base.cr),
     crit_damage_bp: percent(base.cdmg),
-    defense_bp: defense,
-    magic_resist_bp: magicResist,
-    property_damage_bp: propertyDamage,
+    defense_bp: percent(base.def),
+    magic_resist_bp: percent(base.mr),
+    // BD2DB's current base-value function initializes ADMG to 50 for every
+    // character; awakening and external ADMG are additive on top.
+    property_damage_bp: 5_000,
     outgoing_damage_bp: 0,
     incoming_damage_bp: 0,
     amplification_bp: 0,
@@ -873,7 +1143,9 @@ function transformCharacters(rawCharacters, ranges, source) {
       element: element(raw.attribute),
       attack_type: attackType(raw.atkType),
       target_selector: selector(raw.atkPosition),
-      level_100_awakened: awakenedStats(raw),
+      level_100: level100Stats(raw),
+      engraving_modifiers: statModifiers(raw.evgraving),
+      awakening_modifiers: statModifiers(raw.awakening),
       costume_ids: costumeIds,
       source: { ...source, raw_payload: raw },
     };
@@ -929,7 +1201,7 @@ function transformCharacters(rawCharacters, ranges, source) {
               selector: (costume.skill ?? []).join(" ").includes("下一個攻擊順序") || (costume.skill ?? []).join(" ").includes("下一位攻擊順序") ? "NEXT_ALLY_IN_ORDER" : selector(costume.target),
               fixed_target_cell: null,
               target_all: false,
-              range_override: resolvedRange === rangeCode(costume.range) ? null : (ranges[resolvedRange] ?? [[0, 0]]).map(([row, depth]) => ({ row, depth })),
+              range_override: resolvedRange === rangeCode(costume.range) ? null : rangeOffsets(ranges, resolvedRange),
               operations: compiled.operations,
               consume_remaining_sp: String(costume.tags ?? "").split(",").includes("暴走"),
               executable: variantDiagnostics.length === 0 && compiled.operations.length > 0,
@@ -945,7 +1217,7 @@ function transformCharacters(rawCharacters, ranges, source) {
         id: costume.costumeId,
         character_id: raw.characterId,
         names: { "zh-TW": costume.costumeName ?? costume.costumeId },
-        range: (ranges[code] ?? [[0, 0]]).map(([row, depth]) => ({ row, depth })),
+        range: rangeOffsets(ranges, code),
         variants,
         permanent_potential_modifiers: statModifiers(costume.permanentStats),
         bonding_modifiers: statModifiers(costume.bondingStat),
@@ -1121,7 +1393,9 @@ function transformFiend(raw, source) {
       element: element(fiend.attribute),
       attack_type: fiend.atkType === "MATK" ? "MAGICAL" : "PHYSICAL",
       target_selector: "FRONT",
-      level_100_awakened: topLevel,
+      level_100: topLevel,
+      engraving_modifiers: {},
+      awakening_modifiers: {},
       costume_ids: costumeIds,
       source: { ...source, raw_payload: raw },
     },
@@ -1160,7 +1434,9 @@ function transformSummons(rawSummons, ranges, source) {
       element: element(raw.attribute),
       attack_type: attackType(raw.atkType),
       target_selector: selector(raw.target),
-      level_100_awakened: { max_hp: 1, attack: 1, magic: 1, crit_rate_bp: 0, crit_damage_bp: 0, defense_bp: 0, magic_resist_bp: 0, property_damage_bp: 0, outgoing_damage_bp: 0, incoming_damage_bp: 0, amplification_bp: 0 },
+      level_100: { max_hp: 1, attack: 1, magic: 1, crit_rate_bp: 0, crit_damage_bp: 0, defense_bp: 0, magic_resist_bp: 0, property_damage_bp: 0, outgoing_damage_bp: 0, incoming_damage_bp: 0, amplification_bp: 0 },
+      engraving_modifiers: {},
+      awakening_modifiers: {},
       costume_ids: [costumeId],
       source: { ...source, raw_payload: raw },
     };
@@ -1177,7 +1453,7 @@ function transformSummons(rawSummons, ranges, source) {
     const code = rangeCode(raw.range);
     costumes[costumeId] = {
       id: costumeId, character_id: characterId, names: { "zh-TW": raw.skillName ?? costumeId },
-      range: (ranges[code] ?? [[0, 0]]).map(([row, depth]) => ({ row, depth })), variants,
+      range: rangeOffsets(ranges, code), variants,
       executable: variants.some((variant) => variant.executable), compile_diagnostics: [...new Set(variants.flatMap((variant) => variant.compile_diagnostics))],
       source: { ...source, raw_payload: raw },
     };
@@ -1193,13 +1469,19 @@ const characterAsset = main.match(/assets\/db-characters-[A-Za-z0-9_-]+\.js/)?.[
 const rangeAsset = main.match(/assets\/rangeOffsets-[A-Za-z0-9_-]+\.js/)?.[0];
 const fiendAsset = main.match(/assets\/frcFiendTemplateConfigs-[A-Za-z0-9_-]+\.js/)?.[0];
 const summonAsset = main.match(/assets\/db-summons-[A-Za-z0-9_-]+\.js/)?.[0];
-if (!characterAsset || !rangeAsset || !summonAsset) throw new Error("required data assets were not found");
+const equipmentAsset = main.match(/assets\/db-weapons-[A-Za-z0-9_-]+\.js/)?.[0];
+const equipmentCoreAsset = main.match(/assets\/core-[A-Za-z0-9_-]+\.js/)?.[0];
+if (!characterAsset || !rangeAsset || !summonAsset || !equipmentAsset || !equipmentCoreAsset) {
+  throw new Error("required data assets were not found");
+}
 
-const [characterText, rangeText, fiendText, summonText] = await Promise.all([
+const [characterText, rangeText, fiendText, summonText, equipmentText, equipmentCoreText] = await Promise.all([
   getText(`${ORIGIN}/${characterAsset}`),
   getText(`${ORIGIN}/${rangeAsset}`),
   fiendAsset ? getText(`${ORIGIN}/${fiendAsset}`) : Promise.resolve(""),
   getText(`${ORIGIN}/${summonAsset}`),
+  getText(`${ORIGIN}/${equipmentAsset}`),
+  getText(`${ORIGIN}/${equipmentCoreAsset}`),
 ]);
 const observedAt = new Date().toISOString();
 const characterSource = {
@@ -1215,9 +1497,23 @@ const fiendSource = {
   source_digest: sha256(fiendText),
 };
 const summonSource = { source_id: "BD2DB_SUMMON_STATIC_BUNDLE", source_url: `${ORIGIN}/${summonAsset}`, observed_at: observedAt, source_digest: sha256(summonText) };
-const transformed = transformCharacters(findCharacterData(characterText), findRangeData(rangeText), characterSource);
+const equipmentSource = {
+  source_id: "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
+  source_url: `${ORIGIN}/ja/option-calculator`,
+  observed_at: observedAt,
+  source_digest: sha256(`${equipmentText}\n${equipmentCoreText}`),
+};
+const rawCharacters = findCharacterData(characterText);
+const transformed = transformCharacters(rawCharacters, findRangeData(rangeText), characterSource);
 const transformedFiend = transformFiend(findFiendData(fiendText), fiendSource);
 const transformedSummons = transformSummons(findSummonData(summonText), findRangeData(rangeText), summonSource);
+const transformedEquipment = transformEquipment(
+  findEquipmentData(equipmentText),
+  findEquipmentI18n(equipmentText),
+  findEquipmentStatTables(equipmentCoreText),
+  equipmentSource,
+  new Set(rawCharacters.filter((character) => Number(character.star) === 5).map((character) => character.characterId)),
+);
 Object.assign(transformed.characters, transformedFiend.characters);
 Object.assign(transformed.costumes, transformedFiend.costumes);
 Object.assign(transformed.characters, transformedSummons.characters);
@@ -1227,11 +1523,78 @@ const catalog = {
   characters: transformed.characters,
   costumes: transformed.costumes,
   monsters: transformedFiend.monsters,
+  equipment: transformedEquipment.definitions,
   skills: {},
 };
 
+try {
+  const localization = JSON.parse(await readFile(localizationPath, "utf8"));
+  for (const [id, name] of Object.entries(localization.characters ?? {})) {
+    if (catalog.characters[id]) catalog.characters[id].names.ja = name;
+  }
+  for (const [id, name] of Object.entries(localization.costumes ?? {})) {
+    if (catalog.costumes[id]) catalog.costumes[id].names.ja = name;
+  }
+} catch (error) {
+  if (error?.code !== "ENOENT") throw error;
+}
+
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, `${JSON.stringify(catalog, null, 2)}\n`, "utf8");
+if (equipmentOraclePath) {
+  const oracle = {
+    schema_version: 2,
+    observed_at: observedAt,
+    source: {
+      site: `${ORIGIN}/ja/`,
+      equipment_list: `${ORIGIN}/ja/weapons`,
+      option_calculator: `${ORIGIN}/ja/option-calculator`,
+      stat_calculator: `${ORIGIN}/ja/stat-calculator`,
+      gear_picker: `${ORIGIN}/ja/gear-picker`,
+      equipment_bundle: `${ORIGIN}/${equipmentAsset}`,
+      calculator_bundle: `${ORIGIN}/${equipmentCoreAsset}`,
+      digest: equipmentSource.source_digest,
+    },
+    scope: {
+      kinds: ["CRAFTED_LEGENDARY", "EXCLUSIVE"],
+      tiers: ["UR4", "EX UR"],
+      character_scope: "5_STAR",
+      refinement_scores: [18, 19, 20, 21, 22, 23, 24],
+      equipment_count: Object.keys(transformedEquipment.definitions).length,
+      case_count: transformedEquipment.oracleCases.length,
+      crafted_legendary_count: Object.values(transformedEquipment.definitions)
+        .filter((entry) => entry.kind === "CRAFTED_LEGENDARY").length,
+      exclusive_count: Object.values(transformedEquipment.definitions)
+        .filter((entry) => entry.kind === "EXCLUSIVE").length,
+    },
+    calculator_defaults: {
+      refinement_score: 18,
+      refinement_grades: ["B", "B", "S"],
+      collection: { max_hp_bp: 8000, attack_bp: 8000, magic_bp: 8000, crit_rate_bp: 5000 },
+      external_buffs: {
+        attack_bonus_bp: 0,
+        crit_rate_bp: 0,
+        crit_damage_bp: 0,
+        property_damage_bp: 0,
+        shield_percent_bp: 0,
+        shield_flat: 0,
+      },
+      calculator: {
+        damage_type: "NORMAL",
+        elemental_advantage: true,
+        defense_type: "NONE",
+        target_condition: { min_hp: 0, min_defense_bp: 0, min_magic_resist_bp: 0 },
+        option_count: 15,
+        gear_filters: { exclusive: true, ur4: true, ur3: true, monster: true },
+        world_buff_enabled: false,
+      },
+    },
+    equipment: transformedEquipment.definitions,
+    cases: transformedEquipment.oracleCases,
+  };
+  await mkdir(dirname(equipmentOraclePath), { recursive: true });
+  await writeFile(equipmentOraclePath, `${JSON.stringify(oracle, null, 2)}\n`, "utf8");
+}
 const costumeValues = Object.values(catalog.costumes);
 const report = {
   output: outputPath,
@@ -1241,6 +1604,13 @@ const report = {
   executableCostumes: costumeValues.filter((costume) => costume.executable).length,
   reviewRequiredCostumes: costumeValues.filter((costume) => !costume.executable).length,
   monsters: Object.keys(catalog.monsters).length,
+  equipment: Object.keys(catalog.equipment).length,
+  craftedLegendaryEquipment: Object.values(catalog.equipment)
+    .filter((entry) => entry.kind === "CRAFTED_LEGENDARY").length,
+  exclusiveEquipment: Object.values(catalog.equipment)
+    .filter((entry) => entry.kind === "EXCLUSIVE").length,
+  equipmentCases: transformedEquipment.oracleCases.length,
+  equipmentOracle: equipmentOraclePath,
   sourceDigest: characterSource.source_digest,
 };
 console.log(JSON.stringify(report, null, 2));

@@ -28,6 +28,7 @@ test = [
 bd2-train = "bd2rl.train:main"
 bd2-evaluate = "bd2rl.evaluate:main"
 bd2-gui = "bd2rl.gui:main"
+bd2-play = "bd2rl.gui:main"
 bd2-device-check = "bd2rl.device_check:main"
 
 [tool.maturin]

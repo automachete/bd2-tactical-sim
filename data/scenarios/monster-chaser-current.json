@@ -85,8 +85,44 @@
           "costume_link_target": null
         }
       ],
+      "build_settings": {
+        "engraving_enabled": true,
+        "awakening_enabled": true,
+        "collection": {
+          "max_hp_bp": 8000,
+          "attack_bp": 8000,
+          "magic_bp": 8000,
+          "crit_rate_bp": 5000
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": null,
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [
         "Lathel_3",
         "Lathel_4",
@@ -150,8 +186,44 @@
           "costume_link_target": null
         }
       ],
+      "build_settings": {
+        "engraving_enabled": true,
+        "awakening_enabled": true,
+        "collection": {
+          "max_hp_bp": 8000,
+          "attack_bp": 8000,
+          "magic_bp": 8000,
+          "crit_rate_bp": 5000
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": null,
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [
         "Justia_5",
         "Justia_1",
@@ -206,8 +278,44 @@
           "costume_link_target": null
         }
       ],
+      "build_settings": {
+        "engraving_enabled": true,
+        "awakening_enabled": true,
+        "collection": {
+          "max_hp_bp": 8000,
+          "attack_bp": 8000,
+          "magic_bp": 8000,
+          "crit_rate_bp": 5000
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": null,
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [
         "Scheherazade_4",
         "Scheherazade_1",
@@ -261,8 +369,44 @@
           "costume_link_target": null
         }
       ],
+      "build_settings": {
+        "engraving_enabled": true,
+        "awakening_enabled": true,
+        "collection": {
+          "max_hp_bp": 8000,
+          "attack_bp": 8000,
+          "magic_bp": 8000,
+          "crit_rate_bp": 5000
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": null,
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [
         "Gray_1",
         "Gray_2",
@@ -308,8 +452,44 @@
           "costume_link_target": null
         }
       ],
+      "build_settings": {
+        "engraving_enabled": true,
+        "awakening_enabled": true,
+        "collection": {
+          "max_hp_bp": 8000,
+          "attack_bp": 8000,
+          "magic_bp": 8000,
+          "crit_rate_bp": 5000
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": null,
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [
         "Celia_3",
         "Celia_1",
@@ -362,8 +542,44 @@
           "costume_link_target": null
         }
       ],
+      "build_settings": {
+        "engraving_enabled": true,
+        "awakening_enabled": true,
+        "collection": {
+          "max_hp_bp": 8000,
+          "attack_bp": 8000,
+          "magic_bp": 8000,
+          "crit_rate_bp": 5000
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": null,
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [
         "Sylvia_2",
         "Sylvia_1",
@@ -417,8 +633,44 @@
           "costume_link_target": null
         }
       ],
+      "build_settings": {
+        "engraving_enabled": true,
+        "awakening_enabled": true,
+        "collection": {
+          "max_hp_bp": 8000,
+          "attack_bp": 8000,
+          "magic_bp": 8000,
+          "crit_rate_bp": 5000
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": null,
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [
         "Rubia_3",
         "Rubia_1",
@@ -472,8 +724,44 @@
           "costume_link_target": null
         }
       ],
+      "build_settings": {
+        "engraving_enabled": true,
+        "awakening_enabled": true,
+        "collection": {
+          "max_hp_bp": 8000,
+          "attack_bp": 8000,
+          "magic_bp": 8000,
+          "crit_rate_bp": 5000
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": null,
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [
         "Eclipse_1",
         "Eclipse_2",
@@ -519,8 +807,44 @@
           "costume_link_target": null
         }
       ],
+      "build_settings": {
+        "engraving_enabled": true,
+        "awakening_enabled": true,
+        "collection": {
+          "max_hp_bp": 8000,
+          "attack_bp": 8000,
+          "magic_bp": 8000,
+          "crit_rate_bp": 5000
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": null,
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [
         "Teresse_1",
         "Teresse_3",
@@ -565,8 +889,44 @@
           "costume_link_target": null
         }
       ],
+      "build_settings": {
+        "engraving_enabled": true,
+        "awakening_enabled": true,
+        "collection": {
+          "max_hp_bp": 8000,
+          "attack_bp": 8000,
+          "magic_bp": 8000,
+          "crit_rate_bp": 5000
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": null,
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [
         "Liatris_2",
         "Liatris_3",
@@ -627,6 +987,42 @@
           "costume_link_target": null
         }
       ],
+      "build_settings": {
+        "engraving_enabled": false,
+        "awakening_enabled": false,
+        "collection": {
+          "max_hp_bp": 0,
+          "attack_bp": 0,
+          "magic_bp": 0,
+          "crit_rate_bp": 0
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": {
         "max_hp": 230000000,
         "attack": 0,
@@ -640,7 +1036,7 @@
         "incoming_damage_bp": 0,
         "amplification_bp": 0
       },
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [
         "fiend:10072:hunt-72-skill-1",
         "fiend:10072:hunt-72-skill-2",
@@ -662,6 +1058,42 @@
         "depth": 1
       },
       "costume_loadout": [],
+      "build_settings": {
+        "engraving_enabled": false,
+        "awakening_enabled": false,
+        "collection": {
+          "max_hp_bp": 0,
+          "attack_bp": 0,
+          "magic_bp": 0,
+          "crit_rate_bp": 0
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": {
         "max_hp": 230000000,
         "attack": 0,
@@ -675,7 +1107,7 @@
         "incoming_damage_bp": 0,
         "amplification_bp": 0
       },
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [],
       "party_no": 1,
       "hp_owner": 1001,
@@ -691,6 +1123,42 @@
         "depth": 1
       },
       "costume_loadout": [],
+      "build_settings": {
+        "engraving_enabled": false,
+        "awakening_enabled": false,
+        "collection": {
+          "max_hp_bp": 0,
+          "attack_bp": 0,
+          "magic_bp": 0,
+          "crit_rate_bp": 0
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": {
         "max_hp": 230000000,
         "attack": 0,
@@ -704,7 +1172,7 @@
         "incoming_damage_bp": 0,
         "amplification_bp": 0
       },
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [],
       "party_no": 1,
       "hp_owner": 1001,
@@ -720,6 +1188,42 @@
         "depth": 2
       },
       "costume_loadout": [],
+      "build_settings": {
+        "engraving_enabled": false,
+        "awakening_enabled": false,
+        "collection": {
+          "max_hp_bp": 0,
+          "attack_bp": 0,
+          "magic_bp": 0,
+          "crit_rate_bp": 0
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": {
         "max_hp": 230000000,
         "attack": 0,
@@ -733,7 +1237,7 @@
         "incoming_damage_bp": 0,
         "amplification_bp": 0
       },
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [],
       "party_no": 1,
       "hp_owner": 1001,
@@ -749,6 +1253,42 @@
         "depth": 2
       },
       "costume_loadout": [],
+      "build_settings": {
+        "engraving_enabled": false,
+        "awakening_enabled": false,
+        "collection": {
+          "max_hp_bp": 0,
+          "attack_bp": 0,
+          "magic_bp": 0,
+          "crit_rate_bp": 0
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": {
         "max_hp": 230000000,
         "attack": 0,
@@ -762,7 +1302,7 @@
         "incoming_damage_bp": 0,
         "amplification_bp": 0
       },
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [],
       "party_no": 1,
       "hp_owner": 1001,
@@ -778,6 +1318,42 @@
         "depth": 2
       },
       "costume_loadout": [],
+      "build_settings": {
+        "engraving_enabled": false,
+        "awakening_enabled": false,
+        "collection": {
+          "max_hp_bp": 0,
+          "attack_bp": 0,
+          "magic_bp": 0,
+          "crit_rate_bp": 0
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": {
         "max_hp": 230000000,
         "attack": 0,
@@ -791,7 +1367,7 @@
         "incoming_damage_bp": 0,
         "amplification_bp": 0
       },
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [],
       "party_no": 1,
       "hp_owner": 1001,
@@ -807,6 +1383,42 @@
         "depth": 3
       },
       "costume_loadout": [],
+      "build_settings": {
+        "engraving_enabled": false,
+        "awakening_enabled": false,
+        "collection": {
+          "max_hp_bp": 0,
+          "attack_bp": 0,
+          "magic_bp": 0,
+          "crit_rate_bp": 0
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": {
         "max_hp": 230000000,
         "attack": 0,
@@ -820,7 +1432,7 @@
         "incoming_damage_bp": 0,
         "amplification_bp": 0
       },
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [],
       "party_no": 1,
       "hp_owner": 1001,
@@ -836,6 +1448,42 @@
         "depth": 3
       },
       "costume_loadout": [],
+      "build_settings": {
+        "engraving_enabled": false,
+        "awakening_enabled": false,
+        "collection": {
+          "max_hp_bp": 0,
+          "attack_bp": 0,
+          "magic_bp": 0,
+          "crit_rate_bp": 0
+        },
+        "external_buffs": {
+          "attack_bonus_bp": 0,
+          "crit_rate_bp": 0,
+          "crit_damage_bp": 0,
+          "property_damage_bp": 0,
+          "shield_percent_bp": 0,
+          "shield_flat": 0
+        },
+        "calculator": {
+          "damage_type": "NORMAL",
+          "elemental_advantage": true,
+          "defense_type": "NONE",
+          "target_condition": {
+            "min_hp": 0,
+            "min_defense_bp": 0,
+            "min_magic_resist_bp": 0
+          },
+          "option_count": 15,
+          "gear_filters": {
+            "exclusive": true,
+            "ur4": true,
+            "ur3": true,
+            "monster": true
+          },
+          "world_buff_enabled": false
+        }
+      },
       "stat_overrides": {
         "max_hp": 230000000,
         "attack": 0,
@@ -849,7 +1497,7 @@
         "incoming_damage_bp": 0,
         "amplification_bp": 0
       },
-      "equipment_modifiers": {},
+      "equipment": {},
       "ai_priority": [],
       "party_no": 1,
       "hp_owner": 1001,

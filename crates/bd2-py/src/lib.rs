@@ -248,11 +248,12 @@ fn training_frame(engine: &BattleEngine, side: Side) -> serde_json::Value {
             .filter(|effect| effect.spec.polarity == bd2_core::EffectPolarity::Beneficial)
             .count();
         let harmful = unit.effects.len().saturating_sub(beneficial);
-        let barrier_total: i64 = unit
-            .effects
-            .iter()
-            .map(|effect| effect.barrier_remaining)
-            .sum();
+        let barrier_total: i64 = unit.external_energy_guard.saturating_add(
+            unit.effects
+                .iter()
+                .map(|effect| effect.barrier_remaining)
+                .sum(),
+        );
         let duration_total: u32 = unit
             .effects
             .iter()

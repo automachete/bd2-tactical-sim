@@ -40,6 +40,8 @@ impl Database {
     pub fn migrate(&mut self) -> Result<()> {
         self.connection
             .execute_batch(include_str!("../migrations/001_init.sql"))?;
+        self.connection
+            .execute_batch(include_str!("../migrations/002_equipment.sql"))?;
         Ok(())
     }
 
@@ -89,6 +91,21 @@ impl Database {
             )?;
             insert_source(&transaction, &catalog.ruleset_id, &monster.source)?;
         }
+        for equipment in catalog.equipment.values() {
+            transaction.execute(
+                "INSERT INTO equipment(ruleset_id, equipment_id, slot, kind, tier, owner_character_id, record_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    catalog.ruleset_id,
+                    equipment.id,
+                    format!("{:?}", equipment.slot),
+                    format!("{:?}", equipment.kind),
+                    equipment.tier,
+                    equipment.owner_character_id,
+                    serde_json::to_string(equipment)?
+                ],
+            )?;
+            insert_source(&transaction, &catalog.ruleset_id, &equipment.source)?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -131,11 +148,13 @@ impl Database {
                 .collect::<Result<Vec<_>>>()?;
         }
         let monsters = load_json_map(&self.connection, "monsters", "monster_id", ruleset_id)?;
+        let equipment = load_json_map(&self.connection, "equipment", "equipment_id", ruleset_id)?;
         Ok(Catalog {
             ruleset_id: ruleset_id.into(),
             characters,
             costumes,
             monsters,
+            equipment,
             skills: BTreeMap::new(),
         })
     }
@@ -167,6 +186,7 @@ impl Database {
             costumes: count(&self.connection, "costumes", ruleset_id)?,
             skill_variants: count(&self.connection, "skill_variants", ruleset_id)?,
             monsters: count(&self.connection, "monsters", ruleset_id)?,
+            equipment: count(&self.connection, "equipment", ruleset_id)?,
             scenarios: count(&self.connection, "scenarios", ruleset_id)?,
         })
     }
@@ -178,6 +198,7 @@ pub struct CatalogCounts {
     pub costumes: u64,
     pub skill_variants: u64,
     pub monsters: u64,
+    pub equipment: u64,
     pub scenarios: u64,
 }
 
@@ -228,7 +249,7 @@ mod tests {
     use super::*;
     use bd2_core::{
         AttackType, CharacterDefinition, CostumeDefinition, Element, Offset, SkillVariant,
-        SourceRecord, Stats, TargetSelector,
+        SourceRecord, StatModifiers, Stats, TargetSelector,
     };
     use std::collections::BTreeMap;
 
@@ -240,7 +261,7 @@ mod tests {
             element: Element::Fire,
             attack_type: AttackType::Physical,
             target_selector: TargetSelector::Front,
-            level_100_awakened: Stats {
+            level_100: Stats {
                 max_hp: 1,
                 attack: 1,
                 magic: 0,
@@ -253,6 +274,8 @@ mod tests {
                 incoming_damage_bp: 0,
                 amplification_bp: 0,
             },
+            engraving_modifiers: StatModifiers::default(),
+            awakening_modifiers: StatModifiers::default(),
             costume_ids: vec!["c0".into()],
             source: SourceRecord::default(),
         };

@@ -22,12 +22,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             database.replace_catalog(&catalog, true)?;
             let counts = database.counts(&catalog.ruleset_id)?;
             println!(
-                "ruleset={} characters={} costumes={} variants={} monsters={}",
+                "ruleset={} characters={} costumes={} variants={} monsters={} equipment={}",
                 catalog.ruleset_id,
                 counts.characters,
                 counts.costumes,
                 counts.skill_variants,
-                counts.monsters
+                counts.monsters,
+                counts.equipment
             );
         }
         Some("import-scenario") if args.len() == 4 => {
@@ -42,11 +43,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let ruleset = database.active_ruleset_id()?;
             let counts = database.counts(&ruleset)?;
             println!(
-                "ruleset={ruleset} characters={} costumes={} variants={} monsters={} scenarios={}",
+                "ruleset={ruleset} characters={} costumes={} variants={} monsters={} equipment={} scenarios={}",
                 counts.characters,
                 counts.costumes,
                 counts.skill_variants,
                 counts.monsters,
+                counts.equipment,
                 counts.scenarios
             );
         }

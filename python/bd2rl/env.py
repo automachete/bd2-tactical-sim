@@ -17,6 +17,17 @@ UNIT_FEATURES = 56
 GLOBAL_FEATURES = 16
 
 
+def terminal_reward_for(outcome: str, control_side: str) -> float:
+    """Return a terminal reward from the controlled side's perspective."""
+    player_reward = {
+        "WIN": 1.0,
+        "LOSS": -1.0,
+        "DRAW": 0.0,
+        "SCORE_ONLY": 0.0,
+    }[outcome]
+    return player_reward if control_side.upper() == "PLAYER" else -player_reward
+
+
 @dataclass(frozen=True)
 class EnvConfig:
     database_path: Path
@@ -40,6 +51,9 @@ class Bd2Env(gym.Env[dict[str, np.ndarray], np.ndarray]):
     def __init__(self, config: EnvConfig, render_mode: str | None = None) -> None:
         super().__init__()
         self.config = config
+        self._control_side = config.control_side.upper()
+        if self._control_side not in {"PLAYER", "ENEMY"}:
+            raise ValueError("control_side must be PLAYER or ENEMY")
         self.render_mode = render_mode
         self._setup_json = config.setup_path.read_text(encoding="utf-8")
         self._episode_seed = config.seed
@@ -100,29 +114,21 @@ class Bd2Env(gym.Env[dict[str, np.ndarray], np.ndarray]):
         self._simulator = _native.Simulator(
             str(self.config.database_path), self._setup_json, self._episode_seed
         )
+        if self.config.auto_opponent:
+            self._advance_to_control_side()
         self._last_state = json.loads(self.simulator.state_json())
         self._last_damage = self._controlled_damage(self._last_state)
-        observation = self._observation(self.config.control_side)
+        observation = self._observation(self._control_side)
         return observation, self._info()
 
     def step(
         self, action: np.ndarray
     ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
         action = np.asarray(action, dtype=np.int64)
-        self.submit_turn(action, self.config.control_side, strict=False)
-
-        auto_turns = 0
+        self.submit_turn(action, self._control_side, strict=False)
+        if self.config.auto_opponent:
+            self._advance_to_control_side()
         state = json.loads(self.simulator.state_json())
-        while (
-            self.config.auto_opponent
-            and state["terminal"] is None
-            and state["active_side"] != self.config.control_side
-        ):
-            self.simulator.step_auto_json()
-            auto_turns += 1
-            if auto_turns > self.config.max_auto_turns:
-                raise RuntimeError("opponent auto-play exceeded safety limit")
-            state = json.loads(self.simulator.state_json())
 
         current_damage = self._controlled_damage(state)
         dense_damage = (current_damage - self._last_damage) / 1_000_000.0
@@ -130,16 +136,11 @@ class Bd2Env(gym.Env[dict[str, np.ndarray], np.ndarray]):
         terminal = state["terminal"]
         terminal_reward = 0.0
         if terminal is not None:
-            terminal_reward = {
-                "WIN": 1.0,
-                "LOSS": -1.0,
-                "DRAW": 0.0,
-                "SCORE_ONLY": 0.0,
-            }[terminal["outcome"]]
+            terminal_reward = terminal_reward_for(terminal["outcome"], self._control_side)
         reward = float(terminal_reward + np.clip(dense_damage, -0.1, 0.1))
         self._last_state = state
         return (
-            self._observation(self.config.control_side),
+            self._observation(self._control_side),
             reward,
             terminal is not None,
             False,
@@ -222,7 +223,7 @@ class Bd2Env(gym.Env[dict[str, np.ndarray], np.ndarray]):
         state = json.loads(self.simulator.state_json())
         order = state["teams"][0 if perspective_side == "PLAYER" else 1]["action_order"]
         action_lookup = self._legal_action_lookup(perspective_side, order)
-        if perspective_side == self.config.control_side:
+        if perspective_side == self._control_side:
             self._action_lookup = action_lookup
         frame = json.loads(self.simulator.training_frame_json(perspective_side))
         return {
@@ -234,13 +235,23 @@ class Bd2Env(gym.Env[dict[str, np.ndarray], np.ndarray]):
         }
 
     def _controlled_damage(self, state: dict[str, Any]) -> int:
-        controlled_side = self.config.control_side
+        controlled_side = self._control_side
         unit_sides = {int(unit_id): unit["side"] for unit_id, unit in state["units"].items()}
         return sum(
             amount
             for unit_id, amount in state["damage_by_source"].items()
             if unit_sides.get(int(unit_id)) == controlled_side
         )
+
+    def _advance_to_control_side(self) -> None:
+        auto_turns = 0
+        state = json.loads(self.simulator.state_json())
+        while state["terminal"] is None and state["active_side"] != self._control_side:
+            self.simulator.step_auto_json()
+            auto_turns += 1
+            if auto_turns > self.config.max_auto_turns:
+                raise RuntimeError("opponent auto-play exceeded safety limit")
+            state = json.loads(self.simulator.state_json())
 
     def _info(self) -> dict[str, Any]:
         state = json.loads(self.simulator.state_json())

@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 import numpy as np
+import pytest
 from bd2rl._native import BatchSimulator, Simulator
 from bd2rl.env import (
     GLOBAL_FEATURES,
@@ -14,6 +15,7 @@ from bd2rl.env import (
     UNIT_FEATURES,
     Bd2Env,
     EnvConfig,
+    terminal_reward_for,
 )
 from gymnasium.utils.env_checker import check_env
 
@@ -134,8 +136,11 @@ def test_current_monster_ai_conditional_and_two_party_handoff() -> None:
         if handoff_seen:
             break
 
-    assert boss_skills[0].endswith("skill-1")
-    assert boss_skills[1].endswith("skill-2")
+    # Conditional skill 5 interrupts immediately after the PLAYER action that
+    # reaches eight chains; it must not advance or reorder the normal sequence.
+    normal_boss_skills = [skill for skill in boss_skills if not skill.endswith("skill-5")]
+    assert normal_boss_skills[0].endswith("skill-1")
+    assert normal_boss_skills[1].endswith("skill-2")
     assert conditional_before_handoff == 1
     assert handoff_seen
 
@@ -181,3 +186,34 @@ def test_gymnasium_contract() -> None:
     config = EnvConfig(DATABASE, ROOT / "data/scenarios/normal-demo.json", seed=31)
     environment = Bd2Env(config)
     check_env(environment, skip_render_check=True)
+
+
+def test_enemy_control_is_case_insensitive_starts_on_its_turn_and_inverts_outcome() -> None:
+    environment = Bd2Env(
+        EnvConfig(
+            DATABASE,
+            MONSTER_SCENARIO,
+            seed=37,
+            control_side="enemy",
+            auto_opponent=True,
+        )
+    )
+    observation, info = environment.reset()
+    assert info["state"]["active_side"] == "ENEMY"
+    assert observation["action_mask"].any()
+    _, _, terminated, _, next_info = environment.step(np.zeros(MAX_TEAM_UNITS, dtype=np.int64))
+    assert terminated or next_info["state"]["active_side"] == "ENEMY"
+    assert terminal_reward_for("WIN", "ENEMY") == -1.0
+    assert terminal_reward_for("LOSS", "enemy") == 1.0
+    assert terminal_reward_for("DRAW", "ENEMY") == 0.0
+
+
+def test_environment_rejects_an_unknown_control_side() -> None:
+    with pytest.raises(ValueError, match="control_side"):
+        Bd2Env(
+            EnvConfig(
+                DATABASE,
+                ROOT / "data/scenarios/normal-demo.json",
+                control_side="SPECTATOR",
+            )
+        )

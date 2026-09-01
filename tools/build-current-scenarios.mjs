@@ -5,6 +5,39 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const catalog = JSON.parse(await readFile(resolve(root, "data/generated/catalog.json"), "utf8"));
 
+function defaultBuildSettings() {
+  return {
+    engraving_enabled: true,
+    awakening_enabled: true,
+    collection: { max_hp_bp: 8000, attack_bp: 8000, magic_bp: 8000, crit_rate_bp: 5000 },
+    external_buffs: {
+      attack_bonus_bp: 0,
+      crit_rate_bp: 0,
+      crit_damage_bp: 0,
+      property_damage_bp: 0,
+      shield_percent_bp: 0,
+      shield_flat: 0,
+    },
+    calculator: {
+      damage_type: "NORMAL",
+      elemental_advantage: true,
+      defense_type: "NONE",
+      target_condition: { min_hp: 0, min_defense_bp: 0, min_magic_resist_bp: 0 },
+      option_count: 15,
+      gear_filters: { exclusive: true, ur4: true, ur3: true, monster: true },
+      world_buff_enabled: false,
+    },
+  };
+}
+
+function unmodifiedBuildSettings() {
+  const settings = defaultBuildSettings();
+  settings.engraving_enabled = false;
+  settings.awakening_enabled = false;
+  settings.collection = { max_hp_bp: 0, attack_bp: 0, magic_bp: 0, crit_rate_bp: 0 };
+  return settings;
+}
+
 function maxLoadout(characterId) {
   const character = catalog.characters[characterId];
   if (!character) throw new Error(`unknown character ${characterId}`);
@@ -33,8 +66,9 @@ function playerUnit(unitId, characterId, partyNo, position) {
     side: "PLAYER",
     position,
     costume_loadout: costumeLoadout,
+    build_settings: defaultBuildSettings(),
     stat_overrides: null,
-    equipment_modifiers: {},
+    equipment: {},
     ai_priority: cheapestFirst,
     party_no: partyNo,
     hp_owner: null,
@@ -66,8 +100,9 @@ function buildMonsterChaser(monsterId, startingLevel) {
     side: "ENEMY",
     position: part.position,
     costume_loadout: index === 0 ? bossCostumes : [],
+    build_settings: unmodifiedBuildSettings(),
     stat_overrides: baseBossStats,
-    equipment_modifiers: {},
+    equipment: {},
     ai_priority: index === 0 ? monster.skill_ids : [],
     party_no: 1,
     hp_owner: index === 0 ? null : hpOwner,

@@ -9,7 +9,11 @@
     "acorn": "^8.15.0"
   },
   "scripts": {
-    "sync": "node sync-bd2db.mjs"
+    "sync": "node sync-bd2db.mjs",
+    "validate:equipment": "node validate-bd2db-equipment.mjs",
+    "test:ui": "playwright test -c playwright.config.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
   }
 }
-

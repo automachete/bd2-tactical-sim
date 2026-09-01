@@ -6,9 +6,10 @@ use std::{
 use crate::{
     ActiveEffect, AttackType, BattleError, BattleEvent, BattleEventKind, BattleMode, BattleSetup,
     BattleState, Catalog, Cell, CostumeDefinition, DamageKind, DurationClock, EffectPolarity,
-    EffectRecipient, LegalUnitActions, Observation, Outcome, Result, Side, SkillOperation,
-    SkillVariant, StatModifiers, StatReference, Stats, TargetSelector, TeamState, TeamTurnPlan,
-    TerminalResult, Transition, UnitCommand, UnitId, UnitObservation, UnitState,
+    EffectRecipient, EquipmentKind, EquipmentLoadout, EquipmentSlot, LegalUnitActions, Observation,
+    Outcome, Result, Side, SkillOperation, SkillVariant, StatModifiers, StatReference, Stats,
+    TargetSelector, TeamState, TeamTurnPlan, TerminalResult, Transition, UnitCommand, UnitId,
+    UnitObservation, UnitState,
 };
 
 #[derive(Debug, Clone)]
@@ -39,8 +40,18 @@ impl BattleEngine {
             let mut stats = unit
                 .stat_overrides
                 .clone()
-                .unwrap_or_else(|| character.level_100_awakened.clone());
+                .unwrap_or_else(|| character.level_100.clone());
             let mut loadout_modifiers = StatModifiers::default();
+            if unit.build_settings.engraving_enabled {
+                accumulate_modifiers(&mut loadout_modifiers, &character.engraving_modifiers);
+            }
+            if unit.build_settings.awakening_enabled {
+                accumulate_modifiers(&mut loadout_modifiers, &character.awakening_modifiers);
+            }
+            accumulate_modifiers(
+                &mut loadout_modifiers,
+                &build_settings_modifiers(character.attack_type, &unit.build_settings),
+            );
             for loadout in &unit.costume_loadout {
                 let costume = &catalog.costumes[&loadout.costume_id];
                 if loadout.permanent_potential_enabled {
@@ -60,8 +71,20 @@ impl BattleEngine {
                     &catalog.costumes[bond_id].bonding_modifiers,
                 );
             }
-            accumulate_modifiers(&mut loadout_modifiers, &unit.equipment_modifiers);
+            let equipment_modifiers =
+                resolve_equipment_modifiers(&catalog, &unit.character_id, &unit.equipment)?;
+            accumulate_modifiers(&mut loadout_modifiers, &equipment_modifiers);
             apply_permanent_modifiers(&mut stats, &loadout_modifiers);
+            let external_energy_guard = unit
+                .build_settings
+                .external_buffs
+                .shield_flat
+                .saturating_add(mul_floor(
+                    stats.max_hp,
+                    unit.build_settings.external_buffs.shield_percent_bp,
+                ))
+                .max(0);
+            let passive_modifiers = runtime_passive_modifiers(&loadout_modifiers);
             let initially_active = setup.rules.mode != BattleMode::MonsterChaser
                 || unit.side == Side::Enemy
                 || unit.party_no == 1;
@@ -75,6 +98,7 @@ impl BattleEngine {
                     alive: initially_active,
                     hp: stats.max_hp,
                     base_stats: stats,
+                    passive_modifiers,
                     costume_loadout: unit.costume_loadout.clone(),
                     cooldowns: unit
                         .costume_loadout
@@ -82,6 +106,7 @@ impl BattleEngine {
                         .map(|costume| (costume.costume_id.clone(), 0))
                         .collect(),
                     effects: Vec::new(),
+                    external_energy_guard,
                     ai_priority: unit.ai_priority.clone(),
                     party_no: unit.party_no,
                     hp_owner: unit.hp_owner,
@@ -503,6 +528,17 @@ impl BattleEngine {
     }
 
     pub fn step(&mut self, plan: TeamTurnPlan) -> Result<Transition> {
+        let checkpoint = self.clone();
+        match self.step_inner(plan) {
+            Ok(transition) => Ok(transition),
+            Err(error) => {
+                *self = checkpoint;
+                Err(error)
+            }
+        }
+    }
+
+    fn step_inner(&mut self, plan: TeamTurnPlan) -> Result<Transition> {
         if self.state.terminal.is_some() {
             return Err(BattleError::AlreadyTerminal);
         }
@@ -1210,12 +1246,11 @@ impl BattleEngine {
 
             let actor_element = self.catalog.characters[&actor.character_id].element;
             let target_element = self.catalog.characters[&target.character_id].element;
-            let elemental = actor_element.factor_bp(target_element)
-                + if actor_element.factor_bp(target_element) > 10_000 {
-                    actor_stats.property_damage_bp
-                } else {
-                    0
-                };
+            let elemental = if actor_element.is_advantageous_against(target_element) {
+                10_000 + actor_stats.property_damage_bp
+            } else {
+                actor_element.factor_bp(target_element)
+            };
             if !matches!(
                 kind,
                 DamageKind::Fixed | DamageKind::HpConsumption | DamageKind::Collision
@@ -1358,6 +1393,16 @@ impl BattleEngine {
             .unwrap_or(target_id);
         let mut barrier_events = Vec::new();
         if let Some(target) = self.state.units.get_mut(&hp_owner) {
+            if target.external_energy_guard > 0 && amount > 0 {
+                let absorbed = amount.min(target.external_energy_guard);
+                amount -= absorbed;
+                target.external_energy_guard -= absorbed;
+                barrier_events.push((
+                    "external:energy_guard".to_string(),
+                    absorbed,
+                    target.external_energy_guard,
+                ));
+            }
             for effect in &mut target.effects {
                 if amount == 0 {
                     break;
@@ -1719,11 +1764,13 @@ impl BattleEngine {
             StatReference::TargetCurrentHp => target.hp,
             StatReference::TargetAttack => target_stats.attack,
             StatReference::TargetMagic => target_stats.magic,
-            StatReference::EnergyGuard => actor
-                .effects
-                .iter()
-                .map(|effect| effect.barrier_remaining)
-                .sum(),
+            StatReference::EnergyGuard => actor.external_energy_guard.saturating_add(
+                actor
+                    .effects
+                    .iter()
+                    .map(|effect| effect.barrier_remaining)
+                    .sum(),
+            ),
             StatReference::ReceivedDamage => self.current_received_damage,
         }
     }
@@ -1787,7 +1834,7 @@ impl BattleEngine {
         let stats = if inherit_summoner_stats {
             source.base_stats.clone()
         } else {
-            character.level_100_awakened.clone()
+            character.level_100.clone()
         };
         self.state.units.insert(
             unit_id,
@@ -1799,9 +1846,11 @@ impl BattleEngine {
                 alive: true,
                 hp: stats.max_hp,
                 base_stats: stats,
+                passive_modifiers: StatModifiers::default(),
                 costume_loadout: vec![loadout],
                 cooldowns: BTreeMap::from([(costume_id.into(), 0)]),
                 effects: Vec::new(),
+                external_energy_guard: 0,
                 ai_priority: vec![costume_id.into()],
                 party_no: source.party_no,
                 hp_owner: None,
@@ -2440,6 +2489,11 @@ impl BattleEngine {
                     "cannot move opposing unit".into(),
                 ));
             }
+            if !unit.alive {
+                return Err(BattleError::IllegalAction(
+                    "cannot move inactive unit".into(),
+                ));
+            }
             let from = unit.position;
             unit.position = *cell;
             if from != *cell {
@@ -3038,7 +3092,7 @@ fn validate_setup(catalog: &Catalog, setup: &BattleSetup) -> Result<()> {
         if !unit
             .stat_overrides
             .as_ref()
-            .unwrap_or(&character.level_100_awakened)
+            .unwrap_or(&character.level_100)
             .validate()
         {
             return Err(BattleError::InvalidScenario(format!(
@@ -3046,6 +3100,8 @@ fn validate_setup(catalog: &Catalog, setup: &BattleSetup) -> Result<()> {
                 unit.unit_id
             )));
         }
+        validate_build_settings(&unit.build_settings)?;
+        resolve_equipment_modifiers(catalog, &unit.character_id, &unit.equipment)?;
         for loadout in &unit.costume_loadout {
             let costume = catalog.costumes.get(&loadout.costume_id).ok_or_else(|| {
                 BattleError::MissingCatalogEntry {
@@ -3166,6 +3222,199 @@ fn validate_setup(catalog: &Catalog, setup: &BattleSetup) -> Result<()> {
     Ok(())
 }
 
+/// Resolve a typed five-slot equipment loadout against the immutable catalog.
+///
+/// This function is public so import/audit tools can exercise the exact same
+/// path as battle initialization. The supported live ruleset is intentionally
+/// strict: crafted UR IV (Legendary) or the owner's EX UR exclusive gear,
+/// score 18-24, and exactly three legal substats per equipped item.
+pub fn resolve_equipment_modifiers(
+    catalog: &Catalog,
+    character_id: &str,
+    equipment: &BTreeMap<EquipmentSlot, EquipmentLoadout>,
+) -> Result<StatModifiers> {
+    let mut total = StatModifiers::default();
+    for (slot, loadout) in equipment {
+        let definition = catalog
+            .equipment
+            .get(&loadout.equipment_id)
+            .ok_or_else(|| BattleError::MissingCatalogEntry {
+                kind: "equipment",
+                id: loadout.equipment_id.clone(),
+            })?;
+        if definition.slot != *slot {
+            return Err(BattleError::InvalidScenario(format!(
+                "equipment '{}' belongs in {:?}, not {:?}",
+                loadout.equipment_id, definition.slot, slot
+            )));
+        }
+        if !matches!(
+            (&definition.kind, definition.tier.as_str()),
+            (EquipmentKind::CraftedLegendary, "UR4") | (EquipmentKind::Exclusive, "EX UR")
+        ) {
+            return Err(BattleError::InvalidScenario(format!(
+                "equipment '{}' is neither Legendary UR IV nor EX UR",
+                loadout.equipment_id
+            )));
+        }
+        if definition.kind == EquipmentKind::Exclusive
+            && definition.owner_character_id.as_deref() != Some(character_id)
+        {
+            return Err(BattleError::InvalidScenario(format!(
+                "exclusive equipment '{}' does not belong to '{}'",
+                loadout.equipment_id, character_id
+            )));
+        }
+        if !(18..=24).contains(&loadout.refinement_score) {
+            return Err(BattleError::InvalidScenario(format!(
+                "equipment '{}' refinement score must be between 18 and 24",
+                loadout.equipment_id
+            )));
+        }
+        let main = definition
+            .modifiers_by_refinement_score
+            .get(&loadout.refinement_score)
+            .ok_or_else(|| {
+                BattleError::InvalidScenario(format!(
+                    "equipment '{}' has no score {} data",
+                    loadout.equipment_id, loadout.refinement_score
+                ))
+            })?;
+        match definition.kind {
+            EquipmentKind::CraftedLegendary => {
+                if loadout.primary_stat.is_some() || loadout.secondary_stat.is_some() {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "crafted equipment '{}' cannot select exclusive main stats",
+                        loadout.equipment_id
+                    )));
+                }
+            }
+            EquipmentKind::Exclusive => {
+                let primary = loadout.primary_stat.ok_or_else(|| {
+                    BattleError::InvalidScenario(format!(
+                        "exclusive equipment '{}' requires a primary stat",
+                        loadout.equipment_id
+                    ))
+                })?;
+                let secondary = loadout.secondary_stat.ok_or_else(|| {
+                    BattleError::InvalidScenario(format!(
+                        "exclusive equipment '{}' requires a secondary stat",
+                        loadout.equipment_id
+                    ))
+                })?;
+                if !definition.primary_stat_options.contains(&primary)
+                    || !definition.secondary_stat_options.contains(&secondary)
+                {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "exclusive equipment '{}' has an illegal main-stat selection",
+                        loadout.equipment_id
+                    )));
+                }
+                let primary_modifier = definition
+                    .primary_modifiers_by_refinement_score
+                    .get(&loadout.refinement_score)
+                    .and_then(|values| values.get(&primary))
+                    .ok_or_else(|| {
+                        BattleError::InvalidScenario(format!(
+                            "exclusive equipment '{}' is missing primary-stat data",
+                            loadout.equipment_id
+                        ))
+                    })?;
+                let secondary_modifier = definition
+                    .secondary_modifiers_by_refinement_score
+                    .get(&loadout.refinement_score)
+                    .and_then(|values| values.get(&secondary))
+                    .ok_or_else(|| {
+                        BattleError::InvalidScenario(format!(
+                            "exclusive equipment '{}' is missing secondary-stat data",
+                            loadout.equipment_id
+                        ))
+                    })?;
+                accumulate_modifiers(&mut total, primary_modifier);
+                accumulate_modifiers(&mut total, secondary_modifier);
+            }
+        }
+        if loadout.substats.len() != 3 {
+            return Err(BattleError::InvalidScenario(format!(
+                "equipment '{}' must have exactly three substats",
+                loadout.equipment_id
+            )));
+        }
+        accumulate_modifiers(&mut total, main);
+        for substat in &loadout.substats {
+            if !definition.allowed_substats.contains(substat) {
+                return Err(BattleError::InvalidScenario(format!(
+                    "equipment '{}' does not allow substat {:?}",
+                    loadout.equipment_id, substat
+                )));
+            }
+            let modifier = definition.substat_modifiers.get(substat).ok_or_else(|| {
+                BattleError::InvalidScenario(format!(
+                    "equipment '{}' is missing modifier data for {:?}",
+                    loadout.equipment_id, substat
+                ))
+            })?;
+            accumulate_modifiers(&mut total, modifier);
+        }
+    }
+    Ok(total)
+}
+
+fn validate_build_settings(settings: &crate::UnitBuildSettings) -> Result<()> {
+    let collection = &settings.collection;
+    if !(0..=8_000).contains(&collection.max_hp_bp)
+        || !(0..=8_000).contains(&collection.attack_bp)
+        || !(0..=8_000).contains(&collection.magic_bp)
+        || !(0..=5_000).contains(&collection.crit_rate_bp)
+    {
+        return Err(BattleError::InvalidScenario(
+            "collection bonuses exceed BD2DB's current ranges".into(),
+        ));
+    }
+    let external = &settings.external_buffs;
+    if external.shield_percent_bp < 0 || external.shield_flat < 0 {
+        return Err(BattleError::InvalidScenario(
+            "external shield values cannot be negative".into(),
+        ));
+    }
+    let calculator = &settings.calculator;
+    if !(1..=15).contains(&calculator.option_count)
+        || calculator.target_condition.min_hp < 0
+        || !(0..=9_000).contains(&calculator.target_condition.min_defense_bp)
+        || !(0..=9_000).contains(&calculator.target_condition.min_magic_resist_bp)
+    {
+        return Err(BattleError::InvalidScenario(
+            "equipment calculator settings are outside BD2DB's current ranges".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn build_settings_modifiers(
+    attack_type: AttackType,
+    settings: &crate::UnitBuildSettings,
+) -> StatModifiers {
+    let mut modifiers = StatModifiers {
+        max_hp_bp: settings.collection.max_hp_bp,
+        attack_bp: settings.collection.attack_bp,
+        magic_bp: settings.collection.magic_bp,
+        crit_rate_bp: settings.collection.crit_rate_bp + settings.external_buffs.crit_rate_bp,
+        crit_damage_bp: settings.external_buffs.crit_damage_bp,
+        property_damage_bp: settings.external_buffs.property_damage_bp
+            + if settings.calculator.world_buff_enabled {
+                5_000
+            } else {
+                0
+            },
+        ..StatModifiers::default()
+    };
+    match attack_type {
+        AttackType::Physical => modifiers.attack_bp += settings.external_buffs.attack_bonus_bp,
+        AttackType::Magical => modifiers.magic_bp += settings.external_buffs.attack_bonus_bp,
+    }
+    modifiers
+}
+
 fn select_variant(
     costume: &CostumeDefinition,
     enhancement: u8,
@@ -3194,11 +3443,33 @@ fn adjusted_sp_cost(base: i32, modifiers: &StatModifiers) -> i32 {
 }
 
 fn effective_modifiers(unit: &UnitState) -> StatModifiers {
-    let mut total = StatModifiers::default();
+    let mut total = unit.passive_modifiers.clone();
     for effect in &unit.effects {
         accumulate_modifiers(&mut total, &effect.spec.modifiers);
     }
     total
+}
+
+fn runtime_passive_modifiers(modifiers: &StatModifiers) -> StatModifiers {
+    let mut runtime = modifiers.clone();
+    // These fields are already folded into UnitState::base_stats by
+    // apply_permanent_modifiers. Keeping them here as well would apply them
+    // twice whenever effective_stats() is evaluated.
+    runtime.max_hp_flat = 0;
+    runtime.max_hp_bp = 0;
+    runtime.attack_flat = 0;
+    runtime.attack_bp = 0;
+    runtime.magic_flat = 0;
+    runtime.magic_bp = 0;
+    runtime.defense_bp = 0;
+    runtime.magic_resist_bp = 0;
+    runtime.crit_rate_bp = 0;
+    runtime.crit_damage_bp = 0;
+    runtime.property_damage_bp = 0;
+    runtime.outgoing_damage_bp = 0;
+    runtime.incoming_damage_bp = 0;
+    runtime.amplification_bp = 0;
+    runtime
 }
 
 fn accumulate_modifiers(total: &mut StatModifiers, value: &StatModifiers) {
@@ -3356,9 +3627,9 @@ fn knockback_delta(direction: crate::KnockbackDirection) -> (i8, i8) {
 mod tests {
     use super::*;
     use crate::{
-        BarrierSpec, CostumeLoadout, CounterSpec, EffectSpec, Element, GridDefinition,
-        MonsterChaserSetup, MonsterDefinition, Offset, PeriodicSpec, SourceRecord, StackRule,
-        UnitSetup,
+        BarrierSpec, CostumeLoadout, CounterSpec, EffectSpec, Element, EquipmentDefinition,
+        EquipmentStat, GridDefinition, MonsterChaserSetup, MonsterDefinition, Offset, PeriodicSpec,
+        SourceRecord, StackRule, UnitBuildSettings, UnitSetup,
     };
 
     fn stats(hp: i64, attack: i64) -> Stats {
@@ -3370,7 +3641,7 @@ mod tests {
             crit_damage_bp: 5_000,
             defense_bp: 0,
             magic_resist_bp: 0,
-            property_damage_bp: 0,
+            property_damage_bp: 5_000,
             outgoing_damage_bp: 0,
             incoming_damage_bp: 0,
             amplification_bp: 0,
@@ -3416,7 +3687,9 @@ mod tests {
                     element,
                     attack_type: AttackType::Physical,
                     target_selector: TargetSelector::Front,
-                    level_100_awakened: stats(1_000, 100),
+                    level_100: stats(1_000, 100),
+                    engraving_modifiers: StatModifiers::default(),
+                    awakening_modifiers: StatModifiers::default(),
                     costume_ids: if id == "hero" {
                         vec!["hero_skill".into()]
                     } else {
@@ -3469,6 +3742,37 @@ mod tests {
                 source: SourceRecord::default(),
             },
         );
+        catalog.equipment.insert(
+            "legendary-test".into(),
+            EquipmentDefinition {
+                id: "legendary-test".into(),
+                names: BTreeMap::new(),
+                kind: EquipmentKind::CraftedLegendary,
+                tier: "UR4".into(),
+                slot: EquipmentSlot::Weapon,
+                owner_character_id: None,
+                modifiers_by_refinement_score: BTreeMap::from([(
+                    18,
+                    StatModifiers {
+                        max_hp_flat: 10,
+                        max_hp_bp: 100,
+                        attack_flat: 1,
+                        attack_bp: 100,
+                        ..StatModifiers::default()
+                    },
+                )]),
+                primary_stat_options: vec![],
+                secondary_stat_options: vec![],
+                primary_modifiers_by_refinement_score: BTreeMap::new(),
+                secondary_modifiers_by_refinement_score: BTreeMap::new(),
+                allowed_substats: vec![EquipmentStat::CritRate],
+                substat_modifiers: BTreeMap::from([(
+                    EquipmentStat::CritRate,
+                    StatModifiers::default(),
+                )]),
+                source: SourceRecord::default(),
+            },
+        );
         Arc::new(catalog)
     }
     fn setup(mode: BattleMode) -> BattleSetup {
@@ -3494,8 +3798,9 @@ mod tests {
                         permanent_potential_enabled: false,
                         costume_link_target: None,
                     }],
+                    build_settings: UnitBuildSettings::unmodified(),
                     stat_overrides: None,
-                    equipment_modifiers: StatModifiers::default(),
+                    equipment: BTreeMap::new(),
                     ai_priority: vec![],
                     party_no: 1,
                     hp_owner: None,
@@ -3508,8 +3813,9 @@ mod tests {
                     side: Side::Enemy,
                     position: Cell { row: 0, depth: 0 },
                     costume_loadout: vec![],
+                    build_settings: UnitBuildSettings::unmodified(),
                     stat_overrides: None,
-                    equipment_modifiers: StatModifiers::default(),
+                    equipment: BTreeMap::new(),
                     ai_priority: vec![],
                     party_no: 1,
                     hp_owner: None,
@@ -3531,7 +3837,7 @@ mod tests {
             formation: BTreeMap::new(),
         };
         engine.step(plan).unwrap();
-        assert_eq!(engine.state.units[&2].hp, 870);
+        assert_eq!(engine.state.units[&2].hp, 850);
         assert_eq!(engine.state.teams[0].sp, 16);
     }
 
@@ -3552,7 +3858,7 @@ mod tests {
             formation: BTreeMap::new(),
         };
         engine.step(plan).unwrap();
-        assert_eq!(engine.state.units[&2].hp, 727); // 130 + floor(130*1.1)
+        assert_eq!(engine.state.units[&2].hp, 685); // 150 + floor(150*1.1)
         assert_eq!(engine.state.teams[0].sp, 13);
     }
 
@@ -3598,8 +3904,9 @@ mod tests {
             side: Side::Player,
             position: Cell { row: 0, depth: 0 },
             costume_loadout: vec![],
+            build_settings: UnitBuildSettings::unmodified(),
             stat_overrides: None,
-            equipment_modifiers: StatModifiers::default(),
+            equipment: BTreeMap::new(),
             ai_priority: vec![],
             party_no: 1,
             hp_owner: None,
@@ -3625,8 +3932,9 @@ mod tests {
             side: Side::Enemy,
             position: Cell { row: 0, depth: 2 },
             costume_loadout: vec![],
+            build_settings: UnitBuildSettings::unmodified(),
             stat_overrides: None,
-            equipment_modifiers: StatModifiers::default(),
+            equipment: BTreeMap::new(),
             ai_priority: vec![],
             party_no: 1,
             hp_owner: None,
@@ -3673,18 +3981,192 @@ mod tests {
         let mut setup = setup(BattleMode::Normal);
         setup.units[0].costume_loadout[0].permanent_potential_enabled = true;
         setup.units[0].costume_loadout[0].costume_link_target = Some("hero_skill".into());
-        setup.units[0].equipment_modifiers = StatModifiers {
-            max_hp_flat: 10,
-            max_hp_bp: 100,
-            attack_flat: 1,
-            attack_bp: 100,
-            ..StatModifiers::default()
-        };
+        setup.units[0].equipment.insert(
+            EquipmentSlot::Weapon,
+            EquipmentLoadout {
+                equipment_id: "legendary-test".into(),
+                refinement_score: 18,
+                primary_stat: None,
+                secondary_stat: None,
+                substats: vec![
+                    EquipmentStat::CritRate,
+                    EquipmentStat::CritRate,
+                    EquipmentStat::CritRate,
+                ],
+            },
+        );
 
         let engine = BattleEngine::new(catalog, setup, 1).unwrap();
         let stats = &engine.state().units[&1].base_stats;
         assert_eq!(stats.max_hp, 1_345);
         assert_eq!(stats.attack, 146);
+    }
+
+    #[test]
+    fn equipment_loadouts_reject_invalid_score_slot_and_substat_count() {
+        let mut configured = setup(BattleMode::Normal);
+        configured.units[0].equipment.insert(
+            EquipmentSlot::Weapon,
+            EquipmentLoadout {
+                equipment_id: "legendary-test".into(),
+                refinement_score: 17,
+                primary_stat: None,
+                secondary_stat: None,
+                substats: vec![EquipmentStat::CritRate; 3],
+            },
+        );
+        assert!(BattleEngine::new(catalog(), configured.clone(), 1).is_err());
+
+        let loadout = configured.units[0]
+            .equipment
+            .remove(&EquipmentSlot::Weapon)
+            .unwrap();
+        configured.units[0].equipment.insert(
+            EquipmentSlot::Armor,
+            EquipmentLoadout {
+                refinement_score: 18,
+                ..loadout
+            },
+        );
+        assert!(BattleEngine::new(catalog(), configured.clone(), 1).is_err());
+
+        let invalid = configured.units[0]
+            .equipment
+            .get_mut(&EquipmentSlot::Armor)
+            .unwrap();
+        invalid.refinement_score = 18;
+        invalid.substats.pop();
+        assert!(BattleEngine::new(catalog(), configured, 1).is_err());
+    }
+
+    #[test]
+    fn bd2db_build_inputs_are_applied_once_and_can_be_disabled() {
+        let mut configured_catalog = catalog();
+        let hero = Arc::make_mut(&mut configured_catalog)
+            .characters
+            .get_mut("hero")
+            .unwrap();
+        hero.engraving_modifiers = StatModifiers {
+            attack_flat: 10,
+            attack_bp: 1_000,
+            ..StatModifiers::default()
+        };
+        hero.awakening_modifiers = StatModifiers {
+            attack_flat: 5,
+            attack_bp: 500,
+            property_damage_bp: 1_000,
+            ..StatModifiers::default()
+        };
+        let mut configured = setup(BattleMode::Normal);
+        configured.units[0].build_settings = UnitBuildSettings::default();
+        configured.units[0]
+            .build_settings
+            .external_buffs
+            .attack_bonus_bp = 1_000;
+        configured.units[0]
+            .build_settings
+            .external_buffs
+            .crit_rate_bp = 250;
+        configured.units[0]
+            .build_settings
+            .external_buffs
+            .crit_damage_bp = 2_000;
+        configured.units[0]
+            .build_settings
+            .external_buffs
+            .property_damage_bp = 500;
+        configured.units[0]
+            .build_settings
+            .calculator
+            .world_buff_enabled = true;
+
+        let engine = BattleEngine::new(configured_catalog.clone(), configured.clone(), 1).unwrap();
+        let effective = &engine.state().units[&1].base_stats;
+        assert_eq!(effective.max_hp, 1_800);
+        assert_eq!(effective.attack, 235);
+        assert_eq!(effective.crit_rate_bp, 5_250);
+        assert_eq!(effective.crit_damage_bp, 7_000);
+        assert_eq!(effective.property_damage_bp, 11_500);
+
+        configured.units[0].build_settings = UnitBuildSettings::unmodified();
+        let unmodified = BattleEngine::new(configured_catalog, configured, 1).unwrap();
+        assert_eq!(unmodified.state().units[&1].base_stats, stats(1_000, 100));
+    }
+
+    #[test]
+    fn bd2db_build_input_ranges_fail_closed() {
+        let mut configured = setup(BattleMode::Normal);
+        configured.units[0].build_settings.collection.attack_bp = 8_001;
+        assert!(BattleEngine::new(catalog(), configured.clone(), 1).is_err());
+
+        configured.units[0].build_settings.collection.attack_bp = 0;
+        configured.units[0]
+            .build_settings
+            .calculator
+            .target_condition
+            .min_defense_bp = 9_001;
+        assert!(BattleEngine::new(catalog(), configured.clone(), 1).is_err());
+
+        configured.units[0]
+            .build_settings
+            .calculator
+            .target_condition
+            .min_defense_bp = 0;
+        configured.units[0]
+            .build_settings
+            .external_buffs
+            .shield_flat = -1;
+        assert!(BattleEngine::new(catalog(), configured, 1).is_err());
+    }
+
+    #[test]
+    fn external_flat_and_percent_shields_initialize_and_deplete_energy_guard() {
+        let mut configured = setup(BattleMode::Normal);
+        configured.units[0]
+            .build_settings
+            .external_buffs
+            .shield_flat = 100;
+        configured.units[0]
+            .build_settings
+            .external_buffs
+            .shield_percent_bp = 1_000;
+        let mut engine = BattleEngine::new(catalog(), configured, 1).unwrap();
+
+        assert_eq!(
+            engine.reference_value(1, 2, StatReference::EnergyGuard),
+            200
+        );
+        engine.apply_raw_damage(2, 1, 150, false, 1);
+        assert_eq!(engine.state.units[&1].hp, 1_000);
+        assert_eq!(engine.state.units[&1].external_energy_guard, 50);
+        engine.apply_raw_damage(2, 1, 100, false, 1);
+        assert_eq!(engine.state.units[&1].hp, 950);
+        assert_eq!(engine.state.units[&1].external_energy_guard, 0);
+    }
+
+    #[test]
+    fn rejected_turn_is_atomic_and_dead_units_cannot_be_placed() {
+        let mut engine = BattleEngine::new(catalog(), setup(BattleMode::Normal), 1).unwrap();
+        let before = engine.state.clone();
+        let invalid_order = TeamTurnPlan {
+            side: Side::Player,
+            order: vec![1, 1],
+            commands: BTreeMap::from([(1, UnitCommand::Wait)]),
+            formation: BTreeMap::from([(1, Cell { row: 2, depth: 3 })]),
+        };
+        assert!(engine.step(invalid_order).is_err());
+        assert_eq!(engine.state, before);
+
+        engine.state.units.get_mut(&1).unwrap().alive = false;
+        let before_dead_move = engine.state.clone();
+        let dead_move = TeamTurnPlan {
+            side: Side::Player,
+            order: vec![1],
+            commands: BTreeMap::from([(1, UnitCommand::Wait)]),
+            formation: BTreeMap::from([(1, Cell { row: 2, depth: 3 })]),
+        };
+        assert!(engine.step(dead_move).is_err());
+        assert_eq!(engine.state, before_dead_move);
     }
 
     #[test]
@@ -3725,8 +4207,9 @@ mod tests {
             side: Side::Player,
             position: Cell { row: 1, depth: 0 },
             costume_loadout: vec![],
+            build_settings: UnitBuildSettings::unmodified(),
             stat_overrides: None,
-            equipment_modifiers: StatModifiers::default(),
+            equipment: BTreeMap::new(),
             ai_priority: vec![],
             party_no: 1,
             hp_owner: None,
@@ -3802,7 +4285,7 @@ mod tests {
                 0,
             )
             .unwrap();
-        assert_eq!(engine.state.units[&2].hp, 870);
+        assert_eq!(engine.state.units[&2].hp, 850);
     }
 
     #[test]
@@ -3834,7 +4317,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(engine.state.units[&2].hp, 870);
+        assert_eq!(engine.state.units[&2].hp, 850);
         assert_eq!(
             engine.state.units[&2]
                 .effects
@@ -3855,8 +4338,9 @@ mod tests {
             side: Side::Player,
             position: Cell { row: 1, depth: 0 },
             costume_loadout: vec![],
+            build_settings: UnitBuildSettings::unmodified(),
             stat_overrides: None,
-            equipment_modifiers: StatModifiers::default(),
+            equipment: BTreeMap::new(),
             ai_priority: vec![],
             party_no: 1,
             hp_owner: None,
@@ -3915,8 +4399,9 @@ mod tests {
             side: Side::Player,
             position: Cell { row: 1, depth: 0 },
             costume_loadout: vec![],
+            build_settings: UnitBuildSettings::unmodified(),
             stat_overrides: None,
-            equipment_modifiers: StatModifiers::default(),
+            equipment: BTreeMap::new(),
             ai_priority: vec![],
             party_no: 1,
             hp_owner: None,
@@ -4002,7 +4487,7 @@ mod tests {
         engine.step(plan).unwrap();
 
         assert_eq!(engine.state.teams[Side::Player.index()].sp, 0);
-        assert_eq!(engine.state.units[&2].hp, 701);
+        assert_eq!(engine.state.units[&2].hp, 655);
     }
 
     #[test]
@@ -4017,7 +4502,9 @@ mod tests {
                 element: Element::Fire,
                 attack_type: AttackType::Physical,
                 target_selector: TargetSelector::Front,
-                level_100_awakened: stats(1, 1),
+                level_100: stats(1, 1),
+                engraving_modifiers: StatModifiers::default(),
+                awakening_modifiers: StatModifiers::default(),
                 costume_ids: vec!["summon_skill".into()],
                 source: SourceRecord::default(),
             },
@@ -4057,7 +4544,7 @@ mod tests {
         });
         engine.apply_effect(1, 2, dot);
         engine.tick_effects(2, DurationClock::GameTurn);
-        assert_eq!(engine.state.units[&2].hp, 870);
+        assert_eq!(engine.state.units[&2].hp, 850);
         assert!(engine.state.units[&2].effects.is_empty());
     }
 
@@ -4087,7 +4574,7 @@ mod tests {
             3
         );
         engine.tick_effects(2, DurationClock::GameTurn);
-        assert_eq!(engine.state.units[&2].hp, 610);
+        assert_eq!(engine.state.units[&2].hp, 550);
     }
 
     #[test]
@@ -4197,8 +4684,9 @@ mod tests {
             side: Side::Enemy,
             position: Cell { row: 1, depth: 0 },
             costume_loadout: vec![],
+            build_settings: UnitBuildSettings::unmodified(),
             stat_overrides: Some(stats(100, 10)),
-            equipment_modifiers: StatModifiers::default(),
+            equipment: BTreeMap::new(),
             ai_priority: vec![],
             party_no: 1,
             hp_owner: Some(2),
@@ -4230,12 +4718,12 @@ mod tests {
         let progress = engine.state.monster_chaser.as_ref().unwrap();
         assert_eq!(
             (progress.current_level, progress.segment_hp_remaining),
-            (2, 70)
+            (2, 50)
         );
-        assert_eq!(progress.battle_hp_remaining, 70);
+        assert_eq!(progress.battle_hp_remaining, 50);
         assert_eq!(engine.state.units[&2].base_stats.max_hp, 200);
-        assert_eq!(engine.state.units[&2].hp, 70);
-        assert_eq!(engine.state.units[&3].hp, 70);
+        assert_eq!(engine.state.units[&2].hp, 50);
+        assert_eq!(engine.state.units[&3].hp, 50);
         let ratios: Vec<_> = engine
             .observation()
             .units
@@ -4246,7 +4734,7 @@ mod tests {
         assert!(
             ratios
                 .into_iter()
-                .all(|ratio| (ratio - 0.35).abs() < f32::EPSILON)
+                .all(|ratio| (ratio - 0.25).abs() < f32::EPSILON)
         );
         engine.apply_raw_damage(1, 3, 1_000, false, 1);
         assert_eq!(

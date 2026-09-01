@@ -9,7 +9,7 @@ mod error;
 mod model;
 mod rng;
 
-pub use engine::{BattleEngine, SimulatorBatch};
+pub use engine::{BattleEngine, SimulatorBatch, resolve_equipment_modifiers};
 pub use error::{BattleError, Result};
 pub use model::*;
 pub use rng::DeterministicRng;
