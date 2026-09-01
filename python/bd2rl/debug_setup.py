@@ -232,6 +232,7 @@ class DebugSetupCatalog:
                 continue
             characters[character_id] = {
                 **self.entities[character_id],
+                "rarity": int(rarity),
                 "costumes": costumes,
             }
         if not characters:

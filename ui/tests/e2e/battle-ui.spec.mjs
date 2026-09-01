@@ -51,10 +51,16 @@ test("renders a single top-down battlefield with two complete 3x4 grids", async 
   await expect(page.locator("#view-toggle")).toHaveCount(0);
 });
 
-test("loads no image elements or external asset requests", async ({ page }) => {
-  await expect(page.locator("img")).toHaveCount(0);
-  const resources = await page.locator("link, script").evaluateAll(nodes => nodes.map(node => node.href || node.src));
+test("loads generated token portraits only from local 64px PNG assets", async ({ page, request }) => {
+  const portraits = page.locator("img.character-portrait");
+  expect(await portraits.count()).toBeGreaterThan(0);
+  await expect.poll(() => portraits.evaluateAll(images => images.every(image => image.complete && image.naturalWidth === 64 && image.naturalHeight === 64))).toBeTruthy();
+  const resources = await page.locator("link, script, img").evaluateAll(nodes => nodes.map(node => node.href || node.src));
   expect(resources.every(url => new URL(url).origin === "http://127.0.0.1:8771")).toBeTruthy();
+  expect(resources.filter(url => url.endsWith(".png")).every(url => new URL(url).pathname.startsWith("/assets/character-icons/64/"))).toBeTruthy();
+  const response = await request.get("/assets/character-icons/64/Lathel.png");
+  expect(response.ok()).toBeTruthy();
+  expect(response.headers()["content-type"]).toBe("image/png");
 });
 
 test("initialization and a full rerender produce no browser errors", async ({ page }) => {
@@ -834,11 +840,55 @@ test("unit addition lets the user search and choose any five-star DB character",
   await page.locator('[data-add-side="PLAYER"]').click();
   await expect(page.getByTestId("character-picker")).toBeVisible();
   await expect(page.locator("#character-options .character-option")).toHaveCount(61);
+  const portraits = page.locator("#character-options img.character-portrait");
+  await expect(portraits).toHaveCount(61);
+  await expect.poll(() => portraits.evaluateAll(images => images.filter(image => image.complete && image.naturalWidth === 64 && image.naturalHeight === 64).length)).toBe(61);
+  const portraitSources = await portraits.evaluateAll(images => images.map(image => new URL(image.src).pathname));
+  expect(new Set(portraitSources).size).toBe(61);
+  expect(portraitSources.every(path => path.startsWith("/assets/character-icons/64/") && path.endsWith(".png"))).toBeTruthy();
   await page.locator("#character-search").fill("アレック");
   await expect(page.locator("#character-options .character-option")).toHaveCount(1);
   await page.getByTestId("character-option-Alec").click();
   await expect(page.getByTestId("character-picker")).not.toBeVisible();
   await expect(page.locator("#player-roster")).toContainText("アレック");
+});
+
+test("all five elements use distinct colors on character cards and portraits", async ({ page }) => {
+  await page.locator("#open-formation").click();
+  await page.locator("#player-roster .remove-unit").first().click();
+  await page.locator('[data-add-side="PLAYER"]').click();
+  const colors = await page.locator("#character-options .character-option").evaluateAll(cards => {
+    const result = {};
+    for (const card of cards) {
+      for (const element of ["fire", "water", "wind", "light", "dark"]) {
+        if (card.classList.contains(element) && !result[element]) {
+          const emblem = card.querySelector(".token-emblem");
+          result[element] = {
+            card: getComputedStyle(card).borderInlineStartColor,
+            portrait: getComputedStyle(emblem).borderColor,
+            variable: getComputedStyle(card).getPropertyValue("--element-color").trim(),
+          };
+        }
+      }
+    }
+    return result;
+  });
+  expect(Object.keys(colors).sort()).toEqual(["dark", "fire", "light", "water", "wind"]);
+  expect(new Set(Object.values(colors).map(value => value.variable)).size).toBe(5);
+  for (const value of Object.values(colors)) {
+    expect(value.card).toBe(value.portrait);
+  }
+});
+
+test("portrait identity follows a token through selection and drag placement", async ({ page }) => {
+  const token = page.getByTestId("player-token-1");
+  const source = await token.locator("img.character-portrait").getAttribute("src");
+  const characterId = await token.locator(".token-emblem").getAttribute("data-character-id");
+  expect(source).toBe(`/assets/character-icons/64/${characterId}.png`);
+  await token.click();
+  await expect(page.locator("#selected-emblem img.character-portrait")).toHaveAttribute("src", source);
+  await token.dragTo(page.getByTestId("player-cell-0-3"));
+  await expect(page.getByTestId("player-cell-0-3").locator("img.character-portrait")).toHaveAttribute("src", source);
 });
 
 test("Mirror War locks runtime formation while retaining manual commands", async ({ page, request }) => {

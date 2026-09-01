@@ -11,6 +11,7 @@
   "scripts": {
     "sync": "node sync-bd2db.mjs",
     "validate:equipment": "node validate-bd2db-equipment.mjs",
+    "validate:icons": "node validate-character-icons.mjs",
     "test:ui": "playwright test -c playwright.config.mjs"
   },
   "devDependencies": {

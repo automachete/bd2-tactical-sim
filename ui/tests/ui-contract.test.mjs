@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -13,8 +13,16 @@ for (const [name, content] of [["HTML", html], ["CSS", css], ["JavaScript", app]
   test(`${name} has no external HTTP asset reference`, () => assert.doesNotMatch(content, /https?:\/\//i));
 }
 
-test("HTML contains no image elements", () => assert.doesNotMatch(html, /<img\b/i));
-test("JavaScript never creates image elements", () => assert.doesNotMatch(app, /createElement\(["']img["']\)/i));
+test("JavaScript renders only repository-local generated character portraits", () => {
+  assert.match(app, /\/assets\/character-icons\/64\/\$\{encodeURIComponent\(character\.id\)\}\.png/);
+  assert.match(app, /class="character-portrait"/);
+  assert.doesNotMatch(app, /image-bd2db|browndust2|https?:\/\//i);
+});
+test("the runtime portrait bundle contains all 61 five-star characters", () => {
+  const names = readdirSync(`${root}/assets/character-icons/64`).filter(name => name.endsWith(".png"));
+  assert.equal(names.length, 61);
+  assert.equal(new Set(names).size, 61);
+});
 test("CSS has no raster or remote URL resources", () => assert.doesNotMatch(css, /url\s*\(/i));
 test("CSS contains no perspective transform", () => assert.doesNotMatch(css, /perspective|rotateX|rotateY/i));
 test("HTML has no view-switch control", () => assert.doesNotMatch(html, /view-toggle|ビュー切替/));
@@ -85,10 +93,16 @@ test("UI copy is managed through the Japanese i18n resource", () => {
   assert.match(i18n, /selector\.NEXT_ALLY_IN_ORDER/);
   assert.doesNotMatch(app, /[\u3040-\u30ff\u3400-\u9fff]/);
 });
-test("visual tokens use a Fluent-style neutral surface and one blue accent", () => {
+test("visual tokens use Fluent surfaces plus five distinct element colors", () => {
   assert.match(css, /Fluent 2 component system/);
   assert.match(css, /--accent:\s*#60cdff/);
   assert.match(css, /--panel:\s*#202020/);
+  for (const element of ["fire", "water", "wind", "light", "dark"]) {
+    assert.match(css, new RegExp(`\\.${element} \\{ --element-color:`));
+  }
+  const elementColors = [...css.matchAll(/--element-color:\s*(#[0-9a-f]{6})/gi)].map(match => match[1].toLowerCase());
+  assert.equal(new Set(elementColors.slice(0, 5)).size, 5);
+  assert.match(css, /\.character-portrait[\s\S]+object-fit:\s*contain/);
   assert.doesNotMatch(css, /gradient|Georgia|--gold/);
 });
 test("SP reservation is checked before changing command state", () => assert.match(app, /reason === "INSUFFICIENT_SP"/));

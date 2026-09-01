@@ -15,6 +15,13 @@
   font-family: "Segoe UI Variable", "Noto Sans JP", "Yu Gothic UI", sans-serif;
 }
 
+.fire { --element-color: #ff625e; --element-surface: #4b2424; }
+.water { --element-color: #55aaff; --element-surface: #203a52; }
+.wind { --element-color: #59ca78; --element-surface: #203f2a; }
+.light { --element-color: #f2d45c; --element-surface: #49401f; }
+.dark { --element-color: #b58af4; --element-surface: #382b4d; }
+.neutral, .none { --element-color: #9aa0a6; --element-surface: #333333; }
+
 * { box-sizing: border-box; }
 html, body { width: 100%; min-width: 1024px; height: 100%; margin: 0; overflow: hidden; background: #0f0f0f; color: var(--ink); }
 button, input, select, textarea { font: inherit; }
@@ -40,11 +47,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .battle-header { justify-content: space-between; gap: 18px; padding: 10px 18px; border-bottom: 1px solid var(--line); box-shadow: 0 12px 30px #0007; }
 .selected-summary { display: grid; grid-template-columns: 76px minmax(230px, 1fr) auto 250px 108px; align-items: center; gap: 12px; min-width: 0; flex: 1; max-width: 1020px; }
 .unit-emblem { display: grid; place-items: center; width: 68px; height: 68px; border-radius: 8px; border: 1px solid #ffffff24; background: #3a3a3a; box-shadow: none; color: white; font-size: 25px; font-weight: 900; letter-spacing: -.08em; }
-.unit-emblem.fire { background: #8e3a31; }
-.unit-emblem.water { background: #24577a; }
-.unit-emblem.wind { background: #32613b; }
-.unit-emblem.light { background: #766820; }
-.unit-emblem.dark { background: #51406e; }
+.unit-emblem.fire { background: var(--element-surface); }
+.unit-emblem.water { background: var(--element-surface); }
+.unit-emblem.wind { background: var(--element-surface); }
+.unit-emblem.light { background: var(--element-surface); }
+.unit-emblem.dark { background: var(--element-surface); }
 .selected-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .selected-copy strong { overflow: hidden; font-size: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .selected-copy > span { overflow: hidden; color: #d2d9d6; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -400,11 +407,11 @@ button { border-radius: 6px; }
 .topdown-stage { background: #181818; border-color: #ffffff12; border-radius: 10px; }
 .turn-banner, .interaction-message { background: #181818; border-color: #ffffff12; }
 .unit-emblem, .token-emblem { background: #3a3a3a; border-color: #ffffff24; border-radius: 8px; box-shadow: none; }
-.unit-emblem.fire { background: #8e3a31; }
-.unit-emblem.water { background: #24577a; }
-.unit-emblem.wind { background: #32613b; }
-.unit-emblem.light { background: #766820; }
-.unit-emblem.dark { background: #51406e; }
+.unit-emblem.fire { background: var(--element-surface); }
+.unit-emblem.water { background: var(--element-surface); }
+.unit-emblem.wind { background: var(--element-surface); }
+.unit-emblem.light { background: var(--element-surface); }
+.unit-emblem.dark { background: var(--element-surface); }
 .control-button, .square-control, .hud-button, .secondary-button { background: #2b2b2b; border-color: #ffffff14; border-radius: 6px; }
 .control-button[aria-pressed="true"], .hud-button[aria-pressed="true"] { background: #0f6cbd; border-color: #60cdff; color: white; }
 .order-card, .enemy-card, .roster-chip, .character-option, .menu-list button { background: #292929; border-color: #ffffff12; border-radius: 8px; }
@@ -567,3 +574,25 @@ button { border-radius: 6px; }
   .sp-pips i { width: 8px; height: 8px; }
   .battle-button { grid-template-columns: 44px 1fr; padding-inline: 8px; }
 }
+
+/* Generated token portraits use transparent art over the five BD2 element frames. */
+.unit-emblem, .token-emblem, .small-emblem {
+  position: relative;
+  overflow: hidden;
+  background: var(--element-surface, #333333);
+  border: 2px solid var(--element-color, #9aa0a6);
+  color: white;
+  isolation: isolate;
+}
+.character-portrait {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+.battle-token, .formation-token, .order-card, .enemy-card, .roster-chip, .character-option {
+  border-inline-start: 3px solid var(--element-color, #9aa0a6);
+}
+.character-option small { color: var(--element-color, var(--muted)); }

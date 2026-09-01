@@ -71,9 +71,12 @@ def test_generated_catalog_and_database_have_every_variant() -> None:
         for operation in max_variant("Mamonir_2")["operations"]
     )
     with sqlite3.connect(DATABASE) as connection:
-        assert connection.execute("SELECT COUNT(*) FROM skill_variants").fetchone()[0] == len(
-            variants
-        )
+        active_ruleset = connection.execute(
+            "SELECT ruleset_id FROM catalog_versions WHERE active = 1"
+        ).fetchone()[0]
+        assert connection.execute(
+            "SELECT COUNT(*) FROM skill_variants WHERE ruleset_id = ?", (active_ruleset,)
+        ).fetchone()[0] == len(variants)
 
 
 def test_every_source_semantic_tag_has_typed_catalog_evidence() -> None:
@@ -86,7 +89,7 @@ def test_every_source_semantic_tag_has_typed_catalog_evidence() -> None:
     report = json.loads(result.stdout)
     assert report == {
         "catalog": str(CATALOG),
-        "ruleset": "bd2-current-2026-09-01",
+        "ruleset": "bd2-current-2026-09-02",
         "characters": 66,
         "costumes": 164,
         "variants": 12_509,

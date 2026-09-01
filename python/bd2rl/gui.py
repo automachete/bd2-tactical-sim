@@ -588,6 +588,7 @@ def handler_factory(session: GuiSession, ui_root: Path) -> type[BaseHTTPRequestH
                 ".css": "text/css; charset=utf-8",
                 ".js": "text/javascript; charset=utf-8",
                 ".mjs": "text/javascript; charset=utf-8",
+                ".png": "image/png",
             }.get(path.suffix, "application/octet-stream")
             body = path.read_bytes()
             self.send_response(HTTPStatus.OK)

@@ -402,7 +402,7 @@ function integer(value) {
 }
 
 function element(value) {
-  return ({ "火": "FIRE", "水": "WATER", "風": "WIND", "光": "LIGHT", "闇": "DARK" })[value] ?? "NONE";
+  return ({ "火": "FIRE", "水": "WATER", "風": "WIND", "光": "LIGHT", "闇": "DARK", "暗": "DARK" })[value] ?? "NONE";
 }
 
 function attackType(value) {

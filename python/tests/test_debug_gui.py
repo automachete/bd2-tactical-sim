@@ -49,9 +49,10 @@ def maximum_loadout(catalog: DebugSetupCatalog, character_id: str) -> list[dict[
 def test_debug_catalog_builds_all_three_modes_from_external_data() -> None:
     catalog = DebugSetupCatalog(DATABASE, SCENARIOS)
     public = catalog.public_payload()
-    assert public["ruleset_id"] == "bd2-current-2026-09-01"
+    assert public["ruleset_id"] == "bd2-current-2026-09-02"
     assert len(public["characters"]) == 61
     first = public["characters"][0]
+    assert {character["rarity"] for character in public["characters"]} == {5}
     assert "portrait_url" not in first
     costume = first["costumes"][0]
     assert "portrait_url" not in costume
@@ -1012,6 +1013,11 @@ def test_gui_http_catalog_start_and_turn_round_trip() -> None:
 
         with urllib.request.urlopen(base + "/battle-ui-model.mjs", timeout=10) as response:
             assert response.headers.get_content_type() == "text/javascript"
+        with urllib.request.urlopen(
+            base + "/assets/character-icons/64/Lathel.png", timeout=10
+        ) as response:
+            assert response.headers.get_content_type() == "image/png"
+            assert response.read(8) == b"\x89PNG\r\n\x1a\n"
     finally:
         server.shutdown()
         server.server_close()

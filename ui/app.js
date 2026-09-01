@@ -83,7 +83,15 @@ const displayCharacter = id => entityById(id)?.name || id;
 const formatNumber = value => Number(value || 0).toLocaleString("ja-JP");
 const elementClass = element => String(element || "neutral").toLowerCase();
 const initials = character => String(character?.name || character?.id || t("unit.fiend")).trim().slice(0, 2).toUpperCase();
-const emblemMarkup = (character, className = "token-emblem") => `<span class="${className} ${elementClass(character?.element)}" aria-hidden="true">${escapeHtml(initials(character))}</span>`;
+const portraitPath = character => character?.rarity === 5
+  ? `/assets/character-icons/64/${encodeURIComponent(character.id)}.png`
+  : null;
+const emblemContent = character => {
+  const source = portraitPath(character);
+  if (!source) return escapeHtml(initials(character));
+  return `<img class="character-portrait" src="${escapeHtml(source)}" alt="" width="64" height="64" decoding="async" draggable="false">`;
+};
+const emblemMarkup = (character, className = "token-emblem") => `<span class="${className} ${elementClass(character?.element)}" data-character-id="${escapeHtml(character?.id || "")}" aria-hidden="true">${emblemContent(character)}</span>`;
 
 const announce = message => {
   $("#drag-announcer").textContent = "";
@@ -271,7 +279,7 @@ const renderFormationBoard = (selector, sideKey) => {
       if (entry) {
         const character = characterById(entry.unit.character_id);
         const token = document.createElement("span");
-        token.className = `formation-token ${editorFocus.sideKey === sideKey && editorFocus.index === entry.index ? "selected" : ""}`;
+        token.className = `formation-token ${elementClass(character?.element)} ${editorFocus.sideKey === sideKey && editorFocus.index === entry.index ? "selected" : ""}`;
         token.tabIndex = 0;
         token.setAttribute("role", "button");
         token.setAttribute("aria-label", t("formation.moveAria", { name: character?.name || entry.unit.character_id }));
@@ -330,7 +338,7 @@ const renderFormationRoster = (selector, sideKey) => {
     chip.setAttribute("role", "button");
     chip.setAttribute("aria-grabbed", "false");
     chip.setAttribute("aria-label", t("formation.rosterAria", { name: character?.name || unit.character_id }));
-    chip.className = `roster-chip ${editorFocus.sideKey === sideKey && editorFocus.index === index ? "selected" : ""}`;
+    chip.className = `roster-chip ${elementClass(character?.element)} ${editorFocus.sideKey === sideKey && editorFocus.index === index ? "selected" : ""}`;
     chip.dataset.testid = `${sideKey}-roster-${index}`;
     chip.innerHTML = `${emblemMarkup(character)}<b>${escapeHtml(character?.name || unit.character_id)}</b><button type="button" class="roster-advanced" aria-label="${escapeHtml(t("formation.detailsAria", { name: character?.name || unit.character_id }))}">⚙</button><button type="button" class="remove-unit" aria-label="${escapeHtml(t("formation.removeAria", { name: character?.name || unit.character_id }))}">×</button>`;
     wireEditorDrag(chip, sideKey, index);
@@ -416,7 +424,7 @@ const renderCharacterPicker = () => {
       const button = document.createElement("button");
       const disabled = used.has(character.id);
       button.type = "button";
-      button.className = "character-option";
+      button.className = `character-option ${elementClass(character.element)}`;
       button.disabled = disabled;
       button.dataset.characterId = character.id;
       button.dataset.testid = `character-option-${character.id}`;
@@ -958,7 +966,7 @@ const renderOrder = () => {
     const card = document.createElement("button");
     card.type = "button";
     card.draggable = true;
-    card.className = `order-card ${selectedUnitId === unit.id ? "selected" : ""}`;
+    card.className = `order-card ${elementClass(character?.element)} ${selectedUnitId === unit.id ? "selected" : ""}`;
     card.dataset.unitId = String(unit.id);
     card.dataset.testid = `order-unit-${unit.id}`;
     card.setAttribute("aria-label", t("order.cardAria", { order: index + 1, name: character?.name || unit.character_id, action: meta.name }));
@@ -1066,7 +1074,7 @@ const renderEnemyList = () => {
     const hp = Math.max(0, 100 * Number(unit.hp) / Math.max(1, Number(unit.base_stats.max_hp)));
     const card = document.createElement("button");
     card.type = "button";
-    card.className = "enemy-card";
+    card.className = `enemy-card ${elementClass(character?.element)}`;
     card.dataset.unitId = String(unit.id);
     card.dataset.testid = `enemy-unit-${unit.id}`;
     card.innerHTML = `${emblemMarkup(character)}<span><b>${escapeHtml(character?.name || unit.character_id)}</b><small>HP ${formatNumber(unit.hp)} · ${unit.position.row + 1}-${unit.position.depth + 1}</small><span class="hp-track"><i style="width:${hp}%"></i></span></span>`;
@@ -1290,7 +1298,7 @@ const renderField = (selector, side) => {
         const hp = Math.max(0, 100 * Number(unit.hp) / Math.max(1, Number(unit.base_stats.max_hp)));
         const token = document.createElement("button");
         token.type = "button";
-        token.className = `battle-token ${side === "ENEMY" ? "enemy-token" : ""} ${selectedUnitId === unit.id ? "selected" : ""} ${unit.alive ? "" : "dead"}`;
+        token.className = `battle-token ${elementClass(character?.element)} ${side === "ENEMY" ? "enemy-token" : ""} ${selectedUnitId === unit.id ? "selected" : ""} ${unit.alive ? "" : "dead"}`;
         token.dataset.unitId = String(unit.id);
         token.dataset.testid = `${side.toLowerCase()}-token-${unit.id}`;
         token.setAttribute("aria-label", t(side === "PLAYER" ? "formation.playerTokenAria" : "formation.enemyTokenAria", { name: character?.name || unit.character_id, hp: unit.hp }));
@@ -1418,7 +1426,8 @@ const renderSelectedSkill = (unit, command) => {
   const meta = commandMeta(unit, command);
   const costume = command?.type === "USE_COSTUME" ? costumeById(command.costume_id) : null;
   const loadout = command?.type === "USE_COSTUME" ? unit.costume_loadout.find(item => item.costume_id === command.costume_id) : null;
-  $("#selected-emblem").textContent = initials(character);
+  $("#selected-emblem").innerHTML = emblemContent(character);
+  $("#selected-emblem").dataset.characterId = character?.id || "";
   $("#selected-emblem").className = `unit-emblem ${elementClass(character?.element)}`;
   $("#selected-name").textContent = character?.name || unit.character_id;
   $("#selected-skill-name").textContent = meta.name;
@@ -1694,7 +1703,7 @@ const insertPlaybackToken = (unitId, data, { fullHp = true, position = null } = 
   const token = document.createElement("button");
   token.type = "button";
   token.disabled = true;
-  token.className = `battle-token playback-created ${unit.side === "ENEMY" ? "enemy-token" : ""}`;
+  token.className = `battle-token playback-created ${elementClass(character?.element)} ${unit.side === "ENEMY" ? "enemy-token" : ""}`;
   token.dataset.unitId = String(unit.id);
   token.dataset.testid = `${unit.side.toLowerCase()}-token-${unit.id}`;
   token.innerHTML = `${emblemMarkup(character)}<span class="token-copy"><b>${escapeHtml(character?.name || unit.character_id)}</b><small>HP ${formatNumber(hp)}</small></span><span class="mini-hp"><i style="width:100%"></i></span>`;
