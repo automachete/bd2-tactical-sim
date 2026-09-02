@@ -248,8 +248,8 @@ fn count(connection: &Connection, table: &str, ruleset_id: &str) -> Result<u64> 
 mod tests {
     use super::*;
     use bd2_core::{
-        AttackType, CharacterDefinition, CostumeDefinition, Element, Offset, SkillVariant,
-        SourceRecord, StatModifiers, Stats, TargetSelector,
+        AttackType, CharacterDefinition, CostumeDefinition, Element, KnockbackDirection, Offset,
+        SkillVariant, SourceRecord, StatModifiers, Stats, TargetSelector,
     };
     use std::collections::BTreeMap;
 
@@ -261,6 +261,7 @@ mod tests {
             element: Element::Fire,
             attack_type: AttackType::Physical,
             target_selector: TargetSelector::Front,
+            knockback_direction: KnockbackDirection::DownBack,
             level_100: Stats {
                 max_hp: 1,
                 attack: 1,

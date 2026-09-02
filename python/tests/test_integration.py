@@ -46,6 +46,27 @@ def test_generated_catalog_and_database_have_every_variant() -> None:
     assert len(player_costumes) == 155
     assert all(costume["permanent_potential_modifiers"] for costume in player_costumes)
     assert all(costume["bonding_modifiers"] for costume in player_costumes)
+    all_range_costumes = {
+        costume["id"]
+        for costume in player_costumes
+        if costume["source"]["raw_payload"]["range"].endswith("_all")
+    }
+    assert all_range_costumes == {
+        "Lathel_3",
+        "Rou_2",
+        "Teresse_3",
+        "Helena_1",
+        "Helena_2",
+        "Eleaneer_3",
+        "Liberta_1",
+        "Liberta_2",
+        "Granadair_1",
+    }
+    assert all(
+        variant["target_all"]
+        for costume_id in all_range_costumes
+        for variant in catalog["costumes"][costume_id]["variants"]
+    )
 
     def max_variant(costume_id: str) -> dict[str, object]:
         return max(
@@ -62,6 +83,127 @@ def test_generated_catalog_and_database_have_every_variant() -> None:
         "REMOVE_EFFECTS_BY_TAG",
     ]
     assert max_variant("Helena_3")["selector"] == "NEXT_ALLY_IN_ORDER"
+    assert (
+        sum(
+            character["target_selector"] == "SKIP"
+            for character in catalog["characters"].values()
+            if ":" not in character["id"]
+        )
+        == 24
+    )
+    blade = max_variant("Blade_1")
+    blade_damage = next(
+        operation for operation in blade["operations"] if operation["op"] == "DEAL_DAMAGE"
+    )
+    blade_counter = next(
+        operation["effect"]["counter"]
+        for operation in blade["operations"]
+        if operation.get("effect", {}).get("counter")
+    )
+    assert blade_damage["coefficient_bp"] == 70_000
+    assert blade_counter["coefficient_bp"] == 20_000
+    for counter_only in ("Sylvia_1", "Lecliss_2"):
+        assert all(
+            operation["op"] != "DEAL_DAMAGE"
+            for operation in max_variant(counter_only)["operations"]
+        )
+    elise = max_variant("Elise_3")
+    assert any(
+        operation.get("effect", {}).get("modifiers", {}).get("outgoing_damage_bp") == 15_000
+        for operation in elise["operations"]
+    )
+    rou_evasion = next(
+        operation["effect"]
+        for operation in max_variant("Rou_1")["operations"]
+        if "EVASION" in operation.get("effect", {}).get("tags", [])
+    )
+    assert rou_evasion["modifiers"]["evasion_bp"] == 7_500
+    assert rou_evasion["evasion_decay_bp"] == 500
+    yuri_stacked = next(
+        variant
+        for variant in catalog["costumes"]["Yuri_2"]["variants"]
+        if variant["enhancement"] == 5
+        and variant["burst_level"] == 3
+        and variant["potential_mask"] == 0
+    )
+    assert (
+        sum(
+            operation.get("effect", {}).get("effect_id") == "Yuri_2:STAT:0"
+            for operation in yuri_stacked["operations"]
+        )
+        == 2
+    )
+    for multi_stat_costume in (
+        "Lathel_3",
+        "Gray_4",
+        "Rou_2",
+        "Elise_1",
+        "Helena_2",
+        "Michaela_3",
+        "Liberta_2",
+        "Granadair_1",
+    ):
+        effect_ids = [
+            operation["effect"]["effect_id"]
+            for operation in max_variant(multi_stat_costume)["operations"]
+            if operation["op"] == "APPLY_EFFECT" and ":STAT:" in operation["effect"]["effect_id"]
+        ]
+        assert len(effect_ids) >= 2
+        assert len(effect_ids) == len(set(effect_ids))
+    assert [operation["op"] for operation in max_variant("Gray_2")["operations"][:2]] == [
+        "DEAL_DAMAGE",
+        "APPLY_EFFECT",
+    ]
+    assert [operation["op"] for operation in max_variant("Venaka_1")["operations"][:2]] == [
+        "APPLY_EFFECT",
+        "DEAL_DAMAGE",
+    ]
+    rafina_operations = max_variant("Rafina_1")["operations"]
+    rafina_order = [
+        next(
+            index
+            for index, operation in enumerate(rafina_operations)
+            if operation["op"] == "REMOVE_EFFECTS_BY_TAG" and operation["tag"] == tag
+        )
+        for tag in ("BARRIER", "ENERGY_GUARD")
+    ]
+    rafina_order.append(
+        next(
+            index
+            for index, operation in enumerate(rafina_operations)
+            if operation["op"] == "DEAL_DAMAGE"
+        )
+    )
+    assert rafina_order == sorted(rafina_order)
+    assert [operation["op"] for operation in max_variant("Scheherazade_1")["operations"][:2]] == [
+        "DEAL_DAMAGE",
+        "REMOVE_EFFECTS",
+    ]
+    luvencia = max_variant("Luvencia_3")
+    assert not any(
+        operation.get("effect", {}).get("effect_id") == "Luvencia_3:STAT:0"
+        for operation in luvencia["operations"]
+    )
+    assert any(
+        operation.get("effect", {}).get("on_chain_dealt") for operation in luvencia["operations"]
+    )
+    for costume_id, potential_index, expected_cooldown in (
+        ("Scheherazade_4", 2, 3),
+        ("Anastasia_1", 1, 3),
+        ("Eleaneer_3", 1, 13),
+        ("Yuri_1", 0, 3),
+        ("Olivier_4", 2, 13),
+    ):
+        costume = catalog["costumes"][costume_id]
+        enhanced = max(variant["enhancement"] for variant in costume["variants"])
+        unlocked = next(
+            variant
+            for variant in costume["variants"]
+            if variant["enhancement"] == enhanced
+            and variant["burst_level"] == 0
+            and variant["potential_mask"] == (1 << potential_index)
+        )
+        assert unlocked["cooldown"] == expected_cooldown
     assert any(
         operation.get("effect", {}).get("on_hit_received_operations")
         for operation in max_variant("Aquila_1")["operations"]
@@ -70,6 +212,18 @@ def test_generated_catalog_and_database_have_every_variant() -> None:
         operation.get("effect", {}).get("on_hit_received_operations")
         for operation in max_variant("Mamonir_2")["operations"]
     )
+    refithea_guard = next(
+        operation["effect"]["barrier"]
+        for operation in max_variant("Refithea_2")["operations"]
+        if operation.get("effect", {}).get("barrier")
+    )
+    rou_guard = next(
+        operation["effect"]["barrier"]
+        for operation in max_variant("Rou_2")["operations"]
+        if operation.get("effect", {}).get("barrier")
+    )
+    assert refithea_guard["reference"] == "TARGET_MAX_HP"
+    assert rou_guard["reference"] == "MAX_HP"
     with sqlite3.connect(DATABASE) as connection:
         active_ruleset = connection.execute(
             "SELECT ruleset_id FROM catalog_versions WHERE active = 1"
@@ -87,14 +241,13 @@ def test_every_source_semantic_tag_has_typed_catalog_evidence() -> None:
         text=True,
     )
     report = json.loads(result.stdout)
-    assert report == {
-        "catalog": str(CATALOG),
-        "ruleset": "bd2-current-2026-09-02",
-        "characters": 66,
-        "costumes": 164,
-        "variants": 12_509,
-        "status": "ok",
-    }
+    assert report["catalog"] == str(CATALOG)
+    assert report["ruleset"].startswith("bd2-current-")
+    assert report["characters"] == 66
+    assert report["costumes"] == 164
+    assert report["variants"] == 12_509
+    assert report["lineageChecks"] >= 40_000
+    assert report["status"] == "ok"
 
 
 def test_current_monster_ai_conditional_and_two_party_handoff() -> None:

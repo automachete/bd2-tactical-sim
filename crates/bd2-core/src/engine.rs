@@ -711,6 +711,7 @@ impl BattleEngine {
             }
             UnitCommand::Knockback => {
                 let selector = self.character_selector(actor_id)?;
+                let direction = self.character_knockback_direction(actor_id)?;
                 let target = self.select_main_target(actor_id, selector, None)?;
                 self.emit(BattleEventKind::TargetLocked {
                     actor_id,
@@ -718,7 +719,7 @@ impl BattleEngine {
                 });
                 self.apply_raw_damage(actor_id, target, 1, false, 1);
                 if self.state.units.get(&target).is_some_and(|unit| unit.alive) {
-                    self.knockback(target, crate::KnockbackDirection::Back, 1, 2_500)?;
+                    self.knockback(target, direction, 1, 2_500)?;
                 }
                 self.change_sp(self.state.units[&actor_id].side, 1, "KNOCKBACK");
                 Ok(())
@@ -1364,6 +1365,7 @@ impl BattleEngine {
                         target_id,
                         draw_id,
                     });
+                    self.decay_evasion_effects(target_id);
                     self.consume_effect_charge(target_id, "EVASION");
                     continue;
                 }
@@ -2059,6 +2061,22 @@ impl BattleEngine {
         }
     }
 
+    fn decay_evasion_effects(&mut self, target_id: UnitId) {
+        let Some(unit) = self.state.units.get_mut(&target_id) else {
+            return;
+        };
+        for effect in &mut unit.effects {
+            if effect.spec.tags.contains("EVASION") && effect.spec.evasion_decay_bp > 0 {
+                effect.spec.modifiers.evasion_bp = effect
+                    .spec
+                    .modifiers
+                    .evasion_bp
+                    .saturating_sub(effect.spec.evasion_decay_bp)
+                    .max(0);
+            }
+        }
+    }
+
     fn condition_matches(
         &self,
         actor_id: UnitId,
@@ -2455,6 +2473,18 @@ impl BattleEngine {
             .characters
             .get(&unit.character_id)
             .map(|character| character.attack_type)
+            .ok_or_else(|| BattleError::MissingCatalogEntry {
+                kind: "character",
+                id: unit.character_id.clone(),
+            })
+    }
+
+    fn character_knockback_direction(&self, unit_id: UnitId) -> Result<crate::KnockbackDirection> {
+        let unit = &self.state.units[&unit_id];
+        self.catalog
+            .characters
+            .get(&unit.character_id)
+            .map(|character| character.knockback_direction)
             .ok_or_else(|| BattleError::MissingCatalogEntry {
                 kind: "character",
                 id: unit.character_id.clone(),
@@ -3662,6 +3692,7 @@ mod tests {
             barrier: None,
             periodic: None,
             charges: None,
+            evasion_decay_bp: 0,
             counter: None,
             revive_hp_bp: None,
             max_stacks: None,
@@ -3689,6 +3720,7 @@ mod tests {
                     element,
                     attack_type: AttackType::Physical,
                     target_selector: TargetSelector::Front,
+                    knockback_direction: crate::KnockbackDirection::Back,
                     level_100: stats(1_000, 100),
                     engraving_modifiers: StatModifiers::default(),
                     awakening_modifiers: StatModifiers::default(),
@@ -3846,6 +3878,30 @@ mod tests {
     }
 
     #[test]
+    fn normal_attack_uses_the_character_skip_selector() {
+        let mut owned = (*catalog()).clone();
+        owned.characters.get_mut("hero").unwrap().target_selector = TargetSelector::Skip;
+        let mut battle = setup(BattleMode::Normal);
+        let mut skipped_target = battle.units[1].clone();
+        skipped_target.unit_id = 3;
+        skipped_target.position.depth = 1;
+        battle.units.push(skipped_target);
+        let mut engine = BattleEngine::new(Arc::new(owned), battle, 1).unwrap();
+
+        engine
+            .step(TeamTurnPlan {
+                side: Side::Player,
+                order: vec![1],
+                commands: BTreeMap::from([(1, UnitCommand::NormalAttack)]),
+                formation: BTreeMap::new(),
+            })
+            .unwrap();
+
+        assert_eq!(engine.state.units[&2].hp, 1_000);
+        assert_eq!(engine.state.units[&3].hp, 850);
+    }
+
+    #[test]
     fn multi_hit_uses_pre_hit_chain_and_floors_each_hit() {
         let mut engine = BattleEngine::new(catalog(), setup(BattleMode::Normal), 1).unwrap();
         let plan = TeamTurnPlan {
@@ -3961,6 +4017,28 @@ mod tests {
                 amount: 500
             }
         )));
+    }
+
+    #[test]
+    fn built_in_knockback_uses_the_actors_character_direction() {
+        let mut owned = (*catalog()).clone();
+        owned
+            .characters
+            .get_mut("hero")
+            .unwrap()
+            .knockback_direction = crate::KnockbackDirection::DownBack;
+        let mut engine = BattleEngine::new(Arc::new(owned), setup(BattleMode::Normal), 1).unwrap();
+
+        engine
+            .step(TeamTurnPlan {
+                side: Side::Player,
+                order: vec![1],
+                commands: BTreeMap::from([(1, UnitCommand::Knockback)]),
+                formation: BTreeMap::new(),
+            })
+            .unwrap();
+
+        assert_eq!(engine.state.units[&2].position, Cell { row: 1, depth: 1 });
     }
 
     #[test]
@@ -4293,6 +4371,34 @@ mod tests {
     }
 
     #[test]
+    fn successful_evasion_reduces_the_next_hit_probability_from_source_data() {
+        let mut engine = BattleEngine::new(catalog(), setup(BattleMode::Normal), 1).unwrap();
+        let mut evasion = effect_spec("decaying-evade");
+        evasion.modifiers.evasion_bp = 10_000;
+        evasion.evasion_decay_bp = 10_000;
+        evasion.tags.insert("EVASION".into());
+        engine.apply_effect(2, 2, evasion);
+
+        engine
+            .deal_damage(
+                1,
+                2,
+                DamageKind::Physical,
+                10_000,
+                None,
+                false,
+                true,
+                2,
+                1,
+                0,
+            )
+            .unwrap();
+
+        assert_eq!(engine.state.units[&2].hp, 850);
+        assert_eq!(effective_modifiers(&engine.state.units[&2]).evasion_bp, 0);
+    }
+
+    #[test]
     fn mark_prevents_evasion_without_consuming_evasion_charge() {
         let mut engine = BattleEngine::new(catalog(), setup(BattleMode::Normal), 1).unwrap();
         let mut evasion = effect_spec("evade");
@@ -4506,6 +4612,7 @@ mod tests {
                 element: Element::Fire,
                 attack_type: AttackType::Physical,
                 target_selector: TargetSelector::Front,
+                knockback_direction: crate::KnockbackDirection::Back,
                 level_100: stats(1, 1),
                 engraving_modifiers: StatModifiers::default(),
                 awakening_modifiers: StatModifiers::default(),

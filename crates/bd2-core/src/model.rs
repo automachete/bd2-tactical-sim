@@ -161,6 +161,9 @@ pub struct CharacterDefinition {
     pub element: Element,
     pub attack_type: AttackType,
     pub target_selector: TargetSelector,
+    /// Direction used by the character's built-in knockback command. External
+    /// data is normalized into the simulator's row/depth coordinate space.
+    pub knockback_direction: KnockbackDirection,
     /// Unmodified level-100 stats. Engraving and awakening are kept separate
     /// because BD2DB lets a build enable or disable each progression source.
     pub level_100: Stats,
@@ -515,6 +518,9 @@ pub struct EffectSpec {
     pub periodic: Option<PeriodicSpec>,
     #[serde(default)]
     pub charges: Option<u16>,
+    /// Reduction applied to this effect's evasion probability after each
+    /// successful evade. Some of Rou's evasion skills use this mechanic.
+    pub evasion_decay_bp: BasisPoints,
     #[serde(default)]
     pub counter: Option<CounterSpec>,
     #[serde(default)]

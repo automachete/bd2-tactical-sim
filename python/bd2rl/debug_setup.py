@@ -226,6 +226,7 @@ class DebugSetupCatalog:
                 "name": self._display_name(record.get("names", {}), character_id),
                 "element": record["element"],
                 "attack_type": record["attack_type"],
+                "knockback_direction": record.get("knockback_direction", "BACK"),
                 "level_100": record["level_100"],
                 "engraving_modifiers": record.get("engraving_modifiers", {}),
                 "awakening_modifiers": record.get("awakening_modifiers", {}),

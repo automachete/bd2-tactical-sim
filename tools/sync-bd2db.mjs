@@ -413,30 +413,56 @@ function integer(value) {
 }
 
 function element(value) {
-  return ({ "火": "FIRE", "水": "WATER", "風": "WIND", "光": "LIGHT", "闇": "DARK", "暗": "DARK" })[value] ?? "NONE";
+  const resolved = ({ "火": "FIRE", "水": "WATER", "風": "WIND", "光": "LIGHT", "闇": "DARK", "暗": "DARK" })[value];
+  if (!resolved) throw new Error(`unsupported character element: ${value}`);
+  return resolved;
 }
 
 function attackType(value) {
-  return value === "魔" ? "MAGICAL" : "PHYSICAL";
+  const resolved = ({ "物": "PHYSICAL", "魔": "MAGICAL" })[value];
+  if (!resolved) throw new Error(`unsupported character attack type: ${value}`);
+  return resolved;
 }
 
 function selector(value) {
-  if (String(value).includes("跳過") || String(value).includes("スキップ")) return "SKIP";
-  if (String(value).includes("自身") || String(value).includes("自己") || String(value).includes("戰場")) return "SELF_UNIT";
-  if (String(value).includes("我方") || String(value).includes("我軍") || String(value).includes("Ally")) return "ALLY_FRONT";
-  return "FRONT";
+  const label = String(value ?? "").trim();
+  if (label.includes("跳過") || label.includes("過人") || label.includes("スキップ")) return "SKIP";
+  if (label.includes("自身") || label.includes("自己") || label.includes("戰場")) return "SELF_UNIT";
+  if (label.includes("我方") || label.includes("我軍") || label.includes("Ally")) return "ALLY_FRONT";
+  if (label.includes("最前") || label.includes("直擊")) return "FRONT";
+  throw new Error(`unsupported target selector: ${label}`);
+}
+
+// Source labels describe direction from the target's point of view. Both
+// battle boards use local coordinates with their front edge at depth 0.
+function knockbackDirection(value) {
+  const normalized = String(value ?? "後").trim();
+  const directions = {
+    "後": "BACK",
+    "前": "FRONT",
+    "右": "UP",
+    "左": "DOWN",
+    "右後": "UP_BACK",
+    "左後": "DOWN_BACK",
+    "右前": "UP_FRONT",
+    "左前": "DOWN_FRONT",
+  };
+  if (!directions[normalized]) throw new Error(`unsupported character knockback direction: ${normalized}`);
+  return directions[normalized];
 }
 
 function rangeCode(raw) {
-  const match = String(raw ?? "007").match(/(?:^|_)(\d{3})$/);
-  return match?.[1] ?? "007";
+  const match = String(raw ?? "").match(/(?:^|_)(all|\d{3})$/);
+  if (!match) throw new Error(`unsupported skill range code: ${raw}`);
+  return match[1];
 }
 
 // BD2DB stores range tuples in the rendered board's [depth, row] order.
 // The simulator deliberately names its axes [row, depth] (3 rows x 4 depths),
 // so keeping the source tuple order here transposes every non-symmetric skill.
 function rangeOffsets(ranges, code) {
-  return (ranges[code] ?? [[0, 0]]).map(([depth, row]) => ({ row, depth }));
+  if (!Array.isArray(ranges[code])) throw new Error(`skill range '${code}' is missing from the source range table`);
+  return ranges[code].map(([depth, row]) => ({ row, depth }));
 }
 
 function scalar(level, token) {
@@ -459,6 +485,7 @@ function effect(effectId, polarity, recipient, duration, modifiers = {}, tags = 
       barrier: null,
       periodic: null,
       charges: null,
+      evasion_decay_bp: 0,
       counter: null,
       revive_hp_bp: null,
       max_stacks: null,
@@ -505,6 +532,7 @@ function durationFrom(sentence, level, fallback = 1) {
 
 function directDamage(sentence, character, costume, level) {
   if (/套用.*(?:出血|燒傷|中毒|腐敗|凍傷|惡夢)效果/.test(sentence)) return null;
+  if (/反擊時/.test(sentence)) return null;
   if (!/(?:對敵人造成|攻擊敵人|每次攻擊(?:時)?，?造成|造成(?:相當於)?(?:自身|敵人)|造成\s*\{)/.test(sentence)) return null;
   const referenceMatch = sentence.match(/((?:自身|敵人)?(?:攻擊力|魔法力|最大生命力|目前生命力)|自身持有的能量防衛)\s*(?:的)?\s*(\{(?:VALUE|HIT)\d+\}|\d+(?:\.\d+)?)%/);
   const coefficientFirstMatch = sentence.match(/(\{(?:VALUE|HIT)\d+\}|\d+(?:\.\d+)?)%\s*((?:自身|敵人)?(?:攻擊力|魔法力|最大生命力|目前生命力))/);
@@ -571,6 +599,31 @@ function compileOperations(character, costume, level, burstExtras = [], enhancem
   const postDamageOperations = [];
   const diagnostics = [];
   const firstDamageSentenceIndex = sentences.findIndex((sentence) => directDamage(sentence, character, costume, level));
+  let postDamageFlushed = false;
+  const containsDamage = operation => operation?.op === "DEAL_DAMAGE"
+    || (operation?.operations ?? []).some(containsDamage);
+  const queueAtSourcePosition = (operation, sentenceIndex) => {
+    const beforeDamage = firstDamageSentenceIndex < 0 || sentenceIndex < firstDamageSentenceIndex;
+    if (!beforeDamage && !postDamageFlushed) {
+      postDamageOperations.push(operation);
+      return;
+    }
+    if (beforeDamage) {
+      const damageIndex = operations.findIndex(containsDamage);
+      if (damageIndex >= 0) {
+        operations.splice(damageIndex, 0, operation);
+        return;
+      }
+    }
+    operations.push(operation);
+  };
+  const removeStatOperations = () => {
+    for (const list of [operations, postDamageOperations]) {
+      for (let index = list.length - 1; index >= 0; index -= 1) {
+        if (list[index].effect?.effect_id?.startsWith(`${costume.costumeId}:STAT:`)) list.splice(index, 1);
+      }
+    }
+  };
 
   const hpCost = joined.match(/受到(?:相當於)?自身目前生命力(\{VALUE\d+\}|\d+(?:\.\d+)?)%的傷害/);
   if (hpCost) {
@@ -579,10 +632,12 @@ function compileOperations(character, costume, level, burstExtras = [], enhancem
 
   const evasionCharges = joined.match(/成功迴避(\{VALUE\d+\}|\d+)次前，?以(\{VALUE\d+\}|\d+(?:\.\d+)?)%的機率迴避/);
   const timedEvasion = joined.match(/(\{VALUE\d+\}|\d+)回合期間，?自身有(\{VALUE\d+\}|\d+(?:\.\d+)?)%的機率迴避/);
+  const evasionDecay = joined.match(/成功迴避後續攻擊的機率將減少(\{VALUE\d+\}|\d+(?:\.\d+)?)%/);
+  const evasionExtra = { evasion_decay_bp: evasionDecay ? Math.round(scalar(level, evasionDecay[1]) * 100) : 0 };
   if (evasionCharges) {
-    operations.push(effect(`${costume.costumeId}:EVASION`, "BENEFICIAL", "ACTOR_SIDE", 1, { evasion_bp: Math.round(scalar(level, evasionCharges[2]) * 100) }, ["EVASION"], { duration_clock: "PERMANENT", charges: integer(scalar(level, evasionCharges[1])) }));
+    operations.push(effect(`${costume.costumeId}:EVASION`, "BENEFICIAL", "ACTOR_SIDE", 1, { evasion_bp: Math.round(scalar(level, evasionCharges[2]) * 100) }, ["EVASION"], { duration_clock: "PERMANENT", charges: integer(scalar(level, evasionCharges[1])), ...evasionExtra }));
   } else if (timedEvasion) {
-    operations.push(effect(`${costume.costumeId}:EVASION`, "BENEFICIAL", "ACTOR_SIDE", scalar(level, timedEvasion[1]), { evasion_bp: Math.round(scalar(level, timedEvasion[2]) * 100) }, ["EVASION"]));
+    operations.push(effect(`${costume.costumeId}:EVASION`, "BENEFICIAL", "ACTOR_SIDE", scalar(level, timedEvasion[1]), { evasion_bp: Math.round(scalar(level, timedEvasion[2]) * 100) }, ["EVASION"], evasionExtra));
   }
 
   // Self/allied stat modifiers that explicitly happen before direct damage.
@@ -600,7 +655,8 @@ function compileOperations(character, costume, level, burstExtras = [], enhancem
       continue;
     }
     if (/受到攻擊時|每當自身受到攻擊/.test(sentence)) continue;
-    if (/若|每有|依.*數量|疊加數/.test(sentence)) {
+    if (/若|每有|依.*數量|疊加數|進入加速狀態|累積連鎖時/.test(sentence)) {
+      if (/進入加速狀態|累積連鎖時/.test(sentence)) continue;
       diagnostics.push(`conditional stat effect requires reviewed condition: ${sentence}`);
       continue;
     }
@@ -625,6 +681,9 @@ function compileOperations(character, costume, level, burstExtras = [], enhancem
     const stackTail = /疊加/.test(stackLead) ? (sentences[sentenceIndex + 2] ?? "") : "";
     const stackSentence = `${stackLead} ${stackTail}`;
     const stackCap = /疊加/.test(stackLead) ? stackSentence.match(/最多可(?:賦予)?疊加至(\{VALUE\d+\}|\d+)/) : null;
+    const applicationCountMatch = /疊加/.test(stackLead)
+      ? stackLead.match(/(?:可)?疊加(?:至)?\s*(\{VALUE\d+\}|\d+)(?:次|層)?/)
+      : null;
     const chargeSentence = stackCap
       ? (stackTail.includes("最多可") ? (sentences[sentenceIndex + 3] ?? "") : (sentences[sentenceIndex + 2] ?? ""))
       : stackLead;
@@ -639,7 +698,13 @@ function compileOperations(character, costume, level, burstExtras = [], enhancem
       extra.charges = integer(scalar(level, receivedHitCharge[1]));
       extra.tags = [sign > 0 ? "STAT_REINFORCEMENT" : "STAT_WEAKENING", "RECEIVED_HIT_CHARGE"];
     }
-    operations.push(effect(`${costume.costumeId}:STAT`, sign > 0 ? "BENEFICIAL" : "HARMFUL", recipient, durationFrom(sentence, level), modifiers, [sign > 0 ? "STAT_REINFORCEMENT" : "STAT_WEAKENING"], extra));
+    const applicationCount = Math.max(1, integer(scalar(level, applicationCountMatch?.[1] ?? 1)));
+    for (let application = 0; application < applicationCount; application += 1) {
+      queueAtSourcePosition(
+        effect(`${costume.costumeId}:STAT:${sentenceIndex}`, sign > 0 ? "BENEFICIAL" : "HARMFUL", recipient, durationFrom(sentence, level), modifiers, [sign > 0 ? "STAT_REINFORCEMENT" : "STAT_WEAKENING"], extra),
+        sentenceIndex,
+      );
+    }
   }
 
   for (const sentence of sentences) {
@@ -647,6 +712,8 @@ function compileOperations(character, costume, level, burstExtras = [], enhancem
     if (enhancement && !/若|每有|連鎖/.test(sentence)) operations.push(effect(`${costume.costumeId}:AMPLIFICATION`, "BENEFICIAL", sentence.includes("自身") ? "ACTOR_SIDE" : "ACTOR_TEAM", scalar(level, enhancement[1]), { outgoing_damage_bp: Math.round(scalar(level, enhancement[2]) * 100) }, ["AUGMENTATION"]));
     const wrappedEnhancement = sentence.match(/對(我軍|自身)套用在(\{VALUE\d+\}|\d+)回合期間，施加(?:的)?傷害增加(\{VALUE\d+\}|\d+(?:\.\d+)?)%/);
     if (wrappedEnhancement) operations.push(effect(`${costume.costumeId}:AMPLIFICATION`, "BENEFICIAL", wrappedEnhancement[1] === "自身" ? "ACTOR_SIDE" : "ACTOR_TEAM", scalar(level, wrappedEnhancement[2]), { outgoing_damage_bp: Math.round(scalar(level, wrappedEnhancement[3]) * 100) }, ["AUGMENTATION"]));
+    const leadingEnhancement = sentence.match(/對(我軍|自身)在(\{VALUE\d+\}|\d+)回合期間，套用施加(?:的)?傷害增加(\{VALUE\d+\}|\d+(?:\.\d+)?)%/);
+    if (leadingEnhancement) operations.push(effect(`${costume.costumeId}:AMPLIFICATION`, "BENEFICIAL", leadingEnhancement[1] === "自身" ? "ACTOR_SIDE" : "ACTOR_TEAM", scalar(level, leadingEnhancement[2]), { outgoing_damage_bp: Math.round(scalar(level, leadingEnhancement[3]) * 100) }, ["AUGMENTATION"]));
     const nextAllyEnhancement = sentence.match(/對下一個攻擊順序的我軍，?在(\{VALUE\d+\}|\d+)回合期間，套用施加(?:的)?傷害增加(\{VALUE\d+\}|\d+(?:\.\d+)?)%/);
     if (nextAllyEnhancement) operations.push(effect(`${costume.costumeId}:AMPLIFICATION`, "BENEFICIAL", "TARGET_SIDE", scalar(level, nextAllyEnhancement[1]), { outgoing_damage_bp: Math.round(scalar(level, nextAllyEnhancement[2]) * 100) }, ["AUGMENTATION"]));
     const basic = sentence.match(/一般攻擊施加的傷害增加(\{VALUE\d+\}|\d+(?:\.\d+)?)%/);
@@ -655,15 +722,16 @@ function compileOperations(character, costume, level, burstExtras = [], enhancem
 
   const conditionalMagicDebuff = joined.match(/(\{VALUE\d+\}|\d+)回合期間，敵人的攻擊力減少(\{VALUE\d+\}|\d+(?:\.\d+)?)%.*若敵人為魔法類型.*?(\{VALUE\d+\}|\d+)回合期間，魔法力減少(\{VALUE\d+\}|\d+(?:\.\d+)?)%/);
   if (conditionalMagicDebuff) {
-    for (let index = operations.length - 1; index >= 0; index -= 1) if (operations[index].effect?.effect_id === `${costume.costumeId}:STAT`) operations.splice(index, 1);
+    removeStatOperations();
     const physical = effect(`${costume.costumeId}:ATK_DOWN`, "HARMFUL", "TARGET_SIDE", scalar(level, conditionalMagicDebuff[1]), { attack_bp: -Math.round(scalar(level, conditionalMagicDebuff[2]) * 100) }, ["STAT_WEAKENING"]);
     const magical = effect(`${costume.costumeId}:MATK_DOWN`, "HARMFUL", "TARGET_SIDE", scalar(level, conditionalMagicDebuff[3]), { magic_bp: -Math.round(scalar(level, conditionalMagicDebuff[4]) * 100) }, ["STAT_WEAKENING"]);
-    operations.push({ op: "CONDITIONAL", condition: { type: "TARGET_ATTACK_TYPE", attack_type: "MAGICAL" }, operations: [magical] });
-    operations.push({ op: "CONDITIONAL", condition: { type: "TARGET_NOT_ATTACK_TYPE", attack_type: "MAGICAL" }, operations: [physical] });
+    const sourceIndex = sentences.findIndex((sentence) => /敵人的攻擊力減少/.test(sentence));
+    queueAtSourcePosition({ op: "CONDITIONAL", condition: { type: "TARGET_ATTACK_TYPE", attack_type: "MAGICAL" }, operations: [magical] }, sourceIndex);
+    queueAtSourcePosition({ op: "CONDITIONAL", condition: { type: "TARGET_NOT_ATTACK_TYPE", attack_type: "MAGICAL" }, operations: [physical] }, sourceIndex);
   }
   const lightProperty = joined.match(/(\{VALUE\d+\}|\d+)回合期間，我軍的屬性傷害增加(\{VALUE\d+\}|\d+(?:\.\d+)?)%.*若目標為光屬性.*?屬性傷害變為增加(\{VALUE\d+\}|\d+(?:\.\d+)?)%/);
   if (lightProperty) {
-    for (let index = operations.length - 1; index >= 0; index -= 1) if (operations[index].effect?.effect_id === `${costume.costumeId}:STAT`) operations.splice(index, 1);
+    removeStatOperations();
     const normal = effect(`${costume.costumeId}:PROPERTY`, "BENEFICIAL", "ACTOR_TEAM", scalar(level, lightProperty[1]), { property_damage_bp: Math.round(scalar(level, lightProperty[2]) * 100) }, ["STAT_REINFORCEMENT"]);
     const light = effect(`${costume.costumeId}:PROPERTY_LIGHT`, "BENEFICIAL", "ACTOR_TEAM", scalar(level, lightProperty[1]), { property_damage_bp: Math.round(scalar(level, lightProperty[3]) * 100) }, ["STAT_REINFORCEMENT"]);
     operations.push({ op: "CONDITIONAL", condition: { type: "TARGET_ELEMENT", element: "LIGHT" }, operations: [light] });
@@ -671,7 +739,7 @@ function compileOperations(character, costume, level, burstExtras = [], enhancem
   }
   const actorStatAlternative = joined.match(/(\{VALUE\d+\}|\d+)回合期間，自身的攻擊力增加(\{VALUE\d+\}|\d+(?:\.\d+)?)%.*若自身套用能力值強化效果.*?(\{VALUE\d+\}|\d+)回合期間，屬性傷害增加(\{VALUE\d+\}|\d+(?:\.\d+)?)%/);
   if (actorStatAlternative) {
-    for (let index = operations.length - 1; index >= 0; index -= 1) if (operations[index].effect?.effect_id === `${costume.costumeId}:STAT`) operations.splice(index, 1);
+    removeStatOperations();
     const attackBuff = effect(`${costume.costumeId}:ATK`, "BENEFICIAL", "ACTOR_SIDE", scalar(level, actorStatAlternative[1]), { attack_bp: Math.round(scalar(level, actorStatAlternative[2]) * 100) }, ["STAT_REINFORCEMENT"]);
     const propertyBuff = effect(`${costume.costumeId}:PROPERTY`, "BENEFICIAL", "ACTOR_SIDE", scalar(level, actorStatAlternative[3]), { property_damage_bp: Math.round(scalar(level, actorStatAlternative[4]) * 100) }, ["STAT_REINFORCEMENT"]);
     operations.push({ op: "CONDITIONAL", condition: { type: "ACTOR_HAS_TAG", tag: "STAT_REINFORCEMENT" }, operations: [propertyBuff] });
@@ -902,7 +970,11 @@ function compileOperations(character, costume, level, burstExtras = [], enhancem
       const referenceLabel = hasExplicitRecipient ? guard[3] : guard[2];
       const coefficient = hasExplicitRecipient ? guard[4] : guard[3];
       const recipient = recipientLabel === "自身" ? "ACTOR_SIDE" : recipientLabel.includes("下一") ? "TARGET_SIDE" : "ACTOR_TEAM";
-      const guardOperation = effect(`${costume.costumeId}:ENERGY_GUARD`, "BENEFICIAL", recipient, scalar(level, guard[1]), {}, ["ENERGY_GUARD"], { barrier: { coefficient_bp: Math.round(scalar(level, coefficient) * 100), reference: statReference(referenceLabel) } });
+      const allyOwnStat = recipient === "ACTOR_TEAM" && /各自/.test(sentence);
+      const reference = allyOwnStat && referenceLabel === "最大生命力" ? "TARGET_MAX_HP"
+        : allyOwnStat && referenceLabel === "目前生命力" ? "TARGET_CURRENT_HP"
+          : statReference(referenceLabel);
+      const guardOperation = effect(`${costume.costumeId}:ENERGY_GUARD`, "BENEFICIAL", recipient, scalar(level, guard[1]), {}, ["ENERGY_GUARD"], { barrier: { coefficient_bp: Math.round(scalar(level, coefficient) * 100), reference } });
       const isPreHit = /\[前置效果\]/.test(sentence) || (firstDamageSentenceIndex >= 0 && sentenceIndex < firstDamageSentenceIndex);
       (firstDamageSentenceIndex < 0 || isPreHit ? operations : postDamageOperations).push(guardOperation);
     }
@@ -977,6 +1049,7 @@ function compileOperations(character, costume, level, burstExtras = [], enhancem
     if (!bleedScalingCondition) for (const extraEntry of parsedDamage.filter((entry) => entry !== baseEntry && entry !== alternateEntry && /額外造成/.test(entry.sentence))) operations.push(extraEntry.damage);
   }
   operations.push(...postDamageOperations);
+  postDamageFlushed = true;
   if (/解除對敵人套用的出血效果/.test(joined)) operations.push({ op: "REMOVE_EFFECTS_BY_TAG", tag: "BLEED" });
   if (/解除對敵人套用的脆弱效果/.test(joined)) operations.push({ op: "REMOVE_EFFECTS_BY_TAG", tag: "VULNERABLE" });
 
@@ -1006,9 +1079,15 @@ function compileOperations(character, costume, level, burstExtras = [], enhancem
     if (ownLoss) operations.push({ op: "CHANGE_SP", amount: -integer(scalar(level, ownLoss[1])), side: "ACTOR_SIDE" });
   }
 
-  if (/解除套用於敵人的有益效果/.test(joined)) operations.push({ op: "REMOVE_EFFECTS", polarity: "BENEFICIAL", count: 65535 });
-  if (/解除套用於敵人的能力值強化效果/.test(joined)) operations.push({ op: "REMOVE_EFFECTS_BY_TAG", tag: "STAT_REINFORCEMENT" });
-  if (/解除套用於敵人的減傷和能量防衛效果/.test(joined)) { operations.push({ op: "REMOVE_EFFECTS_BY_TAG", tag: "BARRIER" }); operations.push({ op: "REMOVE_EFFECTS_BY_TAG", tag: "ENERGY_GUARD" }); }
+  const beneficialRemovalIndex = sentences.findIndex((sentence) => /解除套用於敵人的有益效果/.test(sentence));
+  if (beneficialRemovalIndex >= 0) queueAtSourcePosition({ op: "REMOVE_EFFECTS", polarity: "BENEFICIAL", count: 65535 }, beneficialRemovalIndex);
+  const reinforcementRemovalIndex = sentences.findIndex((sentence) => /解除套用於敵人的能力值強化效果/.test(sentence));
+  if (reinforcementRemovalIndex >= 0) queueAtSourcePosition({ op: "REMOVE_EFFECTS_BY_TAG", tag: "STAT_REINFORCEMENT" }, reinforcementRemovalIndex);
+  const guardRemovalIndex = sentences.findIndex((sentence) => /解除套用於敵人的減傷和能量防衛效果/.test(sentence));
+  if (guardRemovalIndex >= 0) {
+    queueAtSourcePosition({ op: "REMOVE_EFFECTS_BY_TAG", tag: "BARRIER" }, guardRemovalIndex);
+    queueAtSourcePosition({ op: "REMOVE_EFFECTS_BY_TAG", tag: "ENERGY_GUARD" }, guardRemovalIndex);
+  }
   if (/\[前置效果\].*解除敵方主要目標套用的防護罩、能量防衛/.test(joined)) {
     operations.unshift({ op: "REMOVE_EFFECTS_BY_TAG", tag: "ENERGY_GUARD" });
     operations.unshift({ op: "REMOVE_EFFECTS_BY_TAG", tag: "BARRIER" });
@@ -1042,7 +1121,8 @@ function compileOperations(character, costume, level, burstExtras = [], enhancem
     const nextAlly = (costume.skill ?? []).join(" ").includes("下一個攻擊順序");
     operations.push({ op: "CHANGE_COOLDOWN", amount: -integer(scalar(level, cooldownReduction[1])), recipient: nextAlly ? "TARGET_SIDE" : /自身/.test(cooldownReduction[0]) ? "ACTOR_SIDE" : /我軍/.test(cooldownReduction[0]) ? "ACTOR_TEAM" : "TARGET_SIDE" });
   }
-  if (/解除減益/.test(joined)) operations.push({ op: "REMOVE_EFFECTS", polarity: "HARMFUL", count: 65535 });
+  const harmfulRemovalIndex = sentences.findIndex((sentence) => /解除減益/.test(sentence));
+  if (harmfulRemovalIndex >= 0) queueAtSourcePosition({ op: "REMOVE_EFFECTS", polarity: "HARMFUL", count: 65535 }, harmfulRemovalIndex);
 
   const counterDuration = joined.match(/(\{VALUE\d+\}|\d+)回合期間，?自身受到攻擊時將反擊/);
   const counterCharges = joined.match(/此效果將在受到(\{VALUE\d+\}|\d+)次攻擊後消失/);
@@ -1059,12 +1139,13 @@ function compileOperations(character, costume, level, burstExtras = [], enhancem
   const revive = joined.match(/(\{VALUE\d+\}|\d+)回合期間，?對自身套用復活效果.*?以(\{VALUE\d+\}|\d+(?:\.\d+)?)%的生命力復活/);
   if (revive) operations.push(effect(`${costume.costumeId}:REVIVE`, "BENEFICIAL", "ACTOR_SIDE", scalar(level, revive[1]), {}, ["REVIVE"], { revive_hp_bp: Math.round(scalar(level, revive[2]) * 100) }));
   const knockback = joined.match(/目標向後擊退(\d+)格/);
-  if (knockback) {
+  const knockbackMetadata = costume.knockback;
+  if (knockback || knockbackMetadata) {
     const collision = joined.match(/對被撞擊的敵人造成被推開目標最大生命力(\{VALUE\d+\}|\d+(?:\.\d+)?)%的物理傷害/);
     operations.push({
       op: "KNOCKBACK",
-      direction: "BACK",
-      distance: integer(knockback[1]),
+      direction: knockbackDirection(knockbackMetadata?.postion ?? "後"),
+      distance: integer(knockbackMetadata?.cells ?? knockback?.[1]),
       collision_coefficient_bp: collision ? Math.round(scalar(level, collision[1]) * 100) : 2_500,
     });
   }
@@ -1174,6 +1255,7 @@ function transformCharacters(rawCharacters, costumeI18n, ranges, source) {
       element: element(raw.attribute),
       attack_type: attackType(raw.atkType),
       target_selector: selector(raw.atkPosition),
+      knockback_direction: knockbackDirection(raw.knockback),
       level_100: level100Stats(raw),
       engraving_modifiers: statModifiers(raw.evgraving),
       awakening_modifiers: statModifiers(raw.awakening),
@@ -1217,8 +1299,8 @@ function transformCharacters(rawCharacters, costumeI18n, ranges, source) {
               if ((potentialMask & (1 << potentialIndex)) === 0) continue;
               for (const item of potential.switches ?? []) resolvedLevel[item.target] = Number(resolvedLevel[item.target] ?? 0) + Number(item.value ?? 0);
               if (potential.type === "Range") resolvedRange = rangeCode(potential.value);
-              if (potential.type === "Rhombus") potentialSpDelta -= integer(String(potential.value ?? "").match(/減少(\d+)/)?.[1]);
-              if (potential.type === "Cooldown") cooldown = Math.max(0, cooldown - integer(String(potential.value ?? "").match(/減少(\d+)/)?.[1]));
+              if (potential.type === "Rhombus") potentialSpDelta -= integer(String(potential.value ?? "").match(/減少\s*(\d+)/)?.[1]);
+              if (potential.type === "Cooldown") cooldown = Math.max(0, cooldown - integer(String(potential.value ?? "").match(/減少\s*(\d+)/)?.[1]));
               if (potential.type === "Plus") selectedPotentialExtras.push(potential);
             }
             const compiled = compileOperations(raw, costume, resolvedLevel, [...appliedStages, ...selectedPotentialExtras], enhancement);
@@ -1232,7 +1314,7 @@ function transformCharacters(rawCharacters, costumeI18n, ranges, source) {
               cooldown,
               selector: (costume.skill ?? []).join(" ").includes("下一個攻擊順序") || (costume.skill ?? []).join(" ").includes("下一位攻擊順序") ? "NEXT_ALLY_IN_ORDER" : selector(costume.target),
               fixed_target_cell: null,
-              target_all: false,
+              target_all: resolvedRange === "all",
               range_override: resolvedRange === rangeCode(costume.range) ? null : rangeOffsets(ranges, resolvedRange),
               operations: compiled.operations,
               consume_remaining_sp: String(costume.tags ?? "").split(",").includes("暴走"),
@@ -1368,19 +1450,15 @@ function transformFiend(raw, source) {
         else if (preset.buffKey === "Chain") modifiers.chain_received_delta = integer(preset.value);
         else if (preset.stateKey === "ChainRetention") modifiers.chain_retention = integer(preset.value);
         else tags.push(preset.buffKey ?? preset.stateKey ?? preset.customStateTitle);
-        operation = {
-          op: "APPLY_EFFECT",
-          effect: {
-            effect_id: stateEffect.customStateId,
-            polarity: preset.stateType === "Buff" ? "BENEFICIAL" : "HARMFUL",
-            recipient: "TARGET_SIDE",
-            duration: integer(preset.remainingDuration),
-            duration_clock: "GAME_TURN",
-            modifiers,
-            tags,
-            stack_rule: "REPLACE_SAME_SOURCE",
-          },
-        };
+        operation = effect(
+          stateEffect.customStateId,
+          preset.stateType === "Buff" ? "BENEFICIAL" : "HARMFUL",
+          "TARGET_SIDE",
+          integer(preset.remainingDuration),
+          modifiers,
+          tags,
+          { duration_clock: "GAME_TURN" },
+        );
       } else {
         diagnostics.push(`unsupported monster state operation ${stateEffect.operation}`);
       }
@@ -1441,6 +1519,7 @@ function transformFiend(raw, source) {
       element: element(fiend.attribute),
       attack_type: fiend.atkType === "MATK" ? "MAGICAL" : "PHYSICAL",
       target_selector: "FRONT",
+      knockback_direction: "BACK",
       level_100: topLevel,
       engraving_modifiers: {},
       awakening_modifiers: {},
@@ -1482,6 +1561,7 @@ function transformSummons(rawSummons, ranges, source) {
       element: element(raw.attribute),
       attack_type: attackType(raw.atkType),
       target_selector: selector(raw.target),
+      knockback_direction: knockbackDirection(raw.knockback),
       level_100: { max_hp: 1, attack: 1, magic: 1, crit_rate_bp: 0, crit_damage_bp: 0, defense_bp: 0, magic_resist_bp: 0, property_damage_bp: 0, outgoing_damage_bp: 0, incoming_damage_bp: 0, amplification_bp: 0 },
       engraving_modifiers: {},
       awakening_modifiers: {},
