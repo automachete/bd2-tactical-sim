@@ -21,14 +21,14 @@ UI = ROOT / "ui"
 FAST_MCTS = MctsConfig(simulations=6, rollout_depth=3, max_branching=8)
 
 
-def wait_plan(simulator: Simulator, side: str) -> dict[str, object]:
+def normal_attack_plan(simulator: Simulator, side: str) -> dict[str, object]:
     state = json.loads(simulator.state_json())
     index = 0 if side == "PLAYER" else 1
     order = state["teams"][index]["action_order"]
     return {
         "side": side,
         "order": order,
-        "commands": {str(unit_id): {"type": "WAIT"} for unit_id in order},
+        "commands": {str(unit_id): {"type": "NORMAL_ATTACK"} for unit_id in order},
         "formation": {},
     }
 
@@ -62,6 +62,7 @@ def test_debug_catalog_builds_all_three_modes_from_external_data() -> None:
     assert isinstance(costume["cooldown"], int)
     assert isinstance(costume["range"], list)
     assert costume["operation_summary"]
+    assert costume["description_ja"]
     assert catalog.characters["Justia"]["name"] == "ユースティア"
     justia_costumes = {item["id"]: item for item in catalog.characters["Justia"]["costumes"]}
     assert justia_costumes["Justia_1"]["name"] == "白い死神"
@@ -100,6 +101,54 @@ def test_debug_catalog_builds_all_three_modes_from_external_data() -> None:
     assert len([unit for unit in monster["units"] if unit["side"] == "ENEMY"]) == 8
 
 
+def test_player_legal_actions_have_no_wait_and_japanese_skill_text_is_materialized() -> None:
+    catalog = DebugSetupCatalog(DATABASE, SCENARIOS)
+    public = catalog.public_payload()
+    session = GuiSession(DATABASE, SCENARIOS, 37, FAST_MCTS)
+
+    assert all(
+        costume["description_ja"] and "{" not in costume["description_ja"]
+        for character in public["characters"]
+        for costume in character["costumes"]
+    )
+    loen = next(
+        costume for costume in catalog.characters["Loen"]["costumes"] if costume["id"] == "Loen_1"
+    )
+    assert loen["name"] == "最後の希望"
+    assert loen["description_ja"] == "敵に自身の魔法力1000%分の魔法ダメージを与えます。"
+
+    legal = session.payload()["legal"]
+    assert legal
+    assert {command["type"] for entry in legal for command in entry["commands"]} <= {
+        "NORMAL_ATTACK",
+        "KNOCKBACK",
+        "USE_COSTUME",
+    }
+    state = session.payload()["state"]
+    order = state["teams"][0]["action_order"]
+    invalid = {
+        "side": "PLAYER",
+        "order": order,
+        "commands": {str(unit_id): {"type": "WAIT"} for unit_id in order},
+        "formation": {},
+    }
+    with pytest.raises(ValueError, match="unknown variant `WAIT`"):
+        session.simulator.step_json(json.dumps(invalid))
+
+
+def test_content_presets_never_contain_runtime_summon_entities() -> None:
+    public = DebugSetupCatalog(DATABASE, SCENARIOS).public_payload()
+    assert any("MagicAmplifierET001" in item["id"] for item in public["entities"])
+    for preset in public["presets"].values():
+        unit_ids = [
+            unit["character_id"]
+            for side in ("player_units", "enemy_units")
+            for unit in preset[side]
+        ]
+        assert all(not character_id.startswith(("summon:", "fiend:")) for character_id in unit_ids)
+        assert all("ET001" not in character_id for character_id in unit_ids)
+
+
 def test_builder_defaults_to_every_costume_at_its_maximum_variant() -> None:
     catalog = DebugSetupCatalog(DATABASE, SCENARIOS)
     preset = catalog.public_payload()["presets"]["NORMAL"]
@@ -112,6 +161,30 @@ def test_builder_defaults_to_every_costume_at_its_maximum_variant() -> None:
         assert loadout["enhancement"] == maximum["max_enhancement"]
         assert loadout["burst_level"] == maximum["max_burst_level"]
         assert loadout["potential_mask"] == maximum["max_potential_mask"]
+
+
+def test_every_burst_variant_has_a_nonincreasing_zero_burst_sp_baseline() -> None:
+    catalog = DebugSetupCatalog(DATABASE, SCENARIOS)
+    checked = 0
+    for costume_id, record in catalog.costume_records.items():
+        variants = record.get("variants", [])
+        for variant in variants:
+            if int(variant.get("burst_level", 0)) <= 0:
+                continue
+            baseline = next(
+                (
+                    item
+                    for item in variants
+                    if int(item["enhancement"]) == int(variant["enhancement"])
+                    and int(item["potential_mask"]) == int(variant["potential_mask"])
+                    and int(item["burst_level"]) == 0
+                ),
+                None,
+            )
+            assert baseline is not None, costume_id
+            assert int(variant["sp_cost"]) >= int(baseline["sp_cost"]), costume_id
+            checked += 1
+    assert checked > 0
 
 
 def test_gui_payload_describes_the_exact_configured_costume_variant() -> None:
@@ -130,6 +203,8 @@ def test_gui_payload_describes_the_exact_configured_costume_variant() -> None:
     legal = next(item for item in payload["legal"] if item["unit_id"] == loen_id)
     command = next(item for item in legal["commands"] if item.get("costume_id") == "Loen_1")
 
+    assert command["ui"]["sp_cost"] == command["ui"]["base_sp_cost"]
+    assert command["ui"]["burst_sp_cost"] == 0
     assert command["ui"]["range"] == [
         {"row": -1, "depth": 0},
         {"row": 0, "depth": -1},
@@ -140,6 +215,22 @@ def test_gui_payload_describes_the_exact_configured_costume_variant() -> None:
     assert len(command["ui"]["range"]) < len(
         session.catalog.characters["Loen"]["costumes"][0]["range"]
     )
+
+    michaela_id = next(
+        int(unit_id)
+        for unit_id, unit in payload["state"]["units"].items()
+        if unit["character_id"] == "Michaela" and unit["side"] == "PLAYER"
+    )
+    michaela_legal = next(item for item in payload["legal"] if item["unit_id"] == michaela_id)
+    michaela_variants = [
+        item
+        for item in michaela_legal["commands"]
+        if item.get("costume_id") == "Michaela_1"
+    ]
+    assert [item["burst_level"] for item in michaela_variants] == [0, 1, 2, 3]
+    assert [item["ui"]["sp_cost"] for item in michaela_variants] == [3, 4, 5, 6]
+    assert [item["ui"]["base_sp_cost"] for item in michaela_variants] == [3, 3, 3, 3]
+    assert [item["ui"]["burst_sp_cost"] for item in michaela_variants] == [0, 1, 2, 3]
 
 
 def test_gui_typed_equipment_changes_stats_but_not_skill_cost_metadata() -> None:
@@ -181,6 +272,29 @@ def test_gui_typed_equipment_changes_stats_but_not_skill_cost_metadata() -> None
     assert command["ui"]["sp_cost"] == variant["sp_cost"]
     assert command["ui"]["cooldown"] == variant["cooldown"]
     assert payload["state"]["units"][str(unit_id)]["base_stats"] != baseline_loen["base_stats"]
+
+
+def test_configured_burst_unlock_level_caps_runtime_action_stages() -> None:
+    session = GuiSession(DATABASE, SCENARIOS, 19, FAST_MCTS)
+    request = session.catalog.public_payload()["presets"]["NORMAL"]
+    michaela = next(unit for unit in request["player_units"] if unit["character_id"] == "Michaela")
+    loadout = next(
+        item for item in michaela["costumes"] if item["costume_id"] == "Michaela_1"
+    )
+    loadout["burst_level"] = 2
+
+    payload = session.start(request)
+    unit_id = next(
+        int(raw_id)
+        for raw_id, unit in payload["state"]["units"].items()
+        if unit["side"] == "PLAYER" and unit["character_id"] == "Michaela"
+    )
+    legal = next(entry for entry in payload["legal"] if entry["unit_id"] == unit_id)
+    assert [
+        command["burst_level"]
+        for command in legal["commands"]
+        if command.get("costume_id") == "Michaela_1"
+    ] == [0, 1, 2]
 
 
 def test_every_supported_equipment_can_initialize_a_real_battle_for_its_owner() -> None:
@@ -329,7 +443,7 @@ def test_preview_footprint_clips_deduplicates_and_tracks_only_occupied_targets()
     assert targets == [101]
 
 
-def test_preview_footprint_handles_normal_wait_and_target_all_without_guessing() -> None:
+def test_preview_footprint_handles_normal_and_target_all_without_guessing() -> None:
     state = {
         "rules": {"grid": {"rows": 3, "depths": 4}},
         "units": {
@@ -352,7 +466,6 @@ def test_preview_footprint_handles_normal_wait_and_target_all_without_guessing()
         {"row": 1, "depth": 2},
         positions,
     )
-    wait_cells, wait_targets = _preview_footprint(state, 1, {"type": "WAIT"}, None, None, positions)
     all_cells, all_targets = _preview_footprint(
         state,
         1,
@@ -364,8 +477,6 @@ def test_preview_footprint_handles_normal_wait_and_target_all_without_guessing()
 
     assert normal_cells == [{"row": 1, "depth": 2}]
     assert normal_targets == [101]
-    assert wait_cells == []
-    assert wait_targets == []
     assert len(all_cells) == 12
     assert all_targets == [1, 2]
 
@@ -399,7 +510,7 @@ def test_mcts_is_deterministic_legal_and_does_not_mutate_live_state() -> None:
     setup = catalog.build_setup(catalog.public_payload()["presets"]["MIRROR_WAR"])
     setup_json = json.dumps(setup)
     simulator = Simulator(str(DATABASE), setup_json, 17)
-    simulator.step_json(json.dumps(wait_plan(simulator, "PLAYER")))
+    simulator.step_json(json.dumps(normal_attack_plan(simulator, "PLAYER")))
     before = simulator.state_json()
 
     first = MctsPlanner(DATABASE, setup_json, 17, FAST_MCTS).choose(simulator, "ENEMY")
@@ -415,7 +526,7 @@ def test_mcts_is_deterministic_legal_and_does_not_mutate_live_state() -> None:
 
 def test_gui_session_uses_mcts_and_monster_rule_controller() -> None:
     session = GuiSession(DATABASE, SCENARIOS, 23, FAST_MCTS)
-    normal = session.step([2, 2, 2])
+    normal = session.step([0, 0, 0])
     assert normal["state"]["active_side"] == "PLAYER"
     assert normal["last_ai"]["controller"] == "MCTS"
     assert normal["last_ai"]["simulations"] == FAST_MCTS.simulations
@@ -462,18 +573,14 @@ def test_gui_turn_is_atomic_when_automatic_opponent_fails(monkeypatch: pytest.Mo
     session = GuiSession(DATABASE, SCENARIOS, 79, FAST_MCTS)
     before = session.payload()
     order = before["state"]["teams"][0]["action_order"]
-    waits = []
-    for entry in before["legal"]:
-        waits.append(
-            next(i for i, command in enumerate(entry["commands"]) if command["type"] == "WAIT")
-        )
+    normal_attacks = [0 for _ in before["legal"]]
 
     def fail_enemy() -> None:
         raise RuntimeError("forced opponent failure")
 
     monkeypatch.setattr(session, "_advance_enemy", fail_enemy)
     with pytest.raises(RuntimeError, match="forced opponent failure"):
-        session.step(waits, order, {})
+        session.step(normal_attacks, order, {})
 
     after = session.payload()
     assert after["state"] == before["state"]
@@ -628,8 +735,6 @@ def test_every_five_star_legal_action_preview_matches_engine_target_lock() -> No
         direct = Simulator(str(DATABASE), session.setup_json, session.seed)
 
         for action_index, command in enumerate(legal_by_id[actor]):
-            if command["type"] == "WAIT":
-                continue
             preview = session.preview(actor, action_index, order, {})
             commands: dict[str, object] = {}
             for unit_id in order:
@@ -637,7 +742,9 @@ def test_every_five_star_legal_action_preview_matches_engine_target_lock() -> No
                 commands[str(unit_id)] = (
                     command
                     if unit_id == actor
-                    else next(candidate for candidate in choices if candidate["type"] == "WAIT")
+                    else next(
+                        candidate for candidate in choices if candidate["type"] == "NORMAL_ATTACK"
+                    )
                 )
             direct.restore_json(live_json)
             direct.step_json(
@@ -716,7 +823,11 @@ def test_preview_matches_real_damage_after_formation_order_and_multi_action_plan
         action_indices.append(
             skill_index
             if unit_id == actor
-            else next(index for index, command in enumerate(commands) if command["type"] == "WAIT")
+            else next(
+                index
+                for index, command in enumerate(commands)
+                if command["type"] == "NORMAL_ATTACK"
+            )
         )
     advanced = session.step(action_indices, reordered, formation)
     player_actions = [
@@ -749,12 +860,14 @@ def test_later_actor_preview_applies_earlier_reserved_kills_before_targeting() -
         for index, command in enumerate(legal_by_id[loen])
         if command.get("costume_id") == "Loen_1"
     )
-    final_wait = next(
-        index for index, command in enumerate(legal_by_id[final]) if command["type"] == "WAIT"
+    final_normal = next(
+        index
+        for index, command in enumerate(legal_by_id[final])
+        if command["type"] == "NORMAL_ATTACK"
     )
-    actions = [loen_skill, 0, final_wait]
+    actions = [loen_skill, 0, final_normal]
 
-    isolated = session.preview(later, 0, order, {}, [0, 0, final_wait])
+    isolated = session.preview(later, 0, order, {}, [0, 0, final_normal])
     planned = session.preview(later, 0, order, {}, actions)
 
     assert isolated["target_id"] == 102
@@ -805,7 +918,7 @@ def test_later_actor_preview_includes_a_summon_created_by_an_earlier_reservation
                 next(
                     index
                     for index, command in enumerate(legal_by_id[unit_id])
-                    if command["type"] == "WAIT"
+                    if command["type"] == "NORMAL_ATTACK"
                 )
             )
 
@@ -846,7 +959,9 @@ def test_payload_keeps_cooldown_costume_visible_as_a_disabled_option() -> None:
         skill_index
         if unit_id == actor
         else next(
-            index for index, command in enumerate(legal_by_id[unit_id]) if command["type"] == "WAIT"
+            index
+            for index, command in enumerate(legal_by_id[unit_id])
+            if command["type"] == "NORMAL_ATTACK"
         )
         for unit_id in order
     ]
@@ -896,7 +1011,11 @@ def test_next_ally_preview_tracks_dragged_action_order_and_real_target_lock() ->
         action_indices.append(
             skill_index
             if unit_id == actor
-            else next(index for index, command in enumerate(commands) if command["type"] == "WAIT")
+            else next(
+                index
+                for index, command in enumerate(commands)
+                if command["type"] == "NORMAL_ATTACK"
+            )
         )
     advanced = session.step(action_indices, reordered, {})
     locked_targets = [
@@ -912,26 +1031,23 @@ def test_gui_rejects_fractional_turn_payload_without_mutating_battle() -> None:
     session = GuiSession(DATABASE, SCENARIOS, 73, FAST_MCTS)
     payload = session.payload()
     order = payload["state"]["teams"][0]["action_order"]
-    waits = [
-        next(index for index, command in enumerate(entry["commands"]) if command["type"] == "WAIT")
-        for entry in payload["legal"]
-    ]
+    normal_attacks = [0 for _ in payload["legal"]]
     before = session.simulator.state_json()
 
     with pytest.raises(ValueError, match=r"actions\[0\] must be an integer"):
-        session.step([0.5, *waits[1:]], order, {})
+        session.step([0.5, *normal_attacks[1:]], order, {})
     assert session.simulator.state_json() == before
 
     with pytest.raises(ValueError, match=r"turn order\[0\] must be an integer"):
-        session.step(waits, [float(order[0]), *order[1:]], {})
+        session.step(normal_attacks, [float(order[0]), *order[1:]], {})
     assert session.simulator.state_json() == before
 
     with pytest.raises(ValueError, match="formation row must be an integer"):
-        session.step(waits, order, {str(order[0]): {"row": 0.5, "depth": 0}})
+        session.step(normal_attacks, order, {str(order[0]): {"row": 0.5, "depth": 0}})
     assert session.simulator.state_json() == before
 
     with pytest.raises(ValueError, match="one selection for every active unit"):
-        session.step(waits[:-1], order, {})
+        session.step(normal_attacks[:-1], order, {})
     assert session.simulator.state_json() == before
 
     with pytest.raises(ValueError, match="preview action_index must be an integer"):
@@ -979,7 +1095,7 @@ def test_gui_http_catalog_start_and_turn_round_trip() -> None:
         started = post("/api/start", mirror)
         assert started["state"]["rules"]["mode"] == "MIRROR_WAR"
         current_order = started["state"]["teams"][0]["action_order"]
-        advanced = post("/api/step", {"actions": [2, 2], "order": list(reversed(current_order))})
+        advanced = post("/api/step", {"actions": [0, 0], "order": list(reversed(current_order))})
         assert advanced["last_ai"]["controller"] == "MCTS"
         assert advanced["state"]["active_side"] == "PLAYER"
         assert advanced["can_rollback"] is True

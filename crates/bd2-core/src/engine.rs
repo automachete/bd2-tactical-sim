@@ -306,7 +306,7 @@ impl BattleEngine {
         if !unit.alive {
             return Ok(LegalUnitActions {
                 unit_id,
-                commands: vec![UnitCommand::Wait],
+                commands: Vec::new(),
             });
         }
         if !unit.can_act {
@@ -315,11 +315,7 @@ impl BattleEngine {
                 commands: Vec::new(),
             });
         }
-        let mut commands = vec![
-            UnitCommand::NormalAttack,
-            UnitCommand::Knockback,
-            UnitCommand::Wait,
-        ];
+        let mut commands = vec![UnitCommand::NormalAttack, UnitCommand::Knockback];
         if !has_tag(unit, "SILENCE") {
             let available_sp = self.state.teams[unit.side.index()].sp;
             for loadout in &unit.costume_loadout {
@@ -338,24 +334,26 @@ impl BattleEngine {
                 if !costume.executable {
                     continue;
                 }
-                let Some(variant) = select_variant(
-                    costume,
-                    loadout.enhancement,
-                    loadout.burst_level,
-                    loadout.potential_mask,
-                ) else {
-                    continue;
-                };
-                if !variant.executable {
-                    continue;
-                }
-                let cost = adjusted_sp_cost(variant.sp_cost, &effective_modifiers(unit));
-                if available_sp >= cost {
-                    commands.push(UnitCommand::UseCostume {
-                        costume_id: loadout.costume_id.clone(),
-                        burst_level: loadout.burst_level,
-                        explicit_target: None,
-                    });
+                for burst_level in 0..=loadout.burst_level {
+                    let Some(variant) = select_variant(
+                        costume,
+                        loadout.enhancement,
+                        burst_level,
+                        loadout.potential_mask,
+                    ) else {
+                        continue;
+                    };
+                    if variant.burst_level != burst_level || !variant.executable {
+                        continue;
+                    }
+                    let cost = adjusted_sp_cost(variant.sp_cost, &effective_modifiers(unit));
+                    if available_sp >= cost {
+                        commands.push(UnitCommand::UseCostume {
+                            costume_id: loadout.costume_id.clone(),
+                            burst_level,
+                            explicit_target: None,
+                        });
+                    }
                 }
             }
         }
@@ -370,8 +368,7 @@ impl BattleEngine {
             let Some(unit) = self.state.units.get(unit_id) else {
                 continue;
             };
-            if !unit.alive {
-                commands.insert(*unit_id, UnitCommand::Wait);
+            if !unit.alive || !unit.can_act {
                 continue;
             }
             let legal = self.legal_actions_for_unit(*unit_id).ok();
@@ -411,6 +408,7 @@ impl BattleEngine {
                     };
                     candidates
                         .iter()
+                        .rev()
                         .find(|command| match command {
                             UnitCommand::UseCostume {
                                 costume_id,
@@ -432,7 +430,7 @@ impl BattleEngine {
                 .ai_priority
                 .iter()
                 .find_map(|wanted| {
-                    candidates.iter().find(|command| matches!(command, UnitCommand::UseCostume { costume_id, .. } if costume_id == wanted)).cloned()
+                    candidates.iter().rev().find(|command| matches!(command, UnitCommand::UseCostume { costume_id, .. } if costume_id == wanted)).cloned()
                 })
                 .or_else(|| candidates.iter().rev().find(|command| matches!(command, UnitCommand::UseCostume { .. })).cloned())
             ).unwrap_or(UnitCommand::NormalAttack);
@@ -569,15 +567,20 @@ impl BattleEngine {
             if self.state.terminal.is_some() {
                 break;
             }
-            let alive = self
-                .state
-                .units
-                .get(&unit_id)
-                .is_some_and(|unit| unit.alive);
-            if !alive {
+            let Some(actor) = self.state.units.get(&unit_id) else {
+                continue;
+            };
+            if !actor.alive {
                 self.emit(BattleEventKind::ActionSkipped {
                     actor_id: unit_id,
                     reason: "DEAD".into(),
+                });
+                continue;
+            }
+            if !actor.can_act {
+                self.emit(BattleEventKind::ActionSkipped {
+                    actor_id: unit_id,
+                    reason: "CANNOT_ACT".into(),
                 });
                 continue;
             }
@@ -677,7 +680,6 @@ impl BattleEngine {
             command: command.clone(),
         });
         match command {
-            UnitCommand::Wait => Ok(()),
             UnitCommand::NormalAttack => {
                 let selector = self.character_selector(actor_id)?;
                 let target = self.select_main_target(actor_id, selector, None)?;
@@ -3705,6 +3707,7 @@ mod tests {
                 id: "hero_skill".into(),
                 character_id: "hero".into(),
                 names: BTreeMap::new(),
+                skill_names: BTreeMap::new(),
                 range: vec![Offset { row: 0, depth: 0 }],
                 variants: vec![SkillVariant {
                     enhancement: 5,
@@ -3734,6 +3737,7 @@ mod tests {
                     activation_condition: None,
                     max_uses_per_party: None,
                     ai_sequence_index: None,
+                    description_ja: "test".into(),
                 }],
                 permanent_potential_modifiers: StatModifiers::default(),
                 bonding_modifiers: StatModifiers::default(),
@@ -4151,7 +4155,7 @@ mod tests {
         let invalid_order = TeamTurnPlan {
             side: Side::Player,
             order: vec![1, 1],
-            commands: BTreeMap::from([(1, UnitCommand::Wait)]),
+            commands: BTreeMap::from([(1, UnitCommand::NormalAttack)]),
             formation: BTreeMap::from([(1, Cell { row: 2, depth: 3 })]),
         };
         assert!(engine.step(invalid_order).is_err());
@@ -4162,7 +4166,7 @@ mod tests {
         let dead_move = TeamTurnPlan {
             side: Side::Player,
             order: vec![1],
-            commands: BTreeMap::from([(1, UnitCommand::Wait)]),
+            commands: BTreeMap::from([(1, UnitCommand::NormalAttack)]),
             formation: BTreeMap::from([(1, Cell { row: 2, depth: 3 })]),
         };
         assert!(engine.step(dead_move).is_err());
@@ -4624,6 +4628,64 @@ mod tests {
         engine.apply_effect(2, 2, counter);
         engine.apply_raw_damage(1, 2, 10, false, 1);
         assert_eq!(engine.state.units[&1].hp, 950);
+    }
+
+    #[test]
+    fn dead_units_have_no_command_but_keep_their_turn_order_for_revive() {
+        let mut engine = BattleEngine::new(catalog(), setup(BattleMode::Normal), 1).unwrap();
+        engine.state.units.get_mut(&1).unwrap().alive = false;
+        engine.state.units.get_mut(&1).unwrap().hp = 0;
+
+        assert!(
+            engine
+                .legal_actions_for_unit(1)
+                .unwrap()
+                .commands
+                .is_empty()
+        );
+        engine.finish_turn(Side::Player);
+
+        assert_eq!(
+            engine.state.teams[Side::Player.index()].action_order,
+            vec![1]
+        );
+    }
+
+    #[test]
+    fn legal_actions_expose_every_unlocked_affordable_burst_stage() {
+        let mut owned = (*catalog()).clone();
+        let base = owned.costumes["hero_skill"].variants[0].clone();
+        for burst_level in 1..=3 {
+            let mut variant = base.clone();
+            variant.burst_level = burst_level;
+            variant.sp_cost = 2 + i32::from(burst_level);
+            owned
+                .costumes
+                .get_mut("hero_skill")
+                .unwrap()
+                .variants
+                .push(variant);
+        }
+        let mut burst_setup = setup(BattleMode::Normal);
+        burst_setup.units[0].costume_loadout[0].burst_level = 3;
+        let mut engine = BattleEngine::new(Arc::new(owned), burst_setup, 1).unwrap();
+
+        let levels = |engine: &BattleEngine| {
+            engine
+                .legal_actions_for_unit(1)
+                .unwrap()
+                .commands
+                .into_iter()
+                .filter_map(|command| match command {
+                    UnitCommand::UseCostume { burst_level, .. } => Some(burst_level),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(levels(&engine), vec![0, 1, 2, 3]);
+
+        engine.state.teams[Side::Player.index()].sp = 4;
+        assert_eq!(levels(&engine), vec![0, 1, 2]);
     }
 
     #[test]

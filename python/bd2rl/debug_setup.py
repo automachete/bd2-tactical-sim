@@ -193,6 +193,10 @@ class DebugSetupCatalog:
             public_costume = {
                 "id": str(costume_id),
                 "name": self._display_name(record.get("names", {}), str(costume_id)),
+                "skill_name": self._display_name(
+                    record.get("skill_names", {}),
+                    self._display_name(record.get("names", {}), str(costume_id)),
+                ),
                 "character_id": str(character_id),
                 "max_enhancement": int(maximum["enhancement"]),
                 "max_burst_level": int(maximum["burst_level"]),
@@ -203,9 +207,8 @@ class DebugSetupCatalog:
                 "target_all": bool(maximum.get("target_all", False)),
                 "range": skill_range,
                 "operation_summary": self._operation_summary(maximum),
-                "permanent_potential_modifiers": record.get(
-                    "permanent_potential_modifiers", {}
-                ),
+                "description_ja": str(maximum.get("description_ja", "")),
+                "permanent_potential_modifiers": record.get("permanent_potential_modifiers", {}),
                 "bonding_modifiers": record.get("bonding_modifiers", {}),
             }
             if str(costume_id).startswith(("fiend:", "summon:")):
@@ -269,6 +272,20 @@ class DebugSetupCatalog:
         )
         if variant is None:
             return None
+        base_variant = next(
+            (
+                item
+                for item in record["variants"]
+                if int(item["enhancement"]) == enhancement
+                and int(item["burst_level"]) == 0
+                and int(item["potential_mask"]) == potential_mask
+            ),
+            None,
+        )
+        if base_variant is None:
+            raise ValueError(
+                f"costume {costume_id} burst variant has no matching burst-level-zero baseline"
+            )
         passive = unit.get("passive_modifiers", {})
         effects = unit.get("effects", [])
         sp_delta = int(passive.get("sp_cost_delta", 0)) + sum(
@@ -279,13 +296,18 @@ class DebugSetupCatalog:
             int(effect.get("spec", {}).get("modifiers", {}).get("cooldown_delta", 0))
             for effect in effects
         )
+        sp_cost = max(0, int(variant["sp_cost"]) + sp_delta)
+        base_sp_cost = max(0, int(base_variant["sp_cost"]) + sp_delta)
         return {
-            "sp_cost": max(0, int(variant["sp_cost"]) + sp_delta),
+            "sp_cost": sp_cost,
+            "base_sp_cost": base_sp_cost,
+            "burst_sp_cost": max(0, sp_cost - base_sp_cost),
             "cooldown": max(0, int(variant["cooldown"]) + cooldown_delta),
             "selector": str(variant["selector"]),
             "target_all": bool(variant.get("target_all", False)),
             "range": variant.get("range_override") or record.get("range", []),
             "operation_summary": self._operation_summary(variant),
+            "description_ja": str(variant.get("description_ja", "")),
         }
 
     @staticmethod
@@ -423,6 +445,7 @@ class DebugSetupCatalog:
                     "condition": self._condition_summary(variant.get("activation_condition")),
                     "range": variant.get("range_override") or record.get("range", []),
                     "operation_summary": self._operation_summary(variant),
+                    "description_ja": str(variant.get("description_ja", "")),
                 }
             )
         return sorted(result, key=lambda item: item["sequence"])
@@ -497,9 +520,7 @@ class DebugSetupCatalog:
                 None,
             ),
             "equipment": unit.get("equipment", {}),
-            "build_settings": copy.deepcopy(
-                unit.get("build_settings", DEFAULT_BUILD_SETTINGS)
-            ),
+            "build_settings": copy.deepcopy(unit.get("build_settings", DEFAULT_BUILD_SETTINGS)),
         }
 
     def build_setup(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -655,9 +676,7 @@ class DebugSetupCatalog:
             result[0]["costume_link_target"] = str(link_target)
         return result
 
-    def _build_equipment(
-        self, request: dict[str, Any], character_id: str
-    ) -> dict[str, Any]:
+    def _build_equipment(self, request: dict[str, Any], character_id: str) -> dict[str, Any]:
         value = request.get("equipment", {})
         if not isinstance(value, dict):
             raise ValueError("equipment must be an object keyed by equipment slot")
@@ -696,9 +715,7 @@ class DebugSetupCatalog:
             primary_stat = loadout.get("primary_stat")
             secondary_stat = loadout.get("secondary_stat")
             if exclusive:
-                primary_allowed = {
-                    option["key"] for option in definition["primary_stat_options"]
-                }
+                primary_allowed = {option["key"] for option in definition["primary_stat_options"]}
                 secondary_allowed = {
                     option["key"] for option in definition["secondary_stat_options"]
                 }
@@ -711,9 +728,7 @@ class DebugSetupCatalog:
                         f"exclusive equipment {equipment_id} requires a legal secondary_stat"
                     )
             elif primary_stat is not None or secondary_stat is not None:
-                raise ValueError(
-                    f"crafted equipment {equipment_id} has fixed primary abilities"
-                )
+                raise ValueError(f"crafted equipment {equipment_id} has fixed primary abilities")
             result[slot] = {
                 "equipment_id": equipment_id,
                 "refinement_score": score,
@@ -769,8 +784,7 @@ class DebugSetupCatalog:
         if set(external) != external_keys:
             raise ValueError("external_buffs has unknown or missing fields")
         normalized_external = {
-            key: _strict_int(external[key], f"external_buffs.{key}")
-            for key in external_keys
+            key: _strict_int(external[key], f"external_buffs.{key}") for key in external_keys
         }
         if normalized_external["shield_percent_bp"] < 0 or normalized_external["shield_flat"] < 0:
             raise ValueError("external shield values cannot be negative")
@@ -795,8 +809,7 @@ class DebugSetupCatalog:
         if set(filters) != {"exclusive", "ur4", "ur3", "monster"}:
             raise ValueError("gear_filters has unknown or missing fields")
         normalized_target = {
-            key: _strict_int(target[key], f"calculator.target_condition.{key}")
-            for key in target
+            key: _strict_int(target[key], f"calculator.target_condition.{key}") for key in target
         }
         if normalized_target["min_hp"] < 0:
             raise ValueError("calculator target HP cannot be negative")
@@ -814,12 +827,8 @@ class DebugSetupCatalog:
             raise ValueError("calculator.option_count must be between 1 and 15")
 
         return {
-            "engraving_enabled": _strict_bool(
-                value["engraving_enabled"], "engraving_enabled"
-            ),
-            "awakening_enabled": _strict_bool(
-                value["awakening_enabled"], "awakening_enabled"
-            ),
+            "engraving_enabled": _strict_bool(value["engraving_enabled"], "engraving_enabled"),
+            "awakening_enabled": _strict_bool(value["awakening_enabled"], "awakening_enabled"),
             "collection": normalized_collection,
             "external_buffs": normalized_external,
             "calculator": {

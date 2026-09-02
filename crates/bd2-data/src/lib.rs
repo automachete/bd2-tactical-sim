@@ -297,11 +297,13 @@ mod tests {
             activation_condition: None,
             max_uses_per_party: None,
             ai_sequence_index: None,
+            description_ja: "テスト説明".into(),
         };
         let costume = CostumeDefinition {
             id: "c0".into(),
             character_id: "c".into(),
             names: BTreeMap::from([("ko".into(), "테스트 스킬".into())]),
+            skill_names: BTreeMap::from([("ja".into(), "テストスキル".into())]),
             range: vec![Offset { row: 0, depth: 0 }],
             variants: vec![variant(0), variant(7)],
             permanent_potential_modifiers: Default::default(),

@@ -176,6 +176,10 @@ pub struct CostumeDefinition {
     pub id: String,
     pub character_id: String,
     pub names: BTreeMap<String, String>,
+    /// Localized in-game skill names. Costume names remain in `names` because
+    /// both are independently displayed by the official UI.
+    #[serde(default)]
+    pub skill_names: BTreeMap<String, String>,
     pub range: Vec<Offset>,
     pub variants: Vec<SkillVariant>,
     /// Permanent stat nodes unlocked in this costume's potential tree.
@@ -229,6 +233,11 @@ pub struct SkillVariant {
     /// One-based position in an encounter-controlled boss action cycle.
     #[serde(default)]
     pub ai_sequence_index: Option<u16>,
+    /// Official Japanese in-game skill text with the selected enhancement,
+    /// burst and potential values materialized. This is presentation data;
+    /// executable behaviour remains defined exclusively by `operations`.
+    #[serde(default)]
+    pub description_ja: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1132,7 +1141,6 @@ pub enum UnitCommand {
         #[serde(default)]
         explicit_target: Option<UnitId>,
     },
-    Wait,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

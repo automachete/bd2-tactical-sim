@@ -149,7 +149,7 @@ class MctsPlanner:
         legal = json.loads(self._sandbox.legal_actions_json(side))
         auto_plan = json.loads(self._sandbox.auto_plan_json(side))
         order = [entry["unit_id"] for entry in legal]
-        commands_by_actor = [entry["commands"] or [{"type": "WAIT"}] for entry in legal]
+        commands_by_actor = [entry["commands"] or [{"type": "NORMAL_ATTACK"}] for entry in legal]
         candidates: dict[str, dict[str, Any]] = {}
 
         def add(commands: list[dict[str, Any]], action_order: list[int] | None = None) -> None:

@@ -329,20 +329,15 @@ class GuiSession:
                 raise ValueError("preview actions must match the requested action order")
             commands: dict[str, dict[str, Any]] = {}
             for slot, current_id in enumerate(requested_order):
-                current_choices = legal_by_id.get(current_id) or [{"type": "WAIT"}]
+                current_choices = legal_by_id.get(current_id) or []
+                if not current_choices:
+                    continue
                 current_index = (
                     selected
                     if current_id == actor_id
                     else planned_indices[slot]
                     if planned_indices is not None
-                    else next(
-                        (
-                            index
-                            for index, candidate in enumerate(current_choices)
-                            if candidate["type"] == "WAIT"
-                        ),
-                        0,
-                    )
+                    else 0
                 )
                 if current_index < 0 or current_index >= len(current_choices):
                     raise ValueError("masked action selected in preview plan")
@@ -457,7 +452,9 @@ class GuiSession:
             raise ValueError("actions must contain one selection for every active unit")
         commands: dict[str, dict[str, Any]] = {}
         for slot, unit_id in enumerate(order):
-            choices = legal_by_id.get(unit_id) or [{"type": "WAIT"}]
+            choices = legal_by_id.get(unit_id) or []
+            if not choices:
+                continue
             selected = action_indices[slot]
             if selected < 0 or selected >= len(choices):
                 raise ValueError(f"masked action selected: slot={slot}, action={selected}")
@@ -509,8 +506,8 @@ class GuiSession:
                 metadata = self.catalog.command_metadata(unit, command)
                 if metadata is not None:
                     command["ui"] = metadata
-            legal_costumes = {
-                str(command["costume_id"])
+            legal_variants = {
+                (str(command["costume_id"]), int(command.get("burst_level", 0)))
                 for command in entry["commands"]
                 if command.get("type") == "USE_COSTUME"
             }
@@ -519,31 +516,32 @@ class GuiSession:
             unavailable: list[dict[str, Any]] = []
             for loadout in unit.get("costume_loadout", []):
                 costume_id = str(loadout["costume_id"])
-                if costume_id in legal_costumes:
-                    continue
-                command = {
-                    "type": "USE_COSTUME",
-                    "costume_id": costume_id,
-                    "burst_level": int(loadout.get("burst_level", 0)),
-                    "explicit_target": None,
-                }
-                metadata = self.catalog.command_metadata(unit, command)
-                if metadata is None:
-                    continue
-                cooldown = int(unit.get("cooldowns", {}).get(costume_id, 0))
-                reason = (
-                    "COOLDOWN"
-                    if cooldown > 0
-                    else "INSUFFICIENT_SP"
-                    if current_sp < int(metadata["sp_cost"])
-                    else "MASKED"
-                )
-                command.update(
-                    ui=metadata,
-                    unavailable_reason=reason,
-                    cooldown_remaining=cooldown,
-                )
-                unavailable.append(command)
+                for burst_level in range(int(loadout.get("burst_level", 0)) + 1):
+                    if (costume_id, burst_level) in legal_variants:
+                        continue
+                    command = {
+                        "type": "USE_COSTUME",
+                        "costume_id": costume_id,
+                        "burst_level": burst_level,
+                        "explicit_target": None,
+                    }
+                    metadata = self.catalog.command_metadata(unit, command)
+                    if metadata is None:
+                        continue
+                    cooldown = int(unit.get("cooldowns", {}).get(costume_id, 0))
+                    reason = (
+                        "COOLDOWN"
+                        if cooldown > 0
+                        else "INSUFFICIENT_SP"
+                        if current_sp < int(metadata["sp_cost"])
+                        else "MASKED"
+                    )
+                    command.update(
+                        ui=metadata,
+                        unavailable_reason=reason,
+                        cooldown_remaining=cooldown,
+                    )
+                    unavailable.append(command)
             entry["unavailable_commands"] = unavailable
         controller = "RULE_BASED" if state["rules"]["mode"] == "MONSTER_CHASER" else "MCTS"
         return {

@@ -157,12 +157,18 @@ const failures = [];
 let variants = 0;
 for (const costume of Object.values(catalog.costumes)) {
   variants += costume.variants.length;
+  if (!costume.id.includes(":") && !costume.skill_names?.ja) {
+    failures.push(`${costume.id}: official Japanese skill name is missing`);
+  }
   if (!costume.executable || costume.compile_diagnostics.length) {
     failures.push(`${costume.id}: costume compilation failed: ${costume.compile_diagnostics.join("; ")}`);
   }
   for (const variant of costume.variants) {
     if (!variant.executable || variant.compile_diagnostics.length) {
       failures.push(`${costume.id}/${variant.enhancement}/${variant.burst_level}/${variant.potential_mask}: variant compilation failed`);
+    }
+    if (!costume.id.includes(":") && (!variant.description_ja || /\{[^}]+\}/.test(variant.description_ja))) {
+      failures.push(`${costume.id}/${variant.enhancement}/${variant.burst_level}/${variant.potential_mask}: official Japanese description is missing or unresolved`);
     }
   }
   const variant = fullVariant(costume);

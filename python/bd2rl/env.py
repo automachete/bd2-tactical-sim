@@ -213,9 +213,12 @@ class Bd2Env(gym.Env[dict[str, np.ndarray], np.ndarray]):
     def _legal_action_lookup(self, side: str, order: list[int]) -> list[list[dict[str, Any]]]:
         legal = json.loads(self.simulator.legal_actions_json(side))
         legal_by_id = {entry["unit_id"]: entry["commands"] for entry in legal}
-        lookup = [legal_by_id.get(unit_id, [{"type": "WAIT"}]) for unit_id in order]
+        lookup = [legal_by_id.get(unit_id) or [{"type": "NORMAL_ATTACK"}] for unit_id in order]
         while len(lookup) < MAX_TEAM_UNITS:
-            lookup.append([{"type": "WAIT"}])
+            # Padding slots are masked policy dimensions and are never sent to
+            # the simulator. A regular command keeps the lookup rectangular
+            # without introducing a user-visible no-op action.
+            lookup.append([{"type": "NORMAL_ATTACK"}])
         return lookup
 
     def _observation(self, perspective_side: str) -> dict[str, np.ndarray]:

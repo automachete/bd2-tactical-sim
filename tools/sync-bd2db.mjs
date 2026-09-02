@@ -147,6 +147,17 @@ function findCharacterData(text) {
   return result.value;
 }
 
+function findCostumeI18n(text) {
+  const result = resolvedStaticCandidates(text).find(({ value }) => {
+    if (!value || Array.isArray(value) || typeof value !== "object") return false;
+    const entries = Object.values(value);
+    return entries.length >= 100
+      && entries.every((entry) => entry?.costumeId && Array.isArray(entry?.skill_ja));
+  });
+  if (!result) throw new Error("costume localization map was not found");
+  return result.value;
+}
+
 function findRangeData(text) {
   const result = staticCandidates(text).find(({ value }) =>
     value && !Array.isArray(value) && Array.isArray(value.all) && Array.isArray(value["001"]),
@@ -1131,7 +1142,27 @@ function statModifiers(entries) {
   return modifiers;
 }
 
-function transformCharacters(rawCharacters, ranges, source) {
+function resolvedJapaneseDescription(localized, level, burstLevel, potentialMask) {
+  const substitute = (line) => String(line).replace(/\{([A-Z][A-Z0-9_]*)\}/g, (token, key) => {
+    if (level[key] === undefined || level[key] === null) return token;
+    const numeric = Number(level[key]);
+    return Number.isFinite(numeric) ? String(numeric) : String(level[key]);
+  });
+  const lines = [...(localized.skill_ja ?? [])];
+  for (const stage of localized.burst_ja ?? []) {
+    if (integer(stage.level) <= burstLevel && stage.type === "Plus" && stage.value) {
+      lines.push(String(stage.value).replace(/^\s*\[追加能力\]\s*/, ""));
+    }
+  }
+  for (const [index, potential] of (localized.skillPotential_ja ?? []).entries()) {
+    if ((potentialMask & (1 << index)) !== 0 && potential.type === "Plus" && potential.value) {
+      lines.push(potential.value);
+    }
+  }
+  return lines.map(substitute).filter(Boolean).join("\n");
+}
+
+function transformCharacters(rawCharacters, costumeI18n, ranges, source) {
   const characters = {};
   const costumes = {};
   for (const raw of rawCharacters.filter((character) => String(character.star) === "5")) {
@@ -1150,6 +1181,7 @@ function transformCharacters(rawCharacters, ranges, source) {
       source: { ...source, raw_payload: raw },
     };
     for (const costume of raw.costumes ?? []) {
+      const localized = costumeI18n[costume.costumeId] ?? {};
       const variants = [];
       const allDiagnostics = [];
       for (const [enhancement, level] of (costume.level ?? []).entries()) {
@@ -1207,6 +1239,7 @@ function transformCharacters(rawCharacters, ranges, source) {
               executable: variantDiagnostics.length === 0 && compiled.operations.length > 0,
               compile_diagnostics: variantDiagnostics,
               preemptive: String(costume.tags ?? "").split(",").includes("先發制人"),
+              description_ja: resolvedJapaneseDescription(localized, resolvedLevel, burstLevel, potentialMask),
             });
           }
         }
@@ -1216,14 +1249,27 @@ function transformCharacters(rawCharacters, ranges, source) {
       costumes[costume.costumeId] = {
         id: costume.costumeId,
         character_id: raw.characterId,
-        names: { "zh-TW": costume.costumeName ?? costume.costumeId },
+        names: {
+          "zh-TW": costume.costumeName ?? costume.costumeId,
+          "zh-CN": localized.costumeName_CN ?? costume.costumeName,
+          en: localized.costumeName_en,
+          ja: localized.costumeName_ja,
+          ko: localized.costumeName_ko,
+        },
+        skill_names: {
+          "zh-TW": costume.skillName ?? costume.costumeId,
+          "zh-CN": localized.skillName_CN ?? costume.skillName,
+          en: localized.skillName_en,
+          ja: localized.skillName_ja,
+          ko: localized.skillName_ko,
+        },
         range: rangeOffsets(ranges, code),
         variants,
         permanent_potential_modifiers: statModifiers(costume.permanentStats),
         bonding_modifiers: statModifiers(costume.bondingStat),
         executable: variants.some((variant) => variant.executable),
         compile_diagnostics: diagnostics,
-        source: { ...source, raw_payload: costume },
+        source: { ...source, raw_payload: { ...costume, _localization: localized } },
       };
     }
   }
@@ -1357,6 +1403,7 @@ function transformFiend(raw, source) {
       id: costumeId,
       character_id: `fiend:${id}`,
       names: skill.localizedName ?? {},
+      skill_names: skill.localizedName ?? {},
       range: (skill.gameFacingRangeOffsets?.length ? skill.gameFacingRangeOffsets : [{ x: 0, y: 0 }]).map((offset) => ({ row: offset.x, depth: offset.y })),
       variants: [{
         enhancement: 0,
@@ -1378,6 +1425,7 @@ function transformFiend(raw, source) {
         activation_condition: activationCondition,
         max_uses_per_party: maxUsesPerParty,
         ai_sequence_index: skill.kind === "normal" ? integer(skill.sourceOrder) : null,
+        description_ja: String(skill.localizedDescription?.ja ?? skill.localizedDescription?.["ja-JP"] ?? ""),
       }],
       executable: diagnostics.length === 0,
       compile_diagnostics: diagnostics,
@@ -1448,11 +1496,13 @@ function transformSummons(rawSummons, ranges, source) {
         for (const operation of compiled.operations) if (operation.op === "DEAL_DAMAGE") operation.can_evade = false;
         compiled.operations.push({ op: "SELF_DESTRUCT" });
       }
-      variants.push({ enhancement, burst_level: 0, potential_mask: 0, sp_cost: integer(level.SP), cooldown: integer(level.CD), selector: selector(raw.target), fixed_target_cell: null, target_all: false, range_override: null, operations: compiled.operations, consume_remaining_sp: false, executable: compiled.diagnostics.length === 0 && compiled.operations.length > 0, compile_diagnostics: compiled.diagnostics, preemptive: false });
+      variants.push({ enhancement, burst_level: 0, potential_mask: 0, sp_cost: integer(level.SP), cooldown: integer(level.CD), selector: selector(raw.target), fixed_target_cell: null, target_all: false, range_override: null, operations: compiled.operations, consume_remaining_sp: false, executable: compiled.diagnostics.length === 0 && compiled.operations.length > 0, compile_diagnostics: compiled.diagnostics, preemptive: false, description_ja: "" });
     }
     const code = rangeCode(raw.range);
     costumes[costumeId] = {
-      id: costumeId, character_id: characterId, names: { "zh-TW": raw.skillName ?? costumeId },
+      id: costumeId, character_id: characterId,
+      names: { "zh-TW": raw.skillName ?? costumeId, ja: raw.costumeName_ja },
+      skill_names: { "zh-TW": raw.skillName ?? costumeId, ja: raw.skillName_ja },
       range: rangeOffsets(ranges, code), variants,
       executable: variants.some((variant) => variant.executable), compile_diagnostics: [...new Set(variants.flatMap((variant) => variant.compile_diagnostics))],
       source: { ...source, raw_payload: raw },
@@ -1504,7 +1554,7 @@ const equipmentSource = {
   source_digest: sha256(`${equipmentText}\n${equipmentCoreText}`),
 };
 const rawCharacters = findCharacterData(characterText);
-const transformed = transformCharacters(rawCharacters, findRangeData(rangeText), characterSource);
+const transformed = transformCharacters(rawCharacters, findCostumeI18n(characterText), findRangeData(rangeText), characterSource);
 const transformedFiend = transformFiend(findFiendData(fiendText), fiendSource);
 const transformedSummons = transformSummons(findSummonData(summonText), findRangeData(rangeText), summonSource);
 const transformedEquipment = transformEquipment(

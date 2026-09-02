@@ -32,7 +32,7 @@
 | O-01 | [韓国公式サイト](https://www.browndust2.com/kr/) | 継続更新 | 製品・公式導線 | A |
 | O-02 | [韓国公式ラウンジ](https://game.naver.com/lounge/BrownDust2/home) | 継続更新 | 最新告知、アップデート、ゲームガイドの基準点 | A |
 | O-03 | [2026-08-27アップデート告知](https://game.naver.com/lounge/BrownDust2/board/detail/8101675) | 2026-08-27 | バースト3段階、追加SP、段階別の打撃数・範囲・効果差、練習戦闘、マルチフェーズ戦闘、フェーズ間の効果非継承、フェーズ戦闘中のデスタイム無効 | A |
-| O-04 | [公式ゲームガイド「戦闘時に選択可能な行動」](https://game.naver.com/lounge/BrownDust2/board/detail/4638212) | 公式ガイド | 通常攻撃、ノックバック、スキルという行動分類 | A |
+| O-04 | [公式ゲームガイド「戦闘時に選択可能な行動」](https://game.naver.com/lounge/BrownDust2/board/detail/4638212) | 2026-09-02再確認 | 通常攻撃、ノックバック、スキルという行動分類。プレイヤーが任意選択する「待機」は記載されず、実装上も合法手に含めない | A |
 | O-05 | [Google Play韓国版ストア](https://play.google.com/store/apps/details?hl=ko&id=com.neowizgames.game.browndust2) | 2026-08-27更新 | 3×4マスを使う戦術戦闘 | A |
 | O-06 | [第38回開発者ノート転載](https://bbs.ruliweb.com/news/board/320108/read/2280526) | 2025-11-08、現行攻略で追認 | ゴールデンコロシアムの基本構造。5×5・9コスチューム、コスチューム単位配置、装備不使用、1体ずつ交互行動、先後ランダム、ALLターン、無限SP・CTなし・スキル優先、戦闘中チェイン非リセット、剣闘士の加護 | A-/B+ |
 | O-07 | [韓国公式サイトの開発者ノート画像資産](https://www.browndust2.com/) | 継続更新 | O-06に含まれる公式原稿・画像の発信元 | A |
@@ -73,6 +73,7 @@ K-07とK-11のLv.15は各記事掲載時点または当該開催の値であり�
 | D-05 | [BD2DB オプション計算機](https://browndust2-db.souseha.com/ja/option-calculator) | 2026-09-01 | UR IV/EX URのMain/Sub/Refinements、5UR専用Extra値、精錬スコア18既定、外部バフ、ダメージ種別、ワールドバフ | B+ |
 | D-06 | [BD2DB ステータス計算機](https://browndust2-db.souseha.com/ja/stat-calculator) | 2026-09-01 | 刻印、覚醒、コスチューム恒常潜在力・結束、装備、コレクション、外部バフを分離した能力値合成入力 | B+ |
 | D-07 | [BD2DB 装備ピッカー](https://browndust2-db.souseha.com/ja/gear-picker) | 2026-09-01 | 属性有利、対象HP/防御/魔法抵抗、候補数、専用/UR IV/UR III/魔物装備フィルターの既定値と入力範囲 | B+ |
+| D-08 | [BD2DB コスチューム一覧](https://browndust2-db.souseha.com/ja/costumes) | 2026-09-02 | 現行静的データの `costumeName_ja`、`skillName_ja`、`skill_ja`、`skillPotential_ja`、`burst_ja` と派生値を解決し、日本語スキル名・説明へ反映 | B+ |
 
 取得処理は第三者JavaScriptを実行せず、構文木からリテラルデータだけを許可リスト方式で読む。同一スナップショットを再生成できるよう、原文ペイロード、URL、取得日、ダイジェストを保存する。
 
