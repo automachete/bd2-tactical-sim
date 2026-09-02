@@ -4,6 +4,7 @@ import {
   burstOptionsForCostume,
   cellKey,
   commandCost,
+  CURRENT_SP_CAP,
   keyboardTarget,
   knockbackPreviewCells,
   knockbackPresentation,
@@ -70,24 +71,21 @@ const costumeById = id => [
 ].find(costume => costume.id === id);
 const equipmentById = id => catalog?.equipment?.find(item => item.id === id);
 const equipmentSlots = ["WEAPON", "ARMOR", "HELMET", "JEWELRY", "GLOVES"];
-const defaultBuildSettings = () => clone(catalog?.build_settings_default || {
-  engraving_enabled: true,
-  awakening_enabled: true,
-  collection: { max_hp_bp: 8000, attack_bp: 8000, magic_bp: 8000, crit_rate_bp: 5000 },
-  external_buffs: { attack_bonus_bp: 0, crit_rate_bp: 0, crit_damage_bp: 0, property_damage_bp: 0, shield_percent_bp: 0, shield_flat: 0 },
-  calculator: {
-    damage_type: "NORMAL",
-    elemental_advantage: true,
-    defense_type: "NONE",
-    target_condition: { min_hp: 0, min_defense_bp: 0, min_magic_resist_bp: 0 },
-    option_count: 15,
-    gear_filters: { exclusive: true, ur4: true, ur3: true, monster: true },
-    world_buff_enabled: false,
-  },
-});
+const defaultBuildSettings = () => {
+  if (!catalog?.build_settings_default) {
+    throw new Error("catalog is missing the default character build settings");
+  }
+  return clone(catalog.build_settings_default);
+};
 const displayCharacter = id => entityById(id)?.name || id;
 const formatNumber = value => Number(value || 0).toLocaleString("ja-JP");
-const elementClass = element => String(element || "neutral").toLowerCase();
+const KNOWN_ELEMENTS = new Set(["FIRE", "WATER", "WIND", "LIGHT", "DARK"]);
+const elementClass = element => {
+  if (element === undefined || element === null || element === "") return "neutral";
+  const normalized = String(element).toUpperCase();
+  if (!KNOWN_ELEMENTS.has(normalized)) throw new Error(`Unsupported element: ${element}`);
+  return normalized.toLowerCase();
+};
 const initials = character => String(character?.name || character?.id || t("unit.fiend")).trim().slice(0, 2).toUpperCase();
 const portraitPath = character => character?.rarity === 5
   ? `/assets/character-icons/64/${encodeURIComponent(character.id)}.png`
@@ -552,7 +550,10 @@ const equipmentModifierLabels = {
 };
 
 const addEquipmentModifiers = (target, modifiers) => {
-  for (const [field, amount] of Object.entries(modifiers || {})) {
+  if (!modifiers || typeof modifiers !== "object") {
+    throw new Error("equipment modifier metadata is missing");
+  }
+  for (const [field, amount] of Object.entries(modifiers)) {
     target[field] = Number(target[field] || 0) + Number(amount);
   }
 };
@@ -560,17 +561,27 @@ const addEquipmentModifiers = (target, modifiers) => {
 const equipmentBonus = loadout => {
   if (!loadout) return {};
   const definition = equipmentById(loadout.equipment_id);
-  if (!definition) return {};
-  const total = { ...(definition.modifiers_by_refinement_score[String(loadout.refinement_score)] || {}) };
+  if (!definition) throw new Error(`equipped item '${loadout.equipment_id}' is missing from the catalog`);
   const score = String(loadout.refinement_score);
+  const refinement = definition.modifiers_by_refinement_score[score];
+  if (!refinement) throw new Error(`item '${definition.id}' has no refinement score ${score}`);
+  const total = { ...refinement };
   if (loadout.primary_stat) {
-    addEquipmentModifiers(total, definition.primary_modifiers_by_refinement_score?.[score]?.[loadout.primary_stat]);
+    const modifier = definition.primary_modifiers_by_refinement_score?.[score]?.[loadout.primary_stat];
+    if (!modifier) throw new Error(`item '${definition.id}' has no primary stat '${loadout.primary_stat}' at score ${score}`);
+    addEquipmentModifiers(total, modifier);
   }
   if (loadout.secondary_stat) {
-    addEquipmentModifiers(total, definition.secondary_modifiers_by_refinement_score?.[score]?.[loadout.secondary_stat]);
+    const modifier = definition.secondary_modifiers_by_refinement_score?.[score]?.[loadout.secondary_stat];
+    if (!modifier) throw new Error(`item '${definition.id}' has no secondary stat '${loadout.secondary_stat}' at score ${score}`);
+    addEquipmentModifiers(total, modifier);
   }
-  for (const key of loadout.substats || []) {
-    const modifier = definition.allowed_substats.find(item => item.key === key)?.modifiers || {};
+  if (!Array.isArray(loadout.substats) || loadout.substats.length !== 3) {
+    throw new Error(`item '${definition.id}' must have exactly three substats`);
+  }
+  for (const key of loadout.substats) {
+    const modifier = definition.allowed_substats.find(item => item.key === key)?.modifiers;
+    if (!modifier) throw new Error(`item '${definition.id}' does not allow substat '${key}'`);
     addEquipmentModifiers(total, modifier);
   }
   return total;
@@ -1451,7 +1462,7 @@ const renderActionDock = () => {
     const isUnaffordable = command.unavailable_reason === "INSUFFICIENT_SP"
       || (available && !isSelected && prospectiveCost > Number(currentPlayerTeam().sp));
     const isOnCooldown = command.unavailable_reason === "COOLDOWN";
-    const miniCells = rangePreviewCells(meta.range || []);
+    const miniCells = rangePreviewCells(meta.range);
     const miniMarkup = command.type === "KNOCKBACK"
       ? knockbackDiagramMarkup(meta.knockback_direction)
       : Array.from({ length: 12 }, (_, cellIndex) => {
@@ -1649,7 +1660,7 @@ const requestRangePreview = (unit, command, meta) => {
   window.clearTimeout(previewTimer);
   previewController?.abort();
   previewController = null;
-  renderRange(meta.range || []);
+  renderRange(meta.range);
   if (!command || animationRunning) return;
   previewTimer = window.setTimeout(async () => {
     if (generation !== previewGeneration || selectedUnitId !== unit.id) return;
@@ -1667,9 +1678,12 @@ const requestRangePreview = (unit, command, meta) => {
         actions: actionIndices(plannedOrder, plannedCommands),
       }, controller.signal);
       if (generation !== previewGeneration || selectedUnitId !== unit.id) return;
-      renderRange(meta.range || [], preview, meta);
+      renderRange(meta.range, preview, meta);
     } catch (error) {
-      if (error?.name !== "AbortError" && generation === previewGeneration) renderRange(meta.range || []);
+      if (error?.name !== "AbortError" && generation === previewGeneration) {
+        renderRange(meta.range);
+        showError(error);
+      }
     } finally {
       if (previewController === controller) previewController = null;
     }
@@ -1687,7 +1701,8 @@ const renderSp = () => {
 let lastSpBreakdown = null;
 
 const renderSpGauge = (displayed, current = displayed, burst = 0) => {
-  const cap = Number(snapshot.state.rules.sp_cap ?? Math.max(20, current));
+  const cap = Number(snapshot.state.rules.sp_cap);
+  if (cap !== CURRENT_SP_CAP) throw new Error(`Invalid SP cap: ${snapshot.state.rules.sp_cap}`);
   const breakdown = spBreakdown({ current, reserved: current - displayed, burst, cap });
   const panel = $(".sp-panel");
   $("#sp-text").textContent = `${breakdown.remaining} / ${breakdown.cap}`;
@@ -1793,7 +1808,7 @@ const humanEvent = event => {
     case "MONSTER_LEVEL_ADVANCED": detail = t("event.levelAdvanced", { level: kind.to_level, amount: formatNumber(kind.carry_damage) }); break;
     case "TURN_ENDED": detail = t("event.turnEnded", { turn: kind.turn, side: t(`battle.side.${kind.side}`) }); break;
     case "BATTLE_ENDED": detail = t("event.battleEnded", { outcome: t(`battle.outcome.${kind.result?.outcome}`) }); break;
-    default: detail = t("event.unknown");
+    default: throw new Error(`Unsupported battle event: ${String(kind.type)}`);
   }
   return `${sequence}  ${detail}`;
 };

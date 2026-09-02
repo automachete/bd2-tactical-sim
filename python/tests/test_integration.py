@@ -29,6 +29,18 @@ def event_kinds(transition: dict[str, object]) -> list[dict[str, object]]:
     return [event["kind"] for event in transition["events"]]  # type: ignore[index]
 
 
+def test_new_battle_reuses_catalog_without_sharing_runtime_state() -> None:
+    setup_json = MONSTER_SCENARIO.read_text(encoding="utf-8")
+    source = Simulator(str(DATABASE), setup_json, 7)
+    sibling = source.new_battle(setup_json, 7)
+    baseline = sibling.state_json()
+
+    assert source.state_json() == baseline
+    source.step_auto_json()
+    assert source.state_json() != baseline
+    assert sibling.state_json() == baseline
+
+
 def test_generated_catalog_and_database_have_every_variant() -> None:
     catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
     variants = [
@@ -158,6 +170,12 @@ def test_generated_catalog_and_database_have_every_variant() -> None:
         "APPLY_EFFECT",
         "DEAL_DAMAGE",
     ]
+    venaka_burst_cooldowns = [
+        variant["cooldown"]
+        for variant in catalog["costumes"]["Venaka_1"]["variants"]
+        if variant["enhancement"] == 5 and variant["potential_mask"] == 0
+    ]
+    assert venaka_burst_cooldowns == [5, 3, 3, 3]
     rafina_operations = max_variant("Rafina_1")["operations"]
     rafina_order = [
         next(
@@ -307,6 +325,9 @@ def test_snapshot_replay_and_gym_observation_cover_all_parts() -> None:
     observation, _ = environment.reset()
     assert observation["units"].shape == (MAX_TOTAL_UNITS, UNIT_FEATURES)
     assert observation["global"].shape == (GLOBAL_FEATURES,)
+    # Lathel_4 is a current preemptive skill and pays 1 SP during initialization.
+    assert observation["global"][2] == pytest.approx(14 / 20)
+    assert observation["global"][3] == pytest.approx(0 / 20)
     assert observation["actor_indices"].shape == (MAX_TEAM_UNITS,)
     assert int(observation["unit_mask"].sum()) == 18
     snapshot = environment.snapshot_json()

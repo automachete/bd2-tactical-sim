@@ -8,6 +8,7 @@ const html = readFileSync(`${root}/index.html`, "utf8");
 const css = readFileSync(`${root}/styles.css`, "utf8");
 const app = readFileSync(`${root}/app.js`, "utf8");
 const i18n = readFileSync(`${root}/i18n.mjs`, "utf8");
+const battleModel = readFileSync(`${root}/battle-ui-model.mjs`, "utf8");
 
 for (const [name, content] of [["HTML", html], ["CSS", css], ["JavaScript", app]]) {
   test(`${name} has no external HTTP asset reference`, () => assert.doesNotMatch(content, /https?:\/\//i));
@@ -138,6 +139,9 @@ test("global SP HUD uses centered diamonds without visible category counters", (
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
   assert.match(app, /plannedBurstSpCost/);
   assert.match(app, /spBreakdown/);
+  assert.match(battleModel, /CURRENT_SP_CAP\s*=\s*20/);
+  assert.match(app, /cap !== CURRENT_SP_CAP/);
+  assert.doesNotMatch(app, /Math\.max\(20,\s*current\)/);
 });
 test("burst-capable costume cards expose localized previous and next stage controls", () => {
   assert.match(app, /burstOptionsForCostume/);

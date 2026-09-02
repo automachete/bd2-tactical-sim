@@ -68,13 +68,18 @@ class MctsPlanner:
         setup_json: str,
         seed: int,
         config: MctsConfig | None = None,
+        template: _native.Simulator | None = None,
     ) -> None:
         self.database = database.resolve()
         self.setup_json = setup_json
         self.seed = seed
         self.config = config or MctsConfig()
         self.config.validate()
-        self._sandbox = _native.Simulator(str(self.database), setup_json, seed)
+        self._sandbox = (
+            _native.Simulator(str(self.database), setup_json, seed)
+            if template is None
+            else template.new_battle(setup_json, seed)
+        )
 
     def choose(self, live_simulator: _native.Simulator, side: str) -> MctsResult:
         side = side.upper()
@@ -149,7 +154,9 @@ class MctsPlanner:
         legal = json.loads(self._sandbox.legal_actions_json(side))
         auto_plan = json.loads(self._sandbox.auto_plan_json(side))
         order = [entry["unit_id"] for entry in legal]
-        commands_by_actor = [entry["commands"] or [{"type": "NORMAL_ATTACK"}] for entry in legal]
+        actionable = [(entry["unit_id"], entry["commands"]) for entry in legal if entry["commands"]]
+        actionable_ids = [actor for actor, _ in actionable]
+        commands_by_actor = [commands for _, commands in actionable]
         candidates: dict[str, dict[str, Any]] = {}
 
         def add(commands: list[dict[str, Any]], action_order: list[int] | None = None) -> None:
@@ -157,20 +164,21 @@ class MctsPlanner:
                 "side": side,
                 "order": action_order or order,
                 "commands": {
-                    str(actor): command for actor, command in zip(order, commands, strict=True)
+                    str(actor): command
+                    for actor, command in zip(actionable_ids, commands, strict=True)
                 },
                 "formation": {},
             }
             candidates.setdefault(self._canonical(plan), plan)
 
         if order:
+            auto_command_map = auto_plan["commands"]
+            if set(auto_command_map) != {str(actor) for actor in actionable_ids}:
+                raise RuntimeError("auto plan does not exactly cover the actionable units")
             candidates[self._canonical(auto_plan)] = auto_plan
             add([commands[0] for commands in commands_by_actor])
             add([commands[-1] for commands in commands_by_actor])
-            auto_commands = [
-                auto_plan.get("commands", {}).get(str(actor), commands[0])
-                for actor, commands in zip(order, commands_by_actor, strict=True)
-            ]
+            auto_commands = [auto_command_map[str(actor)] for actor in actionable_ids]
             if len(order) > 1:
                 add(auto_commands, list(reversed(order)))
                 for actor in order[1:]:

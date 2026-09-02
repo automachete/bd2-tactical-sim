@@ -8,6 +8,7 @@ import {
   cellKey,
   commandBurstCost,
   commandCost,
+  CURRENT_SP_CAP,
   isValidCell,
   keyboardTarget,
   knockbackPreviewCells,
@@ -29,8 +30,8 @@ import {
 } from "../battle-ui-model.mjs";
 
 const legal = new Map([
-  [1, { commands: [{ type: "NORMAL_ATTACK" }, { type: "USE_COSTUME", costume_id: "a" }] }],
-  [2, { commands: [{ type: "NORMAL_ATTACK" }, { type: "USE_COSTUME", costume_id: "b" }] }],
+  [1, { commands: [{ type: "NORMAL_ATTACK" }, { type: "USE_COSTUME", costume_id: "a", ui: { sp_cost: 4, burst_sp_cost: 0 } }] }],
+  [2, { commands: [{ type: "NORMAL_ATTACK" }, { type: "USE_COSTUME", costume_id: "b", ui: { sp_cost: 3, burst_sp_cost: 0 } }] }],
 ]);
 const legalById = unitId => legal.get(Number(unitId));
 const costumes = { a: { sp_cost: 4 }, b: { sp_cost: 3 } };
@@ -118,7 +119,7 @@ for (const [unitId, direction, expected] of [
 }
 
 test("commandCost charges only costumes", () => {
-  assert.equal(commandCost({ type: "USE_COSTUME", costume_id: "a" }, costumeLookup), 4);
+  assert.equal(commandCost({ type: "USE_COSTUME", costume_id: "a", ui: { sp_cost: 4 } }, costumeLookup), 4);
   assert.equal(commandCost({ type: "NORMAL_ATTACK" }, costumeLookup), 0);
 });
 
@@ -129,7 +130,18 @@ test("commandCost prefers exact runtime variant metadata over catalog maximum", 
 test("commandBurstCost reads only the additional burst portion of costume SP", () => {
   assert.equal(commandBurstCost({ type: "USE_COSTUME", ui: { sp_cost: 6, burst_sp_cost: 3 } }), 3);
   assert.equal(commandBurstCost({ type: "NORMAL_ATTACK", ui: { burst_sp_cost: 9 } }), 0);
-  assert.equal(commandBurstCost({ type: "USE_COSTUME" }), 0);
+  assert.throws(() => commandBurstCost({ type: "USE_COSTUME", costume_id: "missing" }), /resolved burst SP cost/);
+});
+
+test("SP planning rejects missing runtime metadata and legal-action records", () => {
+  assert.throws(
+    () => commandCost({ type: "USE_COSTUME", costume_id: "missing" }, costumeLookup),
+    /resolved SP cost/,
+  );
+  assert.throws(
+    () => plannedSpCost([99], new Map(), legalById, costumeLookup),
+    /missing legal actions/,
+  );
 });
 
 test("burstOptionsForCostume returns every stage in order and prefers legal variants", () => {
@@ -180,23 +192,14 @@ test("spBreakdown keeps remaining, regular consumption, and burst consumption di
   });
 });
 
-test("spBreakdown clamps corrupt or stale values without producing negative buckets", () => {
-  assert.deepEqual(spBreakdown({ current: 25, reserved: 30, burst: 40, cap: 20 }), {
-    cap: 20,
-    current: 20,
-    remaining: 0,
-    consumed: 20,
-    regularConsumed: 0,
-    burst: 20,
-  });
-  assert.deepEqual(spBreakdown({ current: -2, reserved: -4, burst: -1, cap: 20 }), {
-    cap: 20,
-    current: 0,
-    remaining: 0,
-    consumed: 0,
-    regularConsumed: 0,
-    burst: 0,
-  });
+test("spBreakdown rejects corrupt state instead of hiding it in the HUD", () => {
+  assert.equal(CURRENT_SP_CAP, 20);
+  assert.throws(() => spBreakdown({ current: 21, reserved: 0, burst: 0, cap: 20 }), /outside/);
+  assert.throws(() => spBreakdown({ current: -1, reserved: 0, burst: 0, cap: 20 }), /outside/);
+  assert.throws(() => spBreakdown({ current: 20, reserved: 21, burst: 0, cap: 20 }), /reserved/);
+  assert.throws(() => spBreakdown({ current: 20, reserved: 5, burst: 6, cap: 20 }), /burst/);
+  assert.throws(() => spBreakdown({ current: 20, reserved: 0, burst: 0, cap: 21 }), /cap/);
+  assert.throws(() => spBreakdown({ current: 20.5, reserved: 0, burst: 0, cap: 20 }), /integers/);
 });
 
 test("selectCommand accepts an affordable command", () => {
@@ -275,6 +278,23 @@ test("rangePreviewCells centers relative offsets instead of treating them as abs
     { row: 0, depth: 1 }, { row: 1, depth: 0 }, { row: 0, depth: 0 },
   ];
   assert.deepEqual([...rangePreviewCells(range)].sort(), ["0,1", "1,0", "1,1", "1,2", "2,1"]);
+});
+
+test("range helpers reject missing and malformed battle metadata", () => {
+  assert.throws(() => rangePreviewCells(undefined), /array/);
+  assert.throws(() => rangePreviewCells([{ row: 0, depth: "unknown" }]), /integer/);
+  assert.throws(
+    () => projectRangeCells(undefined, { row: 0, depth: 0 }),
+    /array/,
+  );
+  assert.throws(
+    () => projectRangeCells([{ row: 0, depth: 0 }], { row: 3, depth: 0 }),
+    /outside/,
+  );
+  assert.throws(
+    () => projectRangeCells([{ row: Number.NaN, depth: 0 }], { row: 0, depth: 0 }),
+    /integer/,
+  );
 });
 
 test("projectRangeCells anchors offsets to the Rust-resolved target and clips board edges", () => {

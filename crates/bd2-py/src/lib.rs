@@ -60,6 +60,13 @@ impl PySimulator {
         self.engine.restore_json(state_json).map_err(py_error)
     }
 
+    #[pyo3(signature = (setup_json, seed=0))]
+    fn new_battle(&self, setup_json: &str, seed: u64) -> PyResult<Self> {
+        let setup: BattleSetup = serde_json::from_str(setup_json).map_err(py_error)?;
+        let engine = self.engine.new_battle(setup, seed).map_err(py_error)?;
+        Ok(Self { engine })
+    }
+
     fn legal_actions_json(&self, side: &str) -> PyResult<String> {
         let side = parse_side(side)?;
         serde_json::to_string(&self.engine.legal_actions(side)).map_err(py_error)
@@ -170,7 +177,10 @@ impl PyBatchSimulator {
             let mut commands = BTreeMap::new();
             for (position, unit_id) in order.iter().enumerate() {
                 let legal = slot.engine.legal_actions_for_unit(*unit_id).map_err(|error| error.to_string())?.commands;
-                let selected = indices.get(position).copied().unwrap_or(0);
+                if legal.is_empty() {
+                    continue;
+                }
+                let selected = indices.get(position).copied().ok_or_else(|| format!("missing action at slot {position}"))?;
                 let command = legal.get(selected).cloned().ok_or_else(|| format!("masked action selected at slot {position}: {selected}"))?;
                 commands.insert(*unit_id, command);
             }
@@ -184,7 +194,10 @@ impl PyBatchSimulator {
             let terminal = slot.engine.state().terminal.clone();
             let terminal_reward = terminal.as_ref().map(|result| match result.outcome { bd2_core::Outcome::Win => 1.0, bd2_core::Outcome::Loss => -1.0, _ => 0.0 }).unwrap_or(0.0);
             let done = terminal.is_some();
-            let terminal_json = terminal.as_ref().map(|result| serde_json::to_value(result).unwrap_or_default());
+            let terminal_json = terminal.as_ref().map(|result| {
+                serde_json::to_value(result)
+                    .expect("terminal result must always serialize to JSON")
+            });
             if done {
                 slot.episode = slot.episode.wrapping_add(1);
                 slot.engine = BattleEngine::new(Arc::clone(&catalog), setup.clone(), episode_seed(base_seed, index, slot.episode)).map_err(|error| error.to_string())?;
@@ -385,7 +398,10 @@ fn training_frame(engine: &BattleEngine, side: Side) -> serde_json::Value {
         .take(MAX_TEAM)
         .enumerate()
     {
-        actor_indices[slot] = unit_index_by_id.get(unit_id).copied().unwrap_or(MAX_UNITS);
+        actor_indices[slot] = unit_index_by_id
+            .get(unit_id)
+            .copied()
+            .expect("validated action-order unit must be present in the observation");
     }
     let own_alive = state
         .units
@@ -404,8 +420,8 @@ fn training_frame(engine: &BattleEngine, side: Side) -> serde_json::Value {
     let global = vec![
         state.game_turn as f32 / state.rules.max_game_turns.max(1) as f32,
         state.round_no as f32 / 50.0,
-        state.teams[side.index()].sp as f32 / 50.0,
-        state.teams[side.opponent().index()].sp as f32 / 50.0,
+        state.teams[side.index()].sp as f32 / state.rules.sp_cap as f32,
+        state.teams[side.opponent().index()].sp as f32 / state.rules.sp_cap as f32,
         if state.active_side == side { 1.0 } else { -1.0 },
         if state.rules.mode == bd2_core::BattleMode::Normal {
             1.0

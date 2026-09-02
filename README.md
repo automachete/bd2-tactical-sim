@@ -54,8 +54,9 @@ cd ..
 
 ```powershell
 cd tools
-npm run sync -- --out ../data/generated/catalog.json
+npm run sync -- --out ../data/generated/catalog.json --equipment-oracle ../data/generated/equipment-oracle.json
 node validate-catalog.mjs ../data/generated/catalog.json
+node validate-bd2db-equipment.mjs ../data/generated/catalog.json ../data/generated/equipment-oracle.json
 node build-current-scenarios.mjs 10072 6
 cd ..
 
@@ -181,6 +182,7 @@ node --check tools/validate-character-icons.mjs
 node --check ui/app.js
 node --test ui/tests/*.test.mjs
 node tools/validate-catalog.mjs data/generated/catalog.json
+node tools/validate-bd2db-equipment.mjs data/generated/catalog.json data/generated/equipment-oracle.json
 node tools/validate-character-icons.mjs
 
 cd tools

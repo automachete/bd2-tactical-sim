@@ -78,12 +78,18 @@ def _preview_footprint(
     grid = state["rules"]["grid"]
     rows = int(grid["rows"])
     depths = int(grid["depths"])
-    metadata = command.get("ui") or {}
-    if bool(metadata.get("target_all", False)):
+    command_type = command["type"]
+    if command_type not in {"NORMAL_ATTACK", "KNOCKBACK", "USE_COSTUME"}:
+        raise ValueError(f"unsupported preview command: {command_type}")
+    metadata = command.get("ui")
+    if command_type == "USE_COSTUME" and not isinstance(metadata, dict):
+        raise ValueError("costume preview is missing authoritative UI metadata")
+    target_all = bool(metadata["target_all"]) if metadata is not None else False
+    if target_all:
         cells = [{"row": row, "depth": depth} for row in range(rows) for depth in range(depths)]
     else:
-        offsets = metadata.get("range") if command.get("type") == "USE_COSTUME" else None
-        if not offsets:
+        offsets = metadata["range"] if command_type == "USE_COSTUME" else None
+        if offsets is None or offsets == []:
             offsets = [{"row": 0, "depth": 0}]
         coordinates = {
             (
@@ -161,26 +167,25 @@ class GuiSession:
                 exploration=self.mcts_config.exploration,
             )
             config.validate()
-            simulator = _native.Simulator(
-                str(self.database),
-                json.dumps(setup, ensure_ascii=False, separators=(",", ":")),
-                seed,
+            setup_json = json.dumps(setup, ensure_ascii=False, separators=(",", ":"))
+            template = getattr(self, "simulator", None)
+            simulator = (
+                _native.Simulator(str(self.database), setup_json, seed)
+                if template is None
+                else template.new_battle(setup_json, seed)
             )
-            preview_simulator = _native.Simulator(
-                str(self.database),
-                json.dumps(setup, ensure_ascii=False, separators=(",", ":")),
-                seed,
-            )
+            preview_simulator = simulator.new_battle(setup_json, seed)
             planner = MctsPlanner(
                 self.database,
-                json.dumps(setup, ensure_ascii=False, separators=(",", ":")),
+                setup_json,
                 seed,
                 config,
+                template=simulator,
             )
             self.seed = seed
             self.mcts_config = config
             self.setup = setup
-            self.setup_json = json.dumps(setup, ensure_ascii=False, separators=(",", ":"))
+            self.setup_json = setup_json
             self.setup_draft = self.catalog.editor_payload_from_setup(setup)
             self.simulator = simulator
             self.preview_simulator = preview_simulator
@@ -193,9 +198,15 @@ class GuiSession:
     def reset(self, seed: int | None = None) -> dict[str, Any]:
         with self.lock:
             next_seed = self.seed + 1 if seed is None else _strict_int(seed, "seed")
-            simulator = _native.Simulator(str(self.database), self.setup_json, next_seed)
-            preview_simulator = _native.Simulator(str(self.database), self.setup_json, next_seed)
-            planner = MctsPlanner(self.database, self.setup_json, next_seed, self.mcts_config)
+            simulator = self.simulator.new_battle(self.setup_json, next_seed)
+            preview_simulator = simulator.new_battle(self.setup_json, next_seed)
+            planner = MctsPlanner(
+                self.database,
+                self.setup_json,
+                next_seed,
+                self.mcts_config,
+                template=simulator,
+            )
             self.seed = next_seed
             self.simulator = simulator
             self.preview_simulator = preview_simulator
@@ -440,7 +451,6 @@ class GuiSession:
                 elif kind["type"] == "COLLISION_DAMAGE":
                     damage_target = int(kind["occupant_id"])
                     collision = int(kind["amount"])
-                    damage = collision
                 if damage_target is None:
                     continue
                 forecast = damage_by_target.setdefault(
@@ -576,22 +586,22 @@ class GuiSession:
         for entry in legal:
             unit = state["units"].get(str(entry["unit_id"]))
             if unit is None:
-                continue
+                raise RuntimeError(f"legal actions reference missing unit {entry['unit_id']}")
             for command in entry["commands"]:
                 metadata = self.catalog.command_metadata(unit, command)
                 if metadata is not None:
                     command["ui"] = metadata
             legal_variants = {
-                (str(command["costume_id"]), int(command.get("burst_level", 0)))
+                (str(command["costume_id"]), int(command["burst_level"]))
                 for command in entry["commands"]
-                if command.get("type") == "USE_COSTUME"
+                if command["type"] == "USE_COSTUME"
             }
             side_index = 0 if unit["side"] == "PLAYER" else 1
             current_sp = int(state["teams"][side_index]["sp"])
             unavailable: list[dict[str, Any]] = []
-            for loadout in unit.get("costume_loadout", []):
+            for loadout in unit["costume_loadout"]:
                 costume_id = str(loadout["costume_id"])
-                for burst_level in range(int(loadout.get("burst_level", 0)) + 1):
+                for burst_level in range(int(loadout["burst_level"]) + 1):
                     if (costume_id, burst_level) in legal_variants:
                         continue
                     command = {
@@ -603,7 +613,11 @@ class GuiSession:
                     metadata = self.catalog.command_metadata(unit, command)
                     if metadata is None:
                         continue
-                    cooldown = int(unit.get("cooldowns", {}).get(costume_id, 0))
+                    if costume_id not in unit["cooldowns"]:
+                        raise RuntimeError(
+                            f"unit {unit['id']} has no cooldown state for {costume_id}"
+                        )
+                    cooldown = int(unit["cooldowns"][costume_id])
                     reason = (
                         "COOLDOWN"
                         if cooldown > 0

@@ -147,25 +147,25 @@ class DebugSetupCatalog:
 
             self.equipment[equipment_id] = {
                 "id": equipment_id,
-                "name": self._display_name(record.get("names", {}), equipment_id),
-                "names": record.get("names", {}),
+                "name": self._display_name(record["names"], equipment_id),
+                "names": record["names"],
                 "kind": record["kind"],
                 "tier": record["tier"],
-                "owner_character_id": record.get("owner_character_id"),
+                "owner_character_id": record["owner_character_id"],
                 "slot": record["slot"],
                 "modifiers_by_refinement_score": record["modifiers_by_refinement_score"],
                 "primary_stat_options": [
-                    stat_option(key) for key in record.get("primary_stat_options", [])
+                    stat_option(key) for key in record["primary_stat_options"]
                 ],
                 "secondary_stat_options": [
-                    stat_option(key) for key in record.get("secondary_stat_options", [])
+                    stat_option(key) for key in record["secondary_stat_options"]
                 ],
-                "primary_modifiers_by_refinement_score": record.get(
-                    "primary_modifiers_by_refinement_score", {}
-                ),
-                "secondary_modifiers_by_refinement_score": record.get(
-                    "secondary_modifiers_by_refinement_score", {}
-                ),
+                "primary_modifiers_by_refinement_score": record[
+                    "primary_modifiers_by_refinement_score"
+                ],
+                "secondary_modifiers_by_refinement_score": record[
+                    "secondary_modifiers_by_refinement_score"
+                ],
                 "allowed_substats": [
                     {
                         "key": key,
@@ -189,13 +189,17 @@ class DebugSetupCatalog:
                     variant["potential_mask"],
                 ),
             )
-            skill_range = maximum.get("range_override") or record.get("range", [])
+            skill_range = (
+                maximum["range_override"]
+                if maximum["range_override"] is not None
+                else record["range"]
+            )
             public_costume = {
                 "id": str(costume_id),
-                "name": self._display_name(record.get("names", {}), str(costume_id)),
+                "name": self._display_name(record["names"], str(costume_id)),
                 "skill_name": self._display_name(
-                    record.get("skill_names", {}),
-                    self._display_name(record.get("names", {}), str(costume_id)),
+                    record["skill_names"],
+                    self._display_name(record["names"], str(costume_id)),
                 ),
                 "character_id": str(character_id),
                 "max_enhancement": int(maximum["enhancement"]),
@@ -204,12 +208,12 @@ class DebugSetupCatalog:
                 "sp_cost": int(maximum["sp_cost"]),
                 "cooldown": int(maximum["cooldown"]),
                 "selector": str(maximum["selector"]),
-                "target_all": bool(maximum.get("target_all", False)),
+                "target_all": bool(maximum["target_all"]),
                 "range": skill_range,
                 "operation_summary": self._operation_summary(maximum),
-                "description_ja": str(maximum.get("description_ja", "")),
-                "permanent_potential_modifiers": record.get("permanent_potential_modifiers", {}),
-                "bonding_modifiers": record.get("bonding_modifiers", {}),
+                "description_ja": str(maximum["description_ja"]),
+                "permanent_potential_modifiers": record["permanent_potential_modifiers"],
+                "bonding_modifiers": record["bonding_modifiers"],
             }
             if str(costume_id).startswith(("fiend:", "summon:")):
                 self.system_costumes[str(costume_id)] = public_costume
@@ -223,13 +227,13 @@ class DebugSetupCatalog:
             record = json.loads(record_json)
             self.entities[character_id] = {
                 "id": character_id,
-                "name": self._display_name(record.get("names", {}), character_id),
+                "name": self._display_name(record["names"], character_id),
                 "element": record["element"],
                 "attack_type": record["attack_type"],
                 "knockback_direction": record["knockback_direction"],
                 "level_100": record["level_100"],
-                "engraving_modifiers": record.get("engraving_modifiers", {}),
-                "awakening_modifiers": record.get("awakening_modifiers", {}),
+                "engraving_modifiers": record["engraving_modifiers"],
+                "awakening_modifiers": record["awakening_modifiers"],
             }
             costumes = costumes_by_character.get(character_id, [])
             if int(rarity) != 5 or ":" in character_id or not costumes:
@@ -246,20 +250,23 @@ class DebugSetupCatalog:
     def command_metadata(
         self, unit: dict[str, Any], command: dict[str, Any]
     ) -> dict[str, Any] | None:
-        if command.get("type") != "USE_COSTUME":
+        command_type = command["type"]
+        if command_type in {"NORMAL_ATTACK", "KNOCKBACK"}:
             return None
+        if command_type != "USE_COSTUME":
+            raise ValueError(f"unsupported battle command: {command_type}")
         costume_id = str(command["costume_id"])
         record = self.costume_records.get(costume_id)
         if record is None:
-            return None
+            raise ValueError(f"command references missing costume {costume_id}")
         loadout = next(
-            (item for item in unit.get("costume_loadout", []) if item["costume_id"] == costume_id),
+            (item for item in unit["costume_loadout"] if item["costume_id"] == costume_id),
             None,
         )
         if loadout is None:
-            return None
+            raise ValueError(f"unit command references unequipped costume {costume_id}")
         enhancement = int(loadout["enhancement"])
-        burst_level = int(command.get("burst_level", loadout["burst_level"]))
+        burst_level = int(command["burst_level"])
         potential_mask = int(loadout["potential_mask"])
         variant = next(
             (
@@ -272,7 +279,10 @@ class DebugSetupCatalog:
             None,
         )
         if variant is None:
-            return None
+            raise ValueError(
+                f"missing exact costume variant {costume_id}/+{enhancement}/B{burst_level}/"
+                f"P{potential_mask}"
+            )
         base_variant = next(
             (
                 item
@@ -287,8 +297,8 @@ class DebugSetupCatalog:
             raise ValueError(
                 f"costume {costume_id} burst variant has no matching burst-level-zero baseline"
             )
-        passive = unit.get("passive_modifiers", {})
-        effects = unit.get("effects", [])
+        passive = unit["passive_modifiers"]
+        effects = unit["effects"]
         sp_delta = int(passive.get("sp_cost_delta", 0)) + sum(
             int(effect.get("spec", {}).get("modifiers", {}).get("sp_cost_delta", 0))
             for effect in effects
@@ -305,10 +315,14 @@ class DebugSetupCatalog:
             "burst_sp_cost": max(0, sp_cost - base_sp_cost),
             "cooldown": max(0, int(variant["cooldown"]) + cooldown_delta),
             "selector": str(variant["selector"]),
-            "target_all": bool(variant.get("target_all", False)),
-            "range": variant.get("range_override") or record.get("range", []),
+            "target_all": bool(variant["target_all"]),
+            "range": (
+                variant["range_override"]
+                if variant["range_override"] is not None
+                else record["range"]
+            ),
             "operation_summary": self._operation_summary(variant),
-            "description_ja": str(variant.get("description_ja", "")),
+            "description_ja": str(variant["description_ja"]),
         }
 
     @staticmethod
@@ -332,6 +346,7 @@ class DebugSetupCatalog:
             "CHANGE_SP": "SP変化",
             "CHANGE_SP_PER_SUCCESSFUL_HIT": "命中数に応じてSP変化",
             "CHANGE_COOLDOWN": "クールタイム変化",
+            "CHANGE_COSTUME_COOLDOWN": "指定コスチュームのクールタイム変化",
             "CONDITIONAL": "条件分岐",
             "CONSUME_HP": "HP消費",
             "EXTEND_EFFECTS": "効果時間延長",
@@ -340,27 +355,31 @@ class DebugSetupCatalog:
             "SELF_DESTRUCT": "自爆",
             "SUMMON": "召喚",
         }
-        operations = variant.get("operations", [])
+        operations = variant["operations"]
         parts: list[str] = []
         for operation in operations[:3]:
-            op = str(operation.get("op", "EFFECT"))
-            label = labels.get(op, op.replace("_", " ").title())
-            hits = int(operation.get("hits", 1) or 1)
+            op = str(operation["op"])
+            if op not in labels:
+                raise ValueError(f"unsupported operation in GUI metadata: {op}")
+            label = labels[op]
+            hits = int(operation["hits"]) if op == "DEAL_DAMAGE" else 1
             coefficient = operation.get("coefficient_bp")
             if coefficient is not None:
                 label += f" {int(coefficient) / 100:g}%"
             if hits > 1:
                 label += f" / {hits}ヒット"
             parts.append(label)
-        if variant.get("consume_remaining_sp"):
+        if variant["consume_remaining_sp"]:
             parts.append("残SP消費")
         return " / ".join(parts) if parts else "固有効果"
 
     @staticmethod
     def _condition_summary(condition: dict[str, Any] | None) -> str | None:
-        if not condition:
+        if condition is None:
             return None
-        kind = str(condition.get("type", ""))
+        kind = str(condition["type"])
+        if not kind:
+            raise ValueError("condition type cannot be empty")
         value = condition.get("value")
         percent = condition.get("percent_bp")
         tag = condition.get("tag")
@@ -386,15 +405,22 @@ class DebugSetupCatalog:
             "TARGET_EFFECT_COUNT_AT_LEAST": f"対象の{polarity}が{value}個以上",
             "TARGET_EFFECT_COUNT_AT_MOST": f"対象の{polarity}が{value}個以下",
             "ACTOR_EFFECT_COUNT_AT_LEAST": f"使用者の{polarity}が{value}個以上",
+            "TARGET_ATTACK_TYPE": f"対象の攻撃種別が{condition.get('attack_type')}",
+            "TARGET_NOT_ATTACK_TYPE": f"対象の攻撃種別が{condition.get('attack_type')}ではない",
+            "TARGET_ELEMENT": f"対象属性が{condition.get('element')}",
+            "TARGET_NOT_ELEMENT": f"対象属性が{condition.get('element')}ではない",
         }
         if kind in {"ANY", "ALL"}:
             joiner = " または " if kind == "ANY" else " かつ "
             nested = [
-                DebugSetupCatalog._condition_summary(item)
-                for item in condition.get("conditions", [])
+                DebugSetupCatalog._condition_summary(item) for item in condition["conditions"]
             ]
-            return joiner.join(item for item in nested if item) or "条件成立時"
-        return labels.get(kind, "条件成立時")
+            if not nested or any(item is None for item in nested):
+                raise ValueError(f"empty nested condition: {kind}")
+            return joiner.join(item for item in nested if item)
+        if kind not in labels:
+            raise ValueError(f"unsupported condition in GUI metadata: {kind}")
+        return labels[kind]
 
     def public_payload(self) -> dict[str, Any]:
         return {
@@ -417,7 +443,7 @@ class DebugSetupCatalog:
             costume["costume_id"]
             for unit in template["units"]
             if unit["side"] == "ENEMY" and unit.get("can_act", True)
-            for costume in unit.get("costume_loadout", [])
+            for costume in unit["costume_loadout"]
         ]
         if not ids:
             return []
@@ -433,7 +459,7 @@ class DebugSetupCatalog:
         for index, costume_id in enumerate(ids):
             record = records.get(costume_id)
             if record is None:
-                continue
+                raise ValueError(f"Monster Chaser template references missing skill {costume_id}")
             variant = max(
                 record["variants"],
                 key=lambda item: (item["enhancement"], item["burst_level"], item["potential_mask"]),
@@ -441,12 +467,20 @@ class DebugSetupCatalog:
             result.append(
                 {
                     "id": costume_id,
-                    "name": self._display_name(record.get("names", {}), f"魔物スキル {index + 1}"),
-                    "sequence": int(variant.get("ai_sequence_index") or index),
-                    "condition": self._condition_summary(variant.get("activation_condition")),
-                    "range": variant.get("range_override") or record.get("range", []),
+                    "name": self._display_name(record["names"], f"魔物スキル {index + 1}"),
+                    "sequence": int(
+                        variant["ai_sequence_index"]
+                        if variant["ai_sequence_index"] is not None
+                        else index
+                    ),
+                    "condition": self._condition_summary(variant["activation_condition"]),
+                    "range": (
+                        variant["range_override"]
+                        if variant["range_override"] is not None
+                        else record["range"]
+                    ),
                     "operation_summary": self._operation_summary(variant),
-                    "description_ja": str(variant.get("description_ja", "")),
+                    "description_ja": str(variant["description_ja"]),
                 }
             )
         return sorted(result, key=lambda item: item["sequence"])
@@ -499,12 +533,12 @@ class DebugSetupCatalog:
             costumes = [
                 {
                     "costume_id": loadout["costume_id"],
-                    "enhancement": loadout.get("enhancement", 5),
-                    "burst_level": loadout.get("burst_level", 0),
+                    "enhancement": loadout["enhancement"],
+                    "burst_level": loadout["burst_level"],
                     "potential_mask": loadout.get("potential_mask", 7),
                     "permanent_potential_enabled": loadout.get("permanent_potential_enabled", True),
                 }
-                for loadout in unit.get("costume_loadout", [])
+                for loadout in unit["costume_loadout"]
             ]
         return {
             "character_id": unit["character_id"],
@@ -515,7 +549,7 @@ class DebugSetupCatalog:
             "costume_link_target": next(
                 (
                     item["costume_link_target"]
-                    for item in unit.get("costume_loadout", [])
+                    for item in unit["costume_loadout"]
                     if item.get("costume_link_target")
                 ),
                 None,

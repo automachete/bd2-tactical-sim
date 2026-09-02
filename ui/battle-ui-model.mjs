@@ -73,14 +73,22 @@ export const reorder = (order, unitId, direction) => {
   return next;
 };
 
-export const commandCost = (command, costumeLookup) => {
+export const commandCost = (command, _costumeLookup) => {
   if (!command || command.type !== "USE_COSTUME") return 0;
-  return Number(command.ui?.sp_cost ?? costumeLookup(command.costume_id)?.sp_cost ?? 0);
+  const cost = Number(command.ui?.sp_cost);
+  if (!Number.isInteger(cost) || cost < 0) {
+    throw new TypeError(`costume command '${command.costume_id}' is missing a valid resolved SP cost`);
+  }
+  return cost;
 };
 
 export const commandBurstCost = command => {
   if (!command || command.type !== "USE_COSTUME") return 0;
-  return Math.max(0, Number(command.ui?.burst_sp_cost ?? 0));
+  const cost = Number(command.ui?.burst_sp_cost);
+  if (!Number.isInteger(cost) || cost < 0) {
+    throw new TypeError(`costume command '${command.costume_id}' is missing a valid resolved burst SP cost`);
+  }
+  return cost;
 };
 
 export const burstOptionsForCostume = (commands, unavailableCommands, costumeId) => {
@@ -100,30 +108,44 @@ export const burstOptionsForCostume = (commands, unavailableCommands, costumeId)
 
 export const plannedSpCost = (order, selections, legalById, costumeLookup) =>
   (order ?? []).reduce((total, unitId) => {
-    const commands = legalById(unitId)?.commands ?? [];
+    const legal = legalById(unitId);
+    if (!legal || !Array.isArray(legal.commands)) throw new Error(`missing legal actions for unit ${unitId}`);
+    const commands = legal.commands;
+    if (!commands.length) return total;
     const index = Number(selections.get(Number(unitId)) ?? 0);
+    if (!commands[index]) throw new RangeError(`masked planned action for unit ${unitId}: ${index}`);
     return total + commandCost(commands[index], costumeLookup);
   }, 0);
 
 export const plannedBurstSpCost = (order, selections, legalById) =>
   (order ?? []).reduce((total, unitId) => {
-    const commands = legalById(unitId)?.commands ?? [];
+    const legal = legalById(unitId);
+    if (!legal || !Array.isArray(legal.commands)) throw new Error(`missing legal actions for unit ${unitId}`);
+    const commands = legal.commands;
+    if (!commands.length) return total;
     const index = Number(selections.get(Number(unitId)) ?? 0);
+    if (!commands[index]) throw new RangeError(`masked planned action for unit ${unitId}: ${index}`);
     return total + commandBurstCost(commands[index]);
   }, 0);
 
+export const CURRENT_SP_CAP = 20;
+
 export const spBreakdown = ({ current, reserved, burst, cap }) => {
-  const normalizedCap = Math.max(0, Math.trunc(Number(cap) || 0));
-  const normalizedCurrent = Math.min(normalizedCap, Math.max(0, Math.trunc(Number(current) || 0)));
-  const normalizedConsumed = Math.min(normalizedCurrent, Math.max(0, Math.trunc(Number(reserved) || 0)));
-  const normalizedBurst = Math.min(normalizedConsumed, Math.max(0, Math.trunc(Number(burst) || 0)));
+  const values = { current: Number(current), reserved: Number(reserved), burst: Number(burst), cap: Number(cap) };
+  if (Object.values(values).some(value => !Number.isInteger(value))) {
+    throw new TypeError("SP values must be integers");
+  }
+  if (values.cap !== CURRENT_SP_CAP) throw new RangeError(`SP cap must be ${CURRENT_SP_CAP}`);
+  if (values.current < 0 || values.current > values.cap) throw new RangeError("current SP is outside the battle cap");
+  if (values.reserved < 0 || values.reserved > values.current) throw new RangeError("reserved SP is outside the current balance");
+  if (values.burst < 0 || values.burst > values.reserved) throw new RangeError("burst SP exceeds reserved SP");
   return {
-    cap: normalizedCap,
-    current: normalizedCurrent,
-    remaining: normalizedCurrent - normalizedConsumed,
-    consumed: normalizedConsumed,
-    regularConsumed: normalizedConsumed - normalizedBurst,
-    burst: normalizedBurst,
+    cap: values.cap,
+    current: values.current,
+    remaining: values.current - values.reserved,
+    consumed: values.reserved,
+    regularConsumed: values.reserved - values.burst,
+    burst: values.burst,
   };
 };
 
@@ -167,9 +189,11 @@ export const autoReserve = ({ order, selections, legalById, costumeLookup, sp })
 };
 
 export const rangePreviewCells = (range, rows = GRID_ROWS, depths = GRID_DEPTHS) => {
-  const offsets = (range ?? [])
-    .map(cell => ({ row: Number(cell.row), depth: Number(cell.depth) }))
-    .filter(cell => Number.isInteger(cell.row) && Number.isInteger(cell.depth));
+  if (!Array.isArray(range)) throw new TypeError("skill range must be an array");
+  const offsets = range.map(cell => ({ row: Number(cell?.row), depth: Number(cell?.depth) }));
+  if (offsets.some(cell => !Number.isInteger(cell.row) || !Number.isInteger(cell.depth))) {
+    throw new TypeError("skill range offsets must be integer cells");
+  }
   if (!offsets.length) return new Set();
   const minimumRow = Math.min(...offsets.map(cell => cell.row));
   const maximumRow = Math.max(...offsets.map(cell => cell.row));
@@ -198,9 +222,15 @@ export const projectRangeCells = (
     }
     return cells;
   }
-  if (!anchor || !isValidCell(anchor.row, anchor.depth, rows, depths)) return cells;
-  const offsets = range?.length ? range : [{ row: 0, depth: 0 }];
+  if (!anchor || !isValidCell(anchor.row, anchor.depth, rows, depths)) {
+    throw new RangeError("range projection anchor is outside the board");
+  }
+  if (!Array.isArray(range)) throw new TypeError("skill range must be an array");
+  const offsets = range.length ? range : [{ row: 0, depth: 0 }];
   for (const offset of offsets) {
+    if (!Number.isInteger(Number(offset?.row)) || !Number.isInteger(Number(offset?.depth))) {
+      throw new TypeError("skill range offsets must be integer cells");
+    }
     const row = Number(anchor.row) + Number(offset.row);
     const depth = Number(anchor.depth) + Number(offset.depth);
     if (isValidCell(row, depth, rows, depths)) cells.add(cellKey(row, depth));

@@ -103,6 +103,7 @@ def test_debug_catalog_builds_all_three_modes_from_external_data() -> None:
 
     for mode, preset in public["presets"].items():
         setup = catalog.build_setup(preset)
+        assert setup["rules"]["sp_cap"] == 20, mode
         simulator = Simulator(str(DATABASE), json.dumps(setup), 13)
         state = json.loads(simulator.state_json())
         assert state["rules"]["mode"] == mode
@@ -245,6 +246,47 @@ def test_gui_payload_describes_the_exact_configured_costume_variant() -> None:
     assert [item["ui"]["burst_sp_cost"] for item in michaela_variants] == [0, 1, 2, 3]
 
 
+def test_gui_metadata_fails_closed_and_preserves_an_explicit_empty_range() -> None:
+    session = GuiSession(DATABASE, SCENARIOS, 11, FAST_MCTS)
+    payload = session.start(session.catalog.public_payload()["presets"]["NORMAL"])
+    unit_id = payload["state"]["teams"][0]["action_order"][0]
+    unit = payload["state"]["units"][str(unit_id)]
+    command = next(
+        item for item in payload["legal"][0]["commands"] if item["type"] == "USE_COSTUME"
+    )
+
+    with pytest.raises(ValueError, match="missing exact costume variant"):
+        session.catalog.command_metadata(unit, {**command, "burst_level": 99})
+    with pytest.raises(ValueError, match="missing costume"):
+        session.catalog.command_metadata(unit, {**command, "costume_id": "missing"})
+    with pytest.raises(ValueError, match="unsupported battle command"):
+        session.catalog.command_metadata(unit, {"type": "WAIT"})
+    with pytest.raises(ValueError, match="unsupported operation"):
+        session.catalog._operation_summary(
+            {"operations": [{"op": "UNKNOWN"}], "consume_remaining_sp": False}
+        )
+    with pytest.raises(ValueError, match="unsupported condition"):
+        session.catalog._condition_summary({"type": "UNKNOWN"})
+
+    record = session.catalog.costume_records[command["costume_id"]]
+    loadout = next(
+        item for item in unit["costume_loadout"] if item["costume_id"] == command["costume_id"]
+    )
+    variant = next(
+        item
+        for item in record["variants"]
+        if item["enhancement"] == loadout["enhancement"]
+        and item["burst_level"] == command["burst_level"]
+        and item["potential_mask"] == loadout["potential_mask"]
+    )
+    original = variant["range_override"]
+    try:
+        variant["range_override"] = []
+        assert session.catalog.command_metadata(unit, command)["range"] == []
+    finally:
+        variant["range_override"] = original
+
+
 def test_gui_typed_equipment_changes_stats_but_not_skill_cost_metadata() -> None:
     session = GuiSession(DATABASE, SCENARIOS, 12, FAST_MCTS)
     request = session.catalog.public_payload()["presets"]["NORMAL"]
@@ -339,6 +381,7 @@ def test_every_supported_equipment_can_initialize_a_real_battle_for_its_owner() 
     fallback = characters[0]["id"]
     enemy_id = characters[1]["id"]
     initialized = 0
+    template: Simulator | None = None
     for definition in catalog.equipment.values():
         character_id = definition["owner_character_id"] or fallback
         primary = (
@@ -367,7 +410,12 @@ def test_every_supported_equipment_can_initialize_a_real_battle_for_its_owner() 
             "enemy_units": [unit(enemy_id, 1, {})],
         }
         setup = catalog.build_setup(request)
-        simulator = Simulator(str(DATABASE), json.dumps(setup), 101)
+        simulator = (
+            Simulator(str(DATABASE), json.dumps(setup), 101)
+            if template is None
+            else template.new_battle(json.dumps(setup), 101)
+        )
+        template = simulator
         state = json.loads(simulator.state_json())
         assert state["units"]["1"]["character_id"] == character_id
         initialized += 1
@@ -435,13 +483,14 @@ def test_preview_footprint_clips_deduplicates_and_tracks_only_occupied_targets()
     command = {
         "type": "USE_COSTUME",
         "ui": {
+            "target_all": False,
             "range": [
                 {"row": -1, "depth": 0},
                 {"row": 0, "depth": 0},
                 {"row": 0, "depth": 0},
                 {"row": 0, "depth": 1},
                 {"row": 1, "depth": 0},
-            ]
+            ],
         },
     }
 
@@ -489,6 +538,16 @@ def test_preview_footprint_handles_normal_and_target_all_without_guessing() -> N
     assert normal_targets == [101]
     assert len(all_cells) == 12
     assert all_targets == [1, 2]
+
+    with pytest.raises(KeyError, match="target_all"):
+        _preview_footprint(
+            state,
+            1,
+            {"type": "USE_COSTUME", "ui": {"range": []}},
+            "ENEMY",
+            {"row": 1, "depth": 2},
+            positions,
+        )
 
 
 def test_builder_rejects_duplicate_character_in_the_same_party() -> None:
@@ -742,7 +801,7 @@ def test_every_five_star_legal_action_preview_matches_engine_target_lock() -> No
         actor = order[0]
         raw_legal = json.loads(session.simulator.legal_actions_json("PLAYER"))
         legal_by_id = {entry["unit_id"]: entry["commands"] for entry in raw_legal}
-        direct = Simulator(str(DATABASE), session.setup_json, session.seed)
+        direct = session.simulator.new_battle(session.setup_json, session.seed)
 
         for action_index, command in enumerate(legal_by_id[actor]):
             preview = session.preview(actor, action_index, order, {})
@@ -953,7 +1012,10 @@ def test_later_actor_preview_includes_a_summon_created_by_an_earlier_reservation
     temporary = Simulator(str(DATABASE), session.setup_json, session.seed)
     temporary.restore_json(session.simulator.state_json())
     commands = {
-        str(unit_id): legal_by_id[unit_id][actions[slot]] for slot, unit_id in enumerate(order)
+        str(unit_id): {
+            key: value for key, value in legal_by_id[unit_id][actions[slot]].items() if key != "ui"
+        }
+        for slot, unit_id in enumerate(order)
     }
     temporary.step_json(
         json.dumps(

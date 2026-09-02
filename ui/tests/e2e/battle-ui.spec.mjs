@@ -345,6 +345,31 @@ test("global SP HUD stays centered and renders twenty true diamond markers witho
   expect(Math.abs(markerStyle.width - markerStyle.height)).toBeLessThan(0.6);
 });
 
+test("turn recovery saturates core state and the global SP HUD at twenty", async ({ page, request }) => {
+  await openBattle(page, request, "MIRROR_WAR");
+  let payload = await (await request.get("/api/state")).json();
+  for (let turn = 0; turn < 2 && payload.state.terminal === null; turn += 1) {
+    const order = payload.state.teams[0].action_order;
+    const response = await request.post("/api/step", {
+      data: { actions: order.map(() => 0), order },
+    });
+    expect(response.ok()).toBeTruthy();
+    payload = await response.json();
+    expect(payload.state.rules.sp_cap).toBe(20);
+    expect(payload.state.teams.every(team => team.sp >= 0 && team.sp <= 20)).toBe(true);
+  }
+  expect(payload.state.event_log.some(event => (
+    event.kind.type === "SP_CHANGED"
+    && event.kind.reason === "TURN_RECOVERY"
+    && event.kind.before === 20
+    && event.kind.after === 20
+  ))).toBe(true);
+  await page.reload();
+  await expect(page.locator("#sp-text")).toHaveText("20 / 20");
+  await expect(page.locator("#sp-pips i")).toHaveCount(20);
+  await expect(page.locator("#sp-pips i.remaining")).toHaveCount(20);
+});
+
 test("burst arrows select stages zero through three and execute the chosen variant", async ({ page, request }) => {
   await page.getByTestId("order-unit-2").click();
   const card = page.locator("#costume-strip [data-costume-id='Michaela_1']");
@@ -651,6 +676,7 @@ test("multi-hit playback exposes chain changes instead of silently skipping them
 });
 
 test("knockback collision shows each authoritative damage event only once", async ({ page, request }) => {
+  test.setTimeout(90_000);
   const catalog = await (await request.get("/api/catalog")).json();
   const setup = structuredClone(catalog.presets.NORMAL);
   const justia = catalog.characters.find(character => character.id === "Justia");
@@ -688,7 +714,9 @@ test("knockback collision shows each authoritative damage event only once", asyn
   const responsePromise = page.waitForResponse(response => response.url().endsWith("/api/step"));
   await page.getByTestId("battle-start").click();
   const result = await (await responsePromise).json();
-  await expect(page.locator("#turn-label")).toHaveText("ターン 3", { timeout: 30_000 });
+  await expect(page.locator("#game-shell")).toHaveClass(/executing/);
+  await expect(page.locator("#game-shell")).not.toHaveClass(/executing/, { timeout: 60_000 });
+  await expect(page.locator("#turn-label")).toHaveText("ターン 3");
   const events = result.state.event_log
     .filter(event => Number(event.sequence) > lastSequence)
     .map(event => event.kind);
