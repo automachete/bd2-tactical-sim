@@ -60,7 +60,10 @@ test("battle execution sends planned formation to the simulator", () => {
 });
 test("Mirror War uses the simulator capability lock", () => assert.match(app, /capabilities\(\)\.formation/));
 test("formation editor supports occupied-cell swapping", () => assert.match(app, /occupiedIndex[\s\S]+draft\[sideKey\]\[occupiedIndex\]\.row = source\.row/));
-test("attack order cards are draggable", () => assert.match(app, /card\.draggable = true/));
+test("actionable order cards are draggable and inactive cards are disabled", () => {
+  assert.match(app, /card\.draggable = isActionable/);
+  assert.match(app, /card\.disabled = !isActionable/);
+});
 test("attack order has no visible up/down button implementation", () => assert.doesNotMatch(app, /order-controls|data-up|data-down/));
 test("all battle and formation cells preserve a square aspect ratio", () => {
   assert.match(css, /\.field-cell, \.formation-cell[\s\S]*?aspect-ratio:\s*1/);
@@ -106,6 +109,27 @@ test("visual tokens use Fluent surfaces plus five distinct element colors", () =
   assert.doesNotMatch(css, /gradient|Georgia|--gold/);
 });
 test("SP reservation is checked before changing command state", () => assert.match(app, /reason === "INSUFFICIENT_SP"/));
+test("global SP HUD uses centered diamonds without visible category counters", () => {
+  for (const id of ["sp-text", "sp-status", "sp-pips"]) assert.match(html, new RegExp(`id="${id}"`));
+  for (const removed of ["sp-remaining", "sp-consumed", "sp-burst", "sp-metric"]) {
+    assert.doesNotMatch(html, new RegExp(removed));
+  }
+  assert.match(i18n, /"footer\.spStatus"/);
+  assert.match(css, /\.sp-panel\s*\{[^}]*justify-self:\s*center/);
+  assert.match(css, /\.sp-pips i\s*\{[^}]*transform:\s*rotate\(45deg\)/);
+  assert.match(css, /\.sp-pips i\.burst/);
+  assert.match(css, /prefers-reduced-motion:\s*reduce/);
+  assert.match(app, /plannedBurstSpCost/);
+  assert.match(app, /spBreakdown/);
+});
+test("burst-capable costume cards expose localized previous and next stage controls", () => {
+  assert.match(app, /burstOptionsForCostume/);
+  assert.match(app, /className = "burst-arrow burst-down"/);
+  assert.match(app, /className = "burst-arrow burst-up"/);
+  for (const key of ["action.burstNone", "action.burstLevel", "action.burstDecreaseAria", "action.burstIncreaseAria"]) {
+    assert.match(i18n, new RegExp(`"${key}"`));
+  }
+});
 test("automatic turn start is cancellable", () => assert.match(app, /clearTimeout\(autoTurnTimer\)/));
 test("terminal state disables turn execution", () => assert.match(app, /Boolean\(snapshot\.state\.terminal\)/));
 test("server-side rollback is wired to the pause menu", () => assert.match(app, /api\("\/api\/rollback"/));

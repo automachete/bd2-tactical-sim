@@ -4,7 +4,9 @@ import test from "node:test";
 import {
   actionIndices,
   autoReserve,
+  burstOptionsForCostume,
   cellKey,
+  commandBurstCost,
   commandCost,
   isValidCell,
   keyboardTarget,
@@ -14,17 +16,19 @@ import {
   normalizeFormation,
   occupantAt,
   playbackDelay,
+  plannedBurstSpCost,
   plannedSpCost,
   projectRangeCells,
   rangePreviewCells,
   reorder,
   selectCommand,
   serializeFormation,
+  spBreakdown,
 } from "../battle-ui-model.mjs";
 
 const legal = new Map([
-  [1, { commands: [{ type: "NORMAL_ATTACK" }, { type: "USE_COSTUME", costume_id: "a" }, { type: "WAIT" }] }],
-  [2, { commands: [{ type: "NORMAL_ATTACK" }, { type: "USE_COSTUME", costume_id: "b" }, { type: "WAIT" }] }],
+  [1, { commands: [{ type: "NORMAL_ATTACK" }, { type: "USE_COSTUME", costume_id: "a" }] }],
+  [2, { commands: [{ type: "NORMAL_ATTACK" }, { type: "USE_COSTUME", costume_id: "b" }] }],
 ]);
 const legalById = unitId => legal.get(Number(unitId));
 const costumes = { a: { sp_cost: 4 }, b: { sp_cost: 3 } };
@@ -91,15 +95,83 @@ for (const [unitId, direction, expected] of [
 test("commandCost charges only costumes", () => {
   assert.equal(commandCost({ type: "USE_COSTUME", costume_id: "a" }, costumeLookup), 4);
   assert.equal(commandCost({ type: "NORMAL_ATTACK" }, costumeLookup), 0);
-  assert.equal(commandCost({ type: "WAIT" }, costumeLookup), 0);
 });
 
 test("commandCost prefers exact runtime variant metadata over catalog maximum", () => {
   assert.equal(commandCost({ type: "USE_COSTUME", costume_id: "a", ui: { sp_cost: 2 } }, costumeLookup), 2);
 });
 
+test("commandBurstCost reads only the additional burst portion of costume SP", () => {
+  assert.equal(commandBurstCost({ type: "USE_COSTUME", ui: { sp_cost: 6, burst_sp_cost: 3 } }), 3);
+  assert.equal(commandBurstCost({ type: "NORMAL_ATTACK", ui: { burst_sp_cost: 9 } }), 0);
+  assert.equal(commandBurstCost({ type: "USE_COSTUME" }), 0);
+});
+
+test("burstOptionsForCostume returns every stage in order and prefers legal variants", () => {
+  const commands = [
+    { type: "NORMAL_ATTACK" },
+    { type: "USE_COSTUME", costume_id: "a", burst_level: 0 },
+    { type: "USE_COSTUME", costume_id: "a", burst_level: 1 },
+    { type: "USE_COSTUME", costume_id: "b", burst_level: 0 },
+  ];
+  const unavailable = [
+    { type: "USE_COSTUME", costume_id: "a", burst_level: 1, unavailable_reason: "MASKED" },
+    { type: "USE_COSTUME", costume_id: "a", burst_level: 2, unavailable_reason: "INSUFFICIENT_SP" },
+  ];
+  assert.deepEqual(
+    burstOptionsForCostume(commands, unavailable, "a").map(option => ({
+      level: option.level,
+      index: option.index,
+      available: option.available,
+    })),
+    [
+      { level: 0, index: 1, available: true },
+      { level: 1, index: 2, available: true },
+      { level: 2, index: null, available: false },
+    ],
+  );
+});
+
 test("plannedSpCost follows selected action indexes", () => {
   assert.equal(plannedSpCost([1, 2], new Map([[1, 1], [2, 1]]), legalById, costumeLookup), 7);
+});
+
+test("plannedBurstSpCost follows selected exact runtime variants", () => {
+  const burstLegal = new Map([
+    [1, { commands: [{ type: "NORMAL_ATTACK" }, { type: "USE_COSTUME", ui: { sp_cost: 6, burst_sp_cost: 3 } }] }],
+    [2, { commands: [{ type: "USE_COSTUME", ui: { sp_cost: 2, burst_sp_cost: 1 } }] }],
+  ]);
+  assert.equal(plannedBurstSpCost([1, 2], new Map([[1, 1], [2, 0]]), id => burstLegal.get(Number(id))), 4);
+});
+
+test("spBreakdown keeps remaining, regular consumption, and burst consumption disjoint", () => {
+  assert.deepEqual(spBreakdown({ current: 15, reserved: 6, burst: 3, cap: 20 }), {
+    cap: 20,
+    current: 15,
+    remaining: 9,
+    consumed: 6,
+    regularConsumed: 3,
+    burst: 3,
+  });
+});
+
+test("spBreakdown clamps corrupt or stale values without producing negative buckets", () => {
+  assert.deepEqual(spBreakdown({ current: 25, reserved: 30, burst: 40, cap: 20 }), {
+    cap: 20,
+    current: 20,
+    remaining: 0,
+    consumed: 20,
+    regularConsumed: 0,
+    burst: 20,
+  });
+  assert.deepEqual(spBreakdown({ current: -2, reserved: -4, burst: -1, cap: 20 }), {
+    cap: 20,
+    current: 0,
+    remaining: 0,
+    consumed: 0,
+    regularConsumed: 0,
+    burst: 0,
+  });
 });
 
 test("selectCommand accepts an affordable command", () => {

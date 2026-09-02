@@ -78,12 +78,54 @@ export const commandCost = (command, costumeLookup) => {
   return Number(command.ui?.sp_cost ?? costumeLookup(command.costume_id)?.sp_cost ?? 0);
 };
 
+export const commandBurstCost = command => {
+  if (!command || command.type !== "USE_COSTUME") return 0;
+  return Math.max(0, Number(command.ui?.burst_sp_cost ?? 0));
+};
+
+export const burstOptionsForCostume = (commands, unavailableCommands, costumeId) => {
+  const byLevel = new Map();
+  for (const command of unavailableCommands ?? []) {
+    if (command.type !== "USE_COSTUME" || command.costume_id !== costumeId) continue;
+    byLevel.set(Number(command.burst_level ?? 0), { command, index: null, available: false });
+  }
+  for (const [index, command] of (commands ?? []).entries()) {
+    if (command.type !== "USE_COSTUME" || command.costume_id !== costumeId) continue;
+    byLevel.set(Number(command.burst_level ?? 0), { command, index, available: true });
+  }
+  return [...byLevel.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([level, option]) => ({ ...option, level }));
+};
+
 export const plannedSpCost = (order, selections, legalById, costumeLookup) =>
   (order ?? []).reduce((total, unitId) => {
     const commands = legalById(unitId)?.commands ?? [];
     const index = Number(selections.get(Number(unitId)) ?? 0);
     return total + commandCost(commands[index], costumeLookup);
   }, 0);
+
+export const plannedBurstSpCost = (order, selections, legalById) =>
+  (order ?? []).reduce((total, unitId) => {
+    const commands = legalById(unitId)?.commands ?? [];
+    const index = Number(selections.get(Number(unitId)) ?? 0);
+    return total + commandBurstCost(commands[index]);
+  }, 0);
+
+export const spBreakdown = ({ current, reserved, burst, cap }) => {
+  const normalizedCap = Math.max(0, Math.trunc(Number(cap) || 0));
+  const normalizedCurrent = Math.min(normalizedCap, Math.max(0, Math.trunc(Number(current) || 0)));
+  const normalizedConsumed = Math.min(normalizedCurrent, Math.max(0, Math.trunc(Number(reserved) || 0)));
+  const normalizedBurst = Math.min(normalizedConsumed, Math.max(0, Math.trunc(Number(burst) || 0)));
+  return {
+    cap: normalizedCap,
+    current: normalizedCurrent,
+    remaining: normalizedCurrent - normalizedConsumed,
+    consumed: normalizedConsumed,
+    regularConsumed: normalizedConsumed - normalizedBurst,
+    burst: normalizedBurst,
+  };
+};
 
 export const selectCommand = ({ order, selections, legalById, costumeLookup, sp }, unitId, index) => {
   const commands = legalById(unitId)?.commands ?? [];
@@ -110,7 +152,6 @@ export const autoReserve = ({ order, selections, legalById, costumeLookup, sp })
     if (preferred) candidates.splice(candidates.indexOf(preferred), 1);
     if (preferred) candidates.unshift(preferred);
     let selected = commands.findIndex(command => command.type === "NORMAL_ATTACK");
-    if (selected < 0) selected = commands.findIndex(command => command.type === "WAIT");
     if (selected < 0) selected = 0;
     next.set(Number(unitId), selected);
     for (const candidate of candidates) {

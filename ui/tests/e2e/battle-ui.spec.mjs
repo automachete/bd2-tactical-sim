@@ -73,6 +73,39 @@ test("initialization and a full rerender produce no browser errors", async ({ pa
   expect(errors).toEqual([]);
 });
 
+test("player reservation exposes no wait action", async ({ page }) => {
+  await expect(page.locator("#costume-strip [data-command-type='WAIT']")).toHaveCount(0);
+  await expect(page.locator("#costume-strip")).not.toContainText("待機");
+});
+
+test("selected costume shows the resolved official Japanese description in the battle header", async ({ page }) => {
+  await page.locator("#costume-strip [data-costume-id='Loen_1']").click();
+  await expect(page.locator("#selected-skill-name")).toHaveText("業火降臨");
+  await expect(page.locator("#selected-skill-summary")).toHaveText(
+    "敵に自身の魔法力1000%分の魔法ダメージを与えます。",
+  );
+  const placement = await page.locator("#selected-skill-summary").evaluate(element => ({
+    inHeader: Boolean(element.closest(".battle-header .selected-skill-detail")),
+    width: element.getBoundingClientRect().width,
+    headerBottom: element.closest(".battle-header").getBoundingClientRect().bottom,
+    workspaceTop: document.querySelector(".battle-workspace").getBoundingClientRect().top,
+  }));
+  expect(placement.inHeader).toBe(true);
+  expect(placement.width).toBeGreaterThan(300);
+  expect(placement.headerBottom).toBeLessThanOrEqual(placement.workspaceTop + 1);
+});
+
+test("content switching never injects runtime summons such as ET001 into setup", async ({ page }) => {
+  await page.locator("#open-formation").click();
+  const dialog = page.locator("#formation-dialog");
+  for (const mode of ["MONSTER_CHASER", "MIRROR_WAR", "NORMAL", "MONSTER_CHASER", "NORMAL"]) {
+    await dialog.locator(`#content-tabs [data-mode='${mode}']`).click();
+    await expect(dialog.locator("[data-character-id*='summon:']")).toHaveCount(0);
+    await expect(dialog.locator("[data-character-id*='fiend:']")).toHaveCount(0);
+    await expect(dialog).not.toContainText("ET001");
+  }
+});
+
 test("interactive controls have names and DOM ids are unique", async ({ page }) => {
   const unnamed = await page.locator("button").evaluateAll(buttons => buttons
     .filter(button => !(button.getAttribute("aria-label") || button.textContent.trim() || button.title))
@@ -110,7 +143,7 @@ test("legacy mixed-language UI captions are absent", async ({ page }) => {
 test("selecting a board unit updates the command panel", async ({ page }) => {
   await page.getByTestId("player-token-2").click();
   await expect(page.locator("#selected-name")).toHaveText("ミカエラ");
-  await expect(page.locator("#costume-strip .command-card")).toHaveCount(6);
+  await expect(page.locator("#costume-strip .command-card")).toHaveCount(5);
 });
 
 test("action order and vertical reservation choices form one left-side workbench", async ({ page }) => {
@@ -221,21 +254,107 @@ test("touch pointer reordering uses the same before-and-after drop semantics", a
 });
 
 test("selecting a costume reserves SP and exposes range highlights", async ({ page }) => {
-  await page.getByTestId("command-1-3").click();
-  await expect(page.getByTestId("command-1-3")).toHaveAttribute("aria-selected", "true");
+  await page.getByTestId("command-1-2").click();
+  await expect(page.getByTestId("command-1-2")).toHaveAttribute("aria-selected", "true");
   await expect(page.locator("#sp-text")).toHaveText("10 / 20");
+  await expect(page.locator("#sp-status")).toHaveText("残りSP 10、消費SP 5、うちバーストSP 0");
   await expect(page.locator("#enemy-field .target-preview")).toHaveCount(4, { timeout: 5_000 });
   await expect(page.locator("#enemy-field .target-occupied")).toHaveCount(2);
   await expect(page.locator("#enemy-field .target-anchor")).toHaveAttribute("data-coordinate", "1-1");
 });
 
-test("normal attack, knockback, and wait can each be reserved", async ({ page }) => {
-  for (const index of [0, 1, 2]) {
+test("global SP HUD stays centered and renders twenty true diamond markers without category counters", async ({ page }) => {
+  for (const viewport of [
+    { width: 800, height: 650 },
+    { width: 1024, height: 700 },
+    { width: 1440, height: 900 },
+    { width: 1600, height: 1000 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const geometry = await page.locator(".battle-footer, .sp-panel").evaluateAll(nodes => nodes.map(node => {
+      const box = node.getBoundingClientRect();
+      return { left: box.left, right: box.right, center: box.left + box.width / 2 };
+    }));
+    expect(Math.abs(geometry[0].center - geometry[1].center), JSON.stringify({ viewport, geometry })).toBeLessThan(1);
+  }
+  await expect(page.locator("#sp-remaining, #sp-consumed, #sp-burst, .sp-metric")).toHaveCount(0);
+  await expect(page.locator("#sp-pips i")).toHaveCount(20);
+  const markerStyle = await page.locator("#sp-pips i").first().evaluate(marker => {
+    const style = getComputedStyle(marker);
+    const box = marker.getBoundingClientRect();
+    return { transform: style.transform, width: box.width, height: box.height };
+  });
+  expect(markerStyle.transform).not.toBe("none");
+  expect(Math.abs(markerStyle.width - markerStyle.height)).toBeLessThan(0.6);
+});
+
+test("burst arrows select stages zero through three and execute the chosen variant", async ({ page, request }) => {
+  await page.getByTestId("order-unit-2").click();
+  const card = page.locator("#costume-strip [data-costume-id='Michaela_1']");
+  await card.click();
+  await expect(card).toHaveAttribute("data-burst-level", "0");
+  await expect(page.locator(".burst-level")).toHaveText("バーストなし");
+  await expect(page.locator("#selected-skill-summary")).toContainText("2ターンの間自身の魔法力が200%増加");
+  await expect(page.getByRole("button", { name: /バースト段階を下げる/ })).toBeDisabled();
+  await expect(page.locator("#sp-text")).toHaveText("12 / 20");
+  await expect(page.locator("#sp-pips i.remaining")).toHaveCount(12);
+  await expect(page.locator("#sp-pips i.spent")).toHaveCount(3);
+  await expect(page.locator("#sp-pips i.burst")).toHaveCount(0);
+
+  const increase = page.getByRole("button", { name: /バースト段階を上げる/ });
+  await increase.click();
+  await expect(card).toHaveAttribute("data-burst-level", "1");
+  await expect(page.locator(".burst-level")).toHaveText("BURST 1");
+  await expect(page.locator("#sp-text")).toHaveText("11 / 20");
+  await expect(page.locator("#sp-pips i.burst")).toHaveCount(1);
+
+  await increase.click();
+  await expect(card).toHaveAttribute("data-burst-level", "2");
+  await expect(page.locator(".burst-level")).toHaveText("BURST 2");
+  await expect(page.locator("#selected-upgrade")).toContainText("B2");
+  await expect(page.locator("#sp-text")).toHaveText("10 / 20");
+  await expect(page.locator("#sp-pips i.spent")).toHaveCount(3);
+  await expect(page.locator("#sp-pips i.burst")).toHaveCount(2);
+
+  await increase.click();
+  await expect(card).toHaveAttribute("data-burst-level", "3");
+  await expect(page.locator(".burst-level")).toHaveText("BURST 3");
+  await expect(page.locator("#selected-skill-summary")).toContainText("4ターンの間自身の魔法力が300%増加");
+  await expect(increase).toBeDisabled();
+  await expect(page.locator("#sp-text")).toHaveText("9 / 20");
+
+  await page.getByRole("button", { name: /バースト段階を下げる/ }).click();
+  await expect(card).toHaveAttribute("data-burst-level", "2");
+  await page.getByTestId("order-unit-1").click();
+  await expect(page.locator(".burst-stepper")).toHaveCount(0);
+  await page.getByTestId("order-unit-2").click();
+  await expect(card).toHaveAttribute("data-burst-level", "2");
+  await expect(page.locator(".burst-level")).toHaveText("BURST 2");
+  await page.setViewportSize({ width: 800, height: 650 });
+  const burstControlBounds = await page.locator(".command-card.selected, .burst-stepper").evaluateAll(nodes => nodes.map(node => {
+    const box = node.getBoundingClientRect();
+    return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+  }));
+  expect(burstControlBounds[1].left).toBeGreaterThanOrEqual(burstControlBounds[0].left);
+  expect(burstControlBounds[1].right).toBeLessThanOrEqual(burstControlBounds[0].right);
+  expect(burstControlBounds[1].top).toBeGreaterThanOrEqual(burstControlBounds[0].top);
+  expect(burstControlBounds[1].bottom).toBeLessThanOrEqual(burstControlBounds[0].bottom);
+  await page.getByTestId("speed").click();
+  await page.getByTestId("speed").click();
+  await page.getByTestId("battle-start").click();
+  await expect(page.locator("#game-shell")).not.toHaveClass(/executing/, { timeout: 45_000 });
+  const payload = await (await request.get("/api/state")).json();
+  const action = payload.state.event_log.find(event =>
+    event.kind.type === "ACTION_STARTED" && Number(event.kind.actor_id) === 2,
+  );
+  expect(action.kind.command.burst_level).toBe(2);
+});
+
+test("normal attack and knockback can each be reserved", async ({ page }) => {
+  for (const index of [0, 1]) {
     await page.getByTestId(`command-1-${index}`).click();
     await expect(page.getByTestId(`command-1-${index}`)).toHaveAttribute("aria-selected", "true");
   }
-  await page.getByTestId("command-1-2").click();
-  await expect(page.getByTestId("command-1-2")).toHaveAttribute("aria-selected", "true");
 });
 
 test("automatic skill reservation updates selections without exceeding SP", async ({ page }) => {
@@ -247,7 +366,7 @@ test("automatic skill reservation updates selections without exceeding SP", asyn
 });
 
 test("automatic reservation preserves the costume the player already chose", async ({ page }) => {
-  await page.getByTestId("command-1-4").click();
+  await page.getByTestId("command-1-3").click();
   await page.getByTestId("auto-reserve").click();
   await page.getByTestId("order-unit-1").click();
   await expect(page.locator("#costume-strip [data-costume-id='Loen_2']")).toHaveAttribute("aria-selected", "true");
@@ -262,6 +381,11 @@ test("an unaffordable costume reservation is rejected without negative SP", asyn
     const costs = labels.map(label => Number(label.match(/SP\s*(\d+)/)?.[1] || 0));
     const maximumIndex = costs.indexOf(Math.max(...costs));
     await cards.nth(maximumIndex).click();
+    const increase = page.getByRole("button", { name: /バースト段階を上げる/ });
+    while (await increase.isVisible().catch(() => false) && await increase.isEnabled()) {
+      await increase.click();
+      if (await page.locator("#toast").isVisible()) break;
+    }
     if (await page.locator("#toast").isVisible()) break;
   }
   await expect(page.locator("#toast")).toContainText("SPが不足");
@@ -330,11 +454,11 @@ test("complex plan keeps formation, order, SP, resolved footprint, and actual hi
   await page.getByTestId("player-token-1").dragTo(page.getByTestId("player-cell-2-3"));
   await page.getByTestId("order-unit-1").dragTo(page.getByTestId("order-unit-3"));
   await page.getByTestId("order-unit-1").click();
-  await page.getByTestId("command-1-3").click();
+  await page.getByTestId("command-1-2").click();
   await page.getByTestId("order-unit-2").click();
-  await page.getByTestId("command-2-2").click();
+  await page.getByTestId("command-2-0").click();
   await page.getByTestId("order-unit-3").click();
-  await page.getByTestId("command-3-2").click();
+  await page.getByTestId("command-3-0").click();
   await page.getByTestId("order-unit-1").click();
 
   await expect(page.locator("#enemy-field .target-preview")).toHaveCount(4);
@@ -365,11 +489,11 @@ test("rapid mixed reservations converge on one latest authoritative target previ
   });
   await page.evaluate(() => {
     document.querySelector('[data-testid="order-unit-1"]').click();
-    document.querySelector('[data-testid="command-1-3"]').click();
+    document.querySelector('[data-testid="command-1-2"]').click();
     document.querySelector('[data-testid="order-unit-2"]').click();
-    document.querySelector('[data-testid="command-2-2"]').click();
+    document.querySelector('[data-testid="command-2-0"]').click();
     document.querySelector('[data-testid="order-unit-3"]').click();
-    document.querySelector('[data-testid="command-3-2"]').click();
+    document.querySelector('[data-testid="command-3-0"]').click();
     document.querySelector('[data-testid="order-unit-1"]').click();
   });
 
@@ -380,11 +504,11 @@ test("rapid mixed reservations converge on one latest authoritative target previ
 });
 
 test("later action preview and execution account for enemies killed by earlier reservations", async ({ page, request }) => {
-  await page.getByTestId("command-1-3").click();
+  await page.getByTestId("command-1-2").click();
   await page.getByTestId("order-unit-2").click();
   await page.getByTestId("command-2-0").click();
   await page.getByTestId("order-unit-3").click();
-  await page.getByTestId("command-3-2").click();
+  await page.getByTestId("command-3-0").click();
   await page.getByTestId("order-unit-2").click();
 
   await expect(page.locator("#enemy-field .target-anchor")).toHaveAttribute("data-coordinate", "3-1");
@@ -402,7 +526,7 @@ test("later action preview and execution account for enemies killed by earlier r
 });
 
 test("battle playback shows actor, target, damage and obeys pause and speed", async ({ page }) => {
-  await page.getByTestId("command-1-3").click();
+  await page.getByTestId("command-1-2").click();
   await page.getByTestId("battle-start").click();
   await expect(page.locator("#game-shell")).toHaveClass(/executing/, { timeout: 10_000 });
   await expect(page.locator("#battle-cue")).toBeVisible();
@@ -421,7 +545,7 @@ test("battle history translates authoritative events without exposing engine JSO
   test.setTimeout(90_000);
   for (const unitId of [2, 3]) {
     await page.getByTestId(`order-unit-${unitId}`).click();
-    await page.locator("#costume-strip [data-command-type='WAIT']").click();
+    await page.locator("#costume-strip [data-command-type='NORMAL_ATTACK']").click();
   }
   await page.getByTestId("order-unit-1").click();
   await page.getByTestId("speed").click();
@@ -459,7 +583,7 @@ test("multi-hit playback exposes chain changes instead of silently skipping them
       }
     }).observe(document.querySelector("#floating-layer"), { childList: true });
   });
-  await page.getByTestId("command-1-3").click();
+  await page.getByTestId("command-1-2").click();
   await page.locator("#speed").click();
   await page.locator("#speed").click();
   await page.getByTestId("battle-start").click();
@@ -484,9 +608,9 @@ test("knockback collision shows each authoritative damage event only once", asyn
   await page.reload();
   await page.getByTestId("command-1-1").click();
   await page.getByTestId("order-unit-2").click();
-  await page.getByTestId("command-2-2").click();
+  await page.getByTestId("command-2-0").click();
   await page.getByTestId("order-unit-3").click();
-  await page.getByTestId("command-3-2").click();
+  await page.getByTestId("command-3-0").click();
   await page.evaluate(() => {
     window.__observedDamage = [];
     new MutationObserver(records => {
@@ -518,10 +642,10 @@ test("knockback collision shows each authoritative damage event only once", asyn
 });
 
 test("used costumes remain visible with an explicit disabled cooldown state next turn", async ({ page }) => {
-  await page.getByTestId("command-1-3").click();
+  await page.getByTestId("command-1-2").click();
   for (const unitId of [2, 3]) {
     await page.getByTestId(`order-unit-${unitId}`).click();
-    await page.getByTestId(`command-${unitId}-2`).click();
+    await page.getByTestId(`command-${unitId}-0`).click();
   }
   await page.getByTestId("speed").click();
   await page.getByTestId("speed").click();
@@ -529,7 +653,7 @@ test("used costumes remain visible with an explicit disabled cooldown state next
   await expect(page.locator("#game-shell")).not.toHaveClass(/executing/, { timeout: 45_000 });
   await page.getByTestId("order-unit-1").click();
   const used = page.locator("#costume-strip [data-costume-id='Loen_1']");
-  await expect(page.locator("#costume-strip .command-card")).toHaveCount(6);
+  await expect(page.locator("#costume-strip .command-card")).toHaveCount(5);
   await expect(used).toBeDisabled();
   await expect(used).toContainText("CT 2");
 });
@@ -541,7 +665,7 @@ test("a newly created summon is inserted during playback before later events can
   const partyIds = await page.locator("#ally-rail .order-card").evaluateAll(cards => cards.map(card => Number(card.dataset.unitId)));
   for (const unitId of partyIds.filter(unitId => unitId !== 1)) {
     await page.getByTestId(`order-unit-${unitId}`).click();
-    await page.locator("#costume-strip [data-command-type='WAIT']").click();
+    await page.locator("#costume-strip [data-command-type='NORMAL_ATTACK']").click();
   }
   await page.getByTestId("battle-start").click();
   await expect(page.locator("#game-shell.executing .playback-created")).toHaveCount(1, { timeout: 15_000 });
@@ -803,7 +927,7 @@ test("configured costume potential changes the displayed skill range variant", a
   setup.mcts_simulations = 3;
   await request.post("/api/start", { data: setup });
   await page.goto("/");
-  const card = page.locator("#costume-strip .command-card").filter({ hasText: "最後の希望" });
+  const card = page.locator("#costume-strip .command-card").filter({ hasText: "業火降臨" });
   await expect(card.locator(".command-range i.hit")).toHaveCount(5);
 });
 
@@ -821,7 +945,7 @@ test("next-ally skills retarget immediately when the left action order is dragge
 
   for (const unitId of [2, 3]) {
     await page.getByTestId(`order-unit-${unitId}`).click();
-    await page.locator("#costume-strip [data-command-type='WAIT']").click();
+    await page.locator("#costume-strip [data-command-type='NORMAL_ATTACK']").click();
   }
   await page.getByTestId("speed").click();
   await page.getByTestId("speed").click();
@@ -936,7 +1060,7 @@ test("Monster Chaser battle delegates the enemy turn to the rule controller", as
   await openBattle(page, request, "MONSTER_CHASER");
   for (const unitId of [1, 2, 3, 4, 5]) {
     await page.getByTestId(`player-token-${unitId}`).click();
-    await page.locator("#costume-strip [data-command-type='WAIT']").click();
+    await page.locator("#costume-strip [data-command-type='NORMAL_ATTACK']").click();
   }
   await page.getByTestId("battle-start").click();
   await expect(page.locator("#sp-text")).toHaveText("14 / 20", { timeout: 15_000 });
@@ -969,6 +1093,7 @@ test("Monster Chaser level transition is animated and the current HP segment sta
 });
 
 test("Monster Chaser inserts party two during playback when party one is eliminated", async ({ page, request }) => {
+  test.setTimeout(180_000);
   const catalog = await (await request.get("/api/catalog")).json();
   const setup = structuredClone(catalog.presets.MONSTER_CHASER);
   setup.monster_level = 25;
@@ -978,15 +1103,14 @@ test("Monster Chaser inserts party two during playback when party one is elimina
   await page.getByTestId("speed").click();
   await page.getByTestId("speed").click();
 
-  const reserveWaitForVisibleParty = async () => {
-    const unitIds = await page.locator("#ally-rail .order-card").evaluateAll(cards => cards.map(card => card.dataset.unitId));
-    for (const unitId of unitIds) {
-      await page.getByTestId(`order-unit-${unitId}`).click();
-      await page.locator("#costume-strip [data-command-type='WAIT']").click();
-    }
+  const expectVisiblePartyToDefaultToNormalAttacks = async () => {
+    const cards = page.locator("#ally-rail .order-card:not(:disabled)");
+    await expect.poll(async () => cards.evaluateAll(items => (
+      items.length > 0 && items.every(item => item.textContent.includes("通常攻撃"))
+    ))).toBe(true);
   };
 
-  await reserveWaitForVisibleParty();
+  await expectVisiblePartyToDefaultToNormalAttacks();
   await page.getByTestId("battle-start").click();
   await expect(page.locator("#game-shell")).not.toHaveClass(/executing/, { timeout: 45_000 });
 
@@ -1009,7 +1133,7 @@ test("Monster Chaser inserts party two during playback when party one is elimina
   for (let turn = 0; turn < 8; turn += 1) {
     const state = await (await request.get("/api/state")).json();
     if (state.state.monster_chaser.current_party === 2) break;
-    await reserveWaitForVisibleParty();
+    await expectVisiblePartyToDefaultToNormalAttacks();
     await page.getByTestId("battle-start").click();
     await expect(page.locator("#game-shell")).not.toHaveClass(/executing/, { timeout: 45_000 });
   }

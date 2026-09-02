@@ -1,6 +1,7 @@
 import {
   actionIndices,
   autoReserve as chooseAutoReserve,
+  burstOptionsForCostume,
   cellKey,
   commandCost,
   keyboardTarget,
@@ -9,6 +10,7 @@ import {
   nextSpeed,
   normalizeFormation,
   occupantAt,
+  plannedBurstSpCost,
   plannedSpCost,
   playbackDelay,
   projectRangeCells,
@@ -16,6 +18,7 @@ import {
   reorder,
   selectCommand,
   serializeFormation,
+  spBreakdown,
 } from "./battle-ui-model.mjs";
 import { DEFAULT_LOCALE, applyTranslations, setLocale, t } from "./i18n.mjs";
 
@@ -28,6 +31,7 @@ let draft = null;
 let selectedUnitId = null;
 let plannedOrder = [];
 let plannedCommands = new Map();
+let plannedBurstLevels = new Map();
 let plannedFormation = {};
 let orderDragId = null;
 let orderPointerDrag = null;
@@ -166,13 +170,16 @@ const defaultCostumes = character => character.costumes.map(costume => ({
 
 const normalizeDraft = preset => {
   const value = clone(preset);
+  const playableCharacterIds = new Set((catalog?.characters || []).map(character => character.id));
   for (const side of ["player_units", "enemy_units"]) {
-    value[side] = value[side].map(unit => ({
+    value[side] = (value[side] || [])
+      .filter(unit => playableCharacterIds.has(unit.character_id))
+      .map(unit => ({
       ...unit,
       equipment: clone(unit.equipment || {}),
       build_settings: clone(unit.build_settings || defaultBuildSettings()),
       costumes: unit.costumes.map(costume => ({ ...costume, enabled: costume.enabled !== false })),
-    }));
+      }));
   }
   return value;
 };
@@ -192,6 +199,9 @@ const numberSelect = (minimum, maximum, selected) => {
 };
 
 const loadDraft = preset => {
+  cancelRangePreview();
+  editorDrag = null;
+  characterPickerTarget = null;
   draft = normalizeDraft(preset);
   editorParty = 1;
   editorFocus = { sideKey: "player_units", index: 0 };
@@ -280,6 +290,7 @@ const renderFormationBoard = (selector, sideKey) => {
         const character = characterById(entry.unit.character_id);
         const token = document.createElement("span");
         token.className = `formation-token ${elementClass(character?.element)} ${editorFocus.sideKey === sideKey && editorFocus.index === entry.index ? "selected" : ""}`;
+        token.dataset.characterId = entry.unit.character_id;
         token.tabIndex = 0;
         token.setAttribute("role", "button");
         token.setAttribute("aria-label", t("formation.moveAria", { name: character?.name || entry.unit.character_id }));
@@ -917,14 +928,18 @@ const capabilities = () => modeCapabilities(snapshot.state.rules.mode, snapshot.
 const effectivePosition = unit => plannedFormation[String(unit.id)] || unit.position;
 
 const commandMeta = (unit, command) => {
-  if (!command) return { name: t("action.wait"), sp_cost: 0, cooldown: 0, range: [], operation_summary: t("action.noAction"), glyph: "…" };
-  if (command.type === "USE_COSTUME") return { ...costumeById(command.costume_id), ...(command.ui || {}), glyph: "✦" };
+  if (!command) return { name: t("action.cannotAct"), sp_cost: 0, cooldown: 0, range: [], operation_summary: "", description_ja: "", glyph: "—" };
+  if (command.type === "USE_COSTUME") {
+    const costume = costumeById(command.costume_id);
+    return { ...costume, ...(command.ui || {}), name: costume.skill_name || costume.name, glyph: "✦" };
+  }
   if (command.type === "NORMAL_ATTACK") return { name: t("action.normal"), sp_cost: 0, cooldown: 0, range: [{ row: 0, depth: 0 }], operation_summary: t("action.normalSummary"), glyph: "⚔" };
   if (command.type === "KNOCKBACK") return { name: t("action.knockback"), sp_cost: 0, cooldown: 0, range: [{ row: 0, depth: 0 }], operation_summary: t("action.knockbackSummary"), glyph: "➤" };
-  return { name: t("action.wait"), sp_cost: 0, cooldown: 0, range: [], operation_summary: t("action.waitSummary"), glyph: "…" };
+  return { name: command.type, sp_cost: 0, cooldown: 0, range: [], operation_summary: "", description_ja: "", glyph: "?" };
 };
 
 const plannedCost = () => plannedSpCost(plannedOrder, plannedCommands, legalFor, costumeById);
+const plannedBurstCost = () => plannedBurstSpCost(plannedOrder, plannedCommands, legalFor);
 
 const moveOrderRelative = (movingId, targetId, after = false) => {
   const moving = Number(movingId);
@@ -963,10 +978,12 @@ const renderOrder = () => {
     if (!unit) return;
     const character = entityById(unit.character_id);
     const meta = commandMeta(unit, selectedCommand(unit.id));
+    const isActionable = Boolean(legalFor(unit.id)?.commands?.length);
     const card = document.createElement("button");
     card.type = "button";
-    card.draggable = true;
-    card.className = `order-card ${elementClass(character?.element)} ${selectedUnitId === unit.id ? "selected" : ""}`;
+    card.draggable = isActionable;
+    card.disabled = !isActionable;
+    card.className = `order-card ${elementClass(character?.element)} ${selectedUnitId === unit.id ? "selected" : ""} ${isActionable ? "" : "inactive"}`;
     card.dataset.unitId = String(unit.id);
     card.dataset.testid = `order-unit-${unit.id}`;
     card.setAttribute("aria-label", t("order.cardAria", { order: index + 1, name: character?.name || unit.character_id, action: meta.name }));
@@ -1337,6 +1354,10 @@ const selectCommandForUnit = (unitId, index) => {
     showError(result.reason === "INSUFFICIENT_SP" ? t("error.insufficientSp") : t("error.maskedAction"));
     return;
   }
+  const selected = legalFor(unitId)?.commands?.[Number(index)];
+  if (selected?.type === "USE_COSTUME") {
+    plannedBurstLevels.set(`${Number(unitId)}:${selected.costume_id}`, Number(selected.burst_level ?? 0));
+  }
   plannedCommands = result.selections;
   renderBattleSurface();
 };
@@ -1358,14 +1379,32 @@ const renderActionDock = () => {
   const character = entityById(unit.character_id);
   $("#reservation-unit-name").textContent = character?.name || unit.character_id;
   $("#reservation-sp").textContent = String(Number(currentPlayerTeam().sp) - plannedCost());
-  const options = [
-    ...entry.commands.map((command, index) => ({ command, index, available: true })),
-    ...(entry.unavailable_commands || []).map(command => ({ command, index: null, available: false })),
-  ];
-  options.forEach(({ command, index, available }) => {
+  const selected = selectedCommand(unit.id);
+  const options = entry.commands
+    .map((command, index) => ({ command, index, available: true }))
+    .filter(option => option.command.type !== "USE_COSTUME");
+  for (const loadout of unit.costume_loadout ?? []) {
+    const variants = burstOptionsForCostume(
+      entry.commands,
+      entry.unavailable_commands,
+      loadout.costume_id,
+    );
+    if (!variants.length) continue;
+    const key = `${unit.id}:${loadout.costume_id}`;
+    const selectedLevel = selected?.type === "USE_COSTUME" && selected.costume_id === loadout.costume_id
+      ? Number(selected.burst_level ?? 0)
+      : plannedBurstLevels.get(key);
+    const desiredLevel = selectedLevel ?? 0;
+    const chosen = variants.find(option => option.level === desiredLevel) ?? variants[0];
+    plannedBurstLevels.set(key, chosen.level);
+    options.push({ ...chosen, variants, key });
+  }
+  options.forEach(({ command, index, available, variants = [], key = null }, displayIndex) => {
     const meta = commandMeta(unit, command);
     const costume = command.type === "USE_COSTUME" ? costumeById(command.costume_id) : null;
     const cooldown = costume ? Number(command.cooldown_remaining ?? unit.cooldowns?.[costume.id] ?? 0) : 0;
+    const wrapper = document.createElement("div");
+    wrapper.className = `command-option ${variants.length > 1 ? "burst-capable" : ""}`;
     const card = document.createElement("button");
     card.type = "button";
     const isSelected = available && selectedCommandIndex(unit.id) === index;
@@ -1386,12 +1425,17 @@ const renderActionDock = () => {
     if (available) card.dataset.commandIndex = String(index);
     card.dataset.commandType = command.type;
     if (command.costume_id) card.dataset.costumeId = command.costume_id;
-    card.dataset.testid = available ? `command-${unit.id}-${index}` : `command-${unit.id}-unavailable-${command.costume_id}`;
+    card.dataset.testid = available ? `command-${unit.id}-${displayIndex}` : `command-${unit.id}-unavailable-${command.costume_id}`;
     card.disabled = !available;
     card.setAttribute("role", "option");
     card.setAttribute("aria-selected", String(isSelected));
     card.setAttribute("aria-label", t("action.cardAria", {
       name: meta.name,
+      burst: variants.length > 1
+        ? Number(command.burst_level ?? 0) > 0
+          ? t("action.burstAriaSuffix", { level: Number(command.burst_level) })
+          : t("action.burstNoneAriaSuffix")
+        : "",
       sp: meta.sp_cost || 0,
       cooldown: cooldown ? t("action.cooldownSuffix", { cooldown }) : "",
       state: isSelected
@@ -1414,9 +1458,49 @@ const renderActionDock = () => {
       : !available
       ? t("action.unavailable")
       : "";
+    card.dataset.burstLevel = String(Number(command.burst_level ?? 0));
     card.innerHTML = `<span class="command-glyph">${meta.glyph}</span><span class="command-name"><b>${escapeHtml(meta.name)}</b><small>${escapeHtml(selector)} · ${escapeHtml(meta.operation_summary || "")}</small></span><span class="command-cost"><b>SP ${meta.sp_cost || 0}</b>${cooldown ? `<small>CT ${cooldown}</small>` : ""}</span><span class="command-range" aria-hidden="true">${miniMarkup}</span><span class="command-state">${escapeHtml(stateLabel)}</span>`;
     if (available) card.addEventListener("click", () => selectCommandForUnit(unit.id, index));
-    root.append(card);
+    wrapper.append(card);
+    if (variants.length > 1 && isSelected) {
+      const level = Number(command.burst_level ?? 0);
+      const currentPosition = variants.findIndex(option => option.level === level);
+      const stepper = document.createElement("span");
+      stepper.className = "burst-stepper";
+      stepper.setAttribute("role", "group");
+      stepper.setAttribute("aria-label", t("action.burstControlsAria", { name: meta.name }));
+      const down = document.createElement("button");
+      down.type = "button";
+      down.className = "burst-arrow burst-down";
+      down.textContent = "‹";
+      down.disabled = currentPosition <= 0;
+      down.setAttribute("aria-label", t("action.burstDecreaseAria", { name: meta.name }));
+      const badge = document.createElement("b");
+      badge.className = `burst-level ${level > 0 ? "active" : ""}`;
+      badge.textContent = level > 0 ? t("action.burstLevel", { level }) : t("action.burstNone");
+      const up = document.createElement("button");
+      up.type = "button";
+      up.className = "burst-arrow burst-up";
+      up.textContent = "›";
+      up.disabled = currentPosition < 0 || currentPosition >= variants.length - 1;
+      up.setAttribute("aria-label", t("action.burstIncreaseAria", { name: meta.name }));
+      const shiftBurst = direction => event => {
+        event.stopPropagation();
+        const target = variants[currentPosition + direction];
+        if (!target) return;
+        if (!target.available) {
+          showError(target.command.unavailable_reason === "INSUFFICIENT_SP" ? t("error.insufficientSp") : t("error.maskedAction"));
+          return;
+        }
+        plannedBurstLevels.set(key, target.level);
+        selectCommandForUnit(unit.id, target.index);
+      };
+      down.addEventListener("click", shiftBurst(-1));
+      up.addEventListener("click", shiftBurst(1));
+      stepper.append(down, badge, up);
+      wrapper.append(stepper);
+    }
+    root.append(wrapper);
   });
   renderSelectedSkill(unit, selectedCommand(unit.id));
 };
@@ -1431,10 +1515,11 @@ const renderSelectedSkill = (unit, command) => {
   $("#selected-emblem").className = `unit-emblem ${elementClass(character?.element)}`;
   $("#selected-name").textContent = character?.name || unit.character_id;
   $("#selected-skill-name").textContent = meta.name;
-  $("#selected-upgrade").textContent = loadout ? `+${loadout.enhancement}${loadout.burst_level ? ` · B${loadout.burst_level}` : ""}` : "";
+  const selectedBurstLevel = Number(command?.burst_level ?? 0);
+  $("#selected-upgrade").textContent = loadout ? `+${loadout.enhancement}${selectedBurstLevel ? ` · B${selectedBurstLevel}` : ""}` : "";
   $("#selected-sp").textContent = meta.sp_cost || 0;
   $("#selected-cooldown").textContent = costume ? unit.cooldowns?.[costume.id] || 0 : 0;
-  $("#selected-skill-summary").textContent = `${meta.selector ? `${t(`selector.${meta.selector}`)} · ` : ""}${meta.operation_summary}`;
+  $("#selected-skill-summary").textContent = meta.description_ja || meta.operation_summary;
   $("#reserved-badge").textContent = t("order.badge", { order: plannedOrder.indexOf(unit.id) + 1 });
   $("#selected-element").textContent = t(`element.${String(character?.element || "NONE")}`);
   requestRangePreview(unit, command, meta);
@@ -1480,7 +1565,7 @@ const requestRangePreview = (unit, command, meta) => {
   previewController?.abort();
   previewController = null;
   renderRange(meta.range || []);
-  if (!command || command.type === "WAIT" || animationRunning) return;
+  if (!command || animationRunning) return;
   previewTimer = window.setTimeout(async () => {
     if (generation !== previewGeneration || selectedUnitId !== unit.id) return;
     const controller = new AbortController();
@@ -1508,23 +1593,47 @@ const requestRangePreview = (unit, command, meta) => {
 
 const renderSp = () => {
   const current = Number(currentPlayerTeam().sp);
-  const remaining = current - plannedCost();
-  renderSpGauge(remaining, current);
+  const consumed = plannedCost();
+  const remaining = current - consumed;
+  renderSpGauge(remaining, current, plannedBurstCost());
   $("#execute").disabled = Boolean(snapshot.state.terminal) || snapshot.state.active_side !== "PLAYER" || remaining < 0 || plannedOrder.length === 0 || requestInFlight || animationRunning;
 };
 
-const renderSpGauge = (displayed, current = displayed) => {
+let lastSpBreakdown = null;
+
+const renderSpGauge = (displayed, current = displayed, burst = 0) => {
   const cap = Number(snapshot.state.rules.sp_cap ?? Math.max(20, current));
-  $("#sp-text").textContent = `${displayed} / ${cap}`;
-  $("#reservation-sp").textContent = String(displayed);
+  const breakdown = spBreakdown({ current, reserved: current - displayed, burst, cap });
+  const panel = $(".sp-panel");
+  $("#sp-text").textContent = `${breakdown.remaining} / ${breakdown.cap}`;
+  $("#sp-status").textContent = t("footer.spStatus", {
+    remaining: breakdown.remaining,
+    consumed: breakdown.consumed,
+    burst: breakdown.burst,
+  });
+  $("#reservation-sp").textContent = String(breakdown.remaining);
+
+  const changed = lastSpBreakdown
+    ? ["remaining", "consumed", "burst"].filter(key => lastSpBreakdown[key] !== breakdown[key])
+    : [];
+  panel.classList.toggle("has-consumption", breakdown.consumed > 0);
+  panel.classList.toggle("has-burst", breakdown.burst > 0);
+  panel.classList.remove("sp-updated");
+  if (changed.length) {
+    void panel.offsetWidth;
+    panel.classList.add("sp-updated");
+  }
+
   const root = $("#sp-pips");
   root.innerHTML = "";
-  for (let index = 0; index < cap; index += 1) {
+  for (let index = 0; index < breakdown.cap; index += 1) {
     const pip = document.createElement("i");
-    if (index < displayed) pip.classList.add("filled");
-    else if (index < current) pip.classList.add("spent");
+    if (index < breakdown.remaining) pip.classList.add("filled", "remaining");
+    else if (index < breakdown.remaining + breakdown.regularConsumed) pip.classList.add("spent");
+    else if (index < breakdown.current) pip.classList.add("burst");
     root.append(pip);
   }
+  lastSpBreakdown = breakdown;
 };
 
 const modifierLabels = {
@@ -1612,9 +1721,12 @@ const unitName = (unitId, data = snapshot) => {
 };
 
 const commandName = command => {
-  if (!command) return t("action.wait");
-  if (command.type === "USE_COSTUME") return costumeById(command.costume_id)?.name || command.costume_id;
-  return ({ NORMAL_ATTACK: t("action.normal"), KNOCKBACK: t("action.knockback"), WAIT: t("action.wait") })[command.type] || command.type;
+  if (!command) return t("selection.none");
+  if (command.type === "USE_COSTUME") {
+    const costume = costumeById(command.costume_id);
+    return costume?.skill_name || costume?.name || command.costume_id;
+  }
+  return ({ NORMAL_ATTACK: t("action.normal"), KNOCKBACK: t("action.knockback") })[command.type] || command.type;
 };
 
 const setBattleCue = (title = "", detail = "", turn = "") => {
@@ -1749,7 +1861,7 @@ const playBattleEvent = async (event, result, generation) => {
     clearPlaybackFocus();
     tokenFor(kind.actor_id)?.classList.add("acting");
     setBattleCue(unitName(kind.actor_id, result), commandName(kind.command), turnText);
-    return animationSleep(kind.command?.type === "WAIT" ? 280 : 680, generation);
+    return animationSleep(680, generation);
   }
   if (kind.type === "TARGET_LOCKED") {
     tokenFor(kind.actor_id)?.classList.add("acting");
@@ -1985,8 +2097,9 @@ const renderBattle = data => {
   const validOrder = new Set((data.legal || []).map(entry => Number(entry.unit_id)));
   plannedOrder = (data.state.teams.find(team => team.side === "PLAYER")?.action_order || []).map(Number).filter(id => validOrder.has(id));
   plannedCommands = new Map(plannedOrder.map(id => [id, 0]));
+  plannedBurstLevels = new Map();
   plannedFormation = normalizeFormation(Object.values(data.state.units).filter(unit => unit.alive && unit.side === "PLAYER" && Number(unit.party_no || 1) === Number(data.state.monster_chaser?.current_party || 1)));
-  selectedUnitId = plannedOrder[0] ?? null;
+  selectedUnitId = plannedOrder.find(id => legalFor(id)?.commands?.length) ?? null;
   keyboardDrag = null;
   if (autoReserveEnabled) plannedCommands = chooseAutoReserve({ order: plannedOrder, selections: plannedCommands, legalById: legalFor, costumeLookup: costumeById, sp: currentPlayerTeam().sp });
   let report = t("ai.idle");

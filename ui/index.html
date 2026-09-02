@@ -14,14 +14,16 @@
           <div class="selected-copy">
             <div class="eyebrow"><span id="selected-element">—</span><span id="selected-upgrade"></span></div>
             <strong id="selected-name" data-i18n="selection.none">ユニットを選択</strong>
-            <span id="selected-skill-name" data-i18n="selection.hint">盤面または行動順から選択してください</span>
+          </div>
+          <div class="selected-skill-detail">
+            <strong id="selected-skill-name" data-i18n="selection.hint">盤面または行動順から選択してください</strong>
+            <p id="selected-skill-summary" lang="ja"></p>
           </div>
           <div class="selected-numbers">
             <span>SP <b id="selected-sp">0</b></span>
             <span>CT <b id="selected-cooldown">0</b></span>
             <em id="reserved-badge" data-i18n="selection.unreserved">未予約</em>
           </div>
-          <p id="selected-skill-summary"></p>
           <div class="range-preview" id="range-preview" aria-label="選択スキルの3×4範囲" data-i18n-aria="selection.rangeAria"></div>
         </section>
 
@@ -96,9 +98,12 @@
           <button class="hud-button" id="open-formation" type="button"><span>▦</span><span data-i18n="footer.preparation">戦闘準備</span></button>
           <button class="hud-button" id="screen-toggle" type="button"><span>□</span><span data-i18n="footer.fullscreen">全画面</span></button>
         </div>
-        <section class="sp-panel" aria-label="スキルポイント残量" data-i18n-aria="footer.spAria">
-          <div><small data-i18n="footer.skillPoint">スキルポイント</small><strong id="sp-text">0 / 0</strong></div>
-          <div class="sp-pips" id="sp-pips"></div>
+        <section class="sp-panel" aria-label="スキルポイント残量" data-i18n-aria="footer.spAria" aria-live="polite" aria-atomic="true">
+          <div class="sp-readout">
+            <span class="sp-total"><small data-i18n="footer.skillPoint">SP</small><strong id="sp-text">0 / 0</strong></span>
+          </div>
+          <span class="sr-only" id="sp-status"></span>
+          <div class="sp-pips" id="sp-pips" aria-hidden="true"></div>
         </section>
         <button class="battle-button" id="execute" type="button" data-testid="battle-start"><span id="battle-turn">ターン 1</span><b data-i18n="footer.battle">BATTLE</b><i data-i18n="footer.start">開始 ›</i></button>
       </footer>
@@ -166,7 +171,7 @@
     </dialog>
 
     <dialog class="sim-dialog log-dialog" id="log-dialog"><section class="dialog-frame compact-dialog"><header class="dialog-title"><div><small data-i18n="log.caption">戦闘履歴</small><h1><span data-i18n="log.title">戦闘記録</span> <span id="event-count">0</span></h1></div><button class="dialog-close" data-close="log-dialog" aria-label="戦闘記録を閉じる" data-i18n-aria="log.closeAria">×</button></header><ol class="event-list" id="events"></ol></section></dialog>
-    <dialog class="sim-dialog help-dialog" id="help-dialog"><section class="dialog-frame compact-dialog"><header class="dialog-title"><div><small data-i18n="help.caption">基本操作</small><h1 data-i18n="help.title">操作方法</h1></div><button class="dialog-close" data-close="help-dialog" aria-label="操作説明を閉じる" data-i18n-aria="help.closeAria">×</button></header><div class="help-flow"><span>1</span><p><b data-i18n="help.formationTitle">配置</b><span data-i18n="help.formationBody">味方駒をドラッグ。味方の上へ落とすと入れ替わります。</span></p><span>2</span><p><b data-i18n="help.reserveTitle">予約</b><span data-i18n="help.reserveBody">味方を選び、通常攻撃・ノックバック・待機・コスチュームスキルを選びます。</span></p><span>3</span><p><b data-i18n="help.orderTitle">順番</b><span data-i18n="help.orderBody">左の行動順カードをドラッグ、または矢印で並べ替えます。</span></p><span>4</span><p><b data-i18n="help.keyboardTitle">キーボード</b><span data-i18n="help.keyboardBody">駒でSpace、矢印で移動先、Enterで確定、Escで取消です。</span></p><span>5</span><p><b data-i18n="help.executeTitle">実行</b><span data-i18n="help.executeBody">SP・範囲・順番を確認して戦闘開始を押します。</span></p></div></section></dialog>
+    <dialog class="sim-dialog help-dialog" id="help-dialog"><section class="dialog-frame compact-dialog"><header class="dialog-title"><div><small data-i18n="help.caption">基本操作</small><h1 data-i18n="help.title">操作方法</h1></div><button class="dialog-close" data-close="help-dialog" aria-label="操作説明を閉じる" data-i18n-aria="help.closeAria">×</button></header><div class="help-flow"><span>1</span><p><b data-i18n="help.formationTitle">配置</b><span data-i18n="help.formationBody">味方駒をドラッグ。味方の上へ落とすと入れ替わります。</span></p><span>2</span><p><b data-i18n="help.reserveTitle">予約</b><span data-i18n="help.reserveBody">味方を選び、通常攻撃・ノックバック・コスチュームスキルを選びます。</span></p><span>3</span><p><b data-i18n="help.orderTitle">順番</b><span data-i18n="help.orderBody">左の行動順カードをドラッグ、または矢印で並べ替えます。</span></p><span>4</span><p><b data-i18n="help.keyboardTitle">キーボード</b><span data-i18n="help.keyboardBody">駒でSpace、矢印で移動先、Enterで確定、Escで取消です。</span></p><span>5</span><p><b data-i18n="help.executeTitle">実行</b><span data-i18n="help.executeBody">SP・範囲・順番を確認して戦闘開始を押します。</span></p></div></section></dialog>
     <dialog class="sim-dialog inspect-dialog" id="inspect-dialog"><section class="dialog-frame compact-dialog"><button class="dialog-close floating-close" data-close="inspect-dialog" aria-label="ユニット詳細を閉じる" data-i18n-aria="inspect.closeAria">×</button><div id="inspect-content"></div></section></dialog>
 
     <div class="toast hidden" id="toast" role="alert"></div>
