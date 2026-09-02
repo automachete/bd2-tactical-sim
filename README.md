@@ -1,34 +1,64 @@
 # BrownDust2 Tactical Simulator
 
-BrownDust2 の現行戦闘ルールを、決定論的なRustコア、版管理されたSQLiteデータ、Gymnasium/TorchRL環境、GPU学習器、任意起動のローカルGUIとして再現するプロジェクトです。
+BrownDust2の戦闘を、決定論的なRustコア、SQLiteカタログ、ブラウザGUI、Gymnasium/TorchRL環境で扱う戦術シミュレータです。ゲームプレイの確認、AI対戦、再現可能な戦闘テスト、GPUを使った方策学習を同じ戦闘コア上で実行できます。
 
-対象モードは通常戦闘、鏡戦争、魔物追跡者です。2026-09-02スナップショットには★5プレイアブル61体、プレイヤー用155コスチューム、召喚4種、現行ボス用5スキル、強化・潜在力・バーストを展開した合計12,509派生を収録します。公開情報から変換した仕様と、現行クライアントで実測済みの仕様は検証台帳で区別します。
+## 対応範囲
 
-## 構成
+| モード | プレイヤー側 | 対戦相手 |
+|---|---|---|
+| 通常戦闘 | GUI操作または方策 | MCTS |
+| 鏡戦争 | GUI操作または方策 | MCTS |
+| 魔物追跡者 | 2パーティを編成してGUI操作 | データ駆動のルールAI |
 
-- `crates/bd2-core`: OSやGUIから独立した戦闘状態・イベント・算術・モード処理
-- `crates/bd2-data`: SQLiteスキーマ、現行スナップショット、シナリオ管理
-- `crates/bd2-py`: PyO3によるPythonネイティブ拡張
-- `python/bd2rl`: Gymnasium環境、GPU PPO、評価、MCTS、シミュレータ専用GUIサーバー
-- `tools`: 実行コードを評価しないASTベースの外部データ同期
-- `ui`: 学習から分離された観戦・対戦画面
-- `docs`: 概念設計、出典台帳、実機検証マトリクス
+2026-09-02版のデータには、★5プレイアブル61体、プレイヤー用155コスチューム、召喚4種、現行ボス用5スキルを収録しています。強化、潜在力、バーストを展開したスキル派生は12,509件です。
+
+主な機能は次のとおりです。
+
+- シードと入力から同じ結果を再現できる整数演算ベースの戦闘コア
+- 3×4盤面の配置、行動予約、対象範囲、戦闘再生を操作できるローカルGUI
+- コスチューム、装備、成長値、バフをSQLiteから読み込むデータ駆動構成
+- 事前学習を必要としないMCTSと、魔物追跡者用の行動順序AI
+- 合法手マスク付きのGymnasium/TorchRL環境とGPU対応PPO
+- 戦闘スナップショット、イベント列、巻き戻しによる再現・診断機能
+
+ゲームクライアントとの照合状況は[実機検証マトリクス](docs/research/browndust2-combat-verification-matrix.md)で管理しています。未検証の境界条件を含め、検証済みの範囲を越えて完全一致とは扱いません。
+
+## 必要環境
+
+以下の手順はWindows PowerShell向けです。
+
+- Python 3.13または3.14
+- Rust 1.97以降
+- Node.js 24以降
+- 学習にGPUを使う場合は、CUDA 13.0に対応したNVIDIA GPU環境
+
+GUIによるデバッグプレイだけであればGPUは不要です。
 
 ## セットアップ
 
-PowerShellで次を実行します。
+### 1. Pythonと開発ツール
 
 ```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cu130
 .\.venv\Scripts\python.exe -m pip install -e ".[test]"
+
 cd tools
 npm install --ignore-scripts
-npx playwright install chromium
+cd ..
+```
+
+### 2. ゲームデータの生成
+
+外部データを同期し、検証後のカタログとシナリオをSQLiteへ格納します。生成物は`data/generated`に作成され、Gitの管理対象には含まれません。
+
+```powershell
+cd tools
 npm run sync -- --out ../data/generated/catalog.json
 node validate-catalog.mjs ../data/generated/catalog.json
 node build-current-scenarios.mjs 10072 6
 cd ..
+
 cargo run -p bd2-data --bin bd2-data -- import-catalog data/generated/catalog.json data/generated/bd2.sqlite
 cargo run -p bd2-data --bin bd2-data -- import-scenario data/scenarios/normal-demo.json data/generated/bd2.sqlite
 cargo run -p bd2-data --bin bd2-data -- import-scenario data/scenarios/mirror-war-demo.json data/generated/bd2.sqlite
@@ -36,19 +66,53 @@ cargo run -p bd2-data --bin bd2-data -- import-scenario data/scenarios/monster-c
 cargo run -p bd2-data --bin bd2-data -- inspect data/generated/bd2.sqlite
 ```
 
-シミュレータだけをデバッグプレイする場合は、学習やチェックポイント作成を行わず次の1コマンドで起動します。ブラウザ上で通常戦闘、鏡戦争、モンスターチェイサーを切り替え、★5キャラクター、配置、全コスチュームの凸・バースト・潜在力、コスチュームリンク、伝説UR IV／★5専用URの5部位装備、精錬18～24、副能力、専用主能力、刻印・覚醒、コレクション、外部バフ、BD2DB装備計算条件を編集できます。
+## GUIでプレイする
 
 ```powershell
 .\.venv\Scripts\bd2-play.exe
 ```
 
-通常戦闘と鏡戦争ではPLAYERのスキルと行動順を手動操作し、ENEMYは現在状態から毎手番UCT方式のMCTSを実行します。事前学習済みモデルは使用しません。モンスターチェイサーでは2つのPLAYERパーティを別々に編成でき、魔物側は外部DBにあるスキル順序、CT、条件発動を使うルールAIで自動進行します。既定のMCTS探索回数は48回で、画面または `--mcts-simulations` から変更できます。`bd2-gui.exe` は同じシミュレータ専用画面の別名です。
+既定では`http://127.0.0.1:8765/`を開きます。ブラウザを自動で開かない場合は`--no-open`、ポートを変更する場合は`--port`を指定できます。`bd2-gui.exe`も同じ画面を起動します。
 
-戦闘画面は見下ろし専用の3×4盤面と予約操作を採用します。左側は「縦の行動順」と「選択ユニットの縦の行動候補」を隣接させ、ユニット選択、予約、順番確認を一か所で完結させます。味方駒はマウス／タッチのドラッグで移動でき、占有マスへ落とすと2体を入れ替えます。Spaceで駒を持ち上げ、矢印で移動先、Enterで確定、Escで取消するキーボード操作も同じ結果になります。行動順カード自体をマウス／タッチでドラッグして任意の挿入位置へ変更し、独立した順番編集モードはありません。コスチューム／基本行動を予約し、戦闘開始で順番・行動・予定配置をRustコアへ一括送信します。対象確認は予定済みの先行行動まで一時シミュレーションし、確定主対象、盤端で切り詰めた効果範囲、実際に範囲内にいるユニットを表示します。予測専用シミュレーターは本番状態を毎回復元して再利用し、連続操作は短く集約して旧要求を中断するため、予約や順番を素早く変えても古い範囲で詰まりません。応答イベントは攻撃者、対象マス、ダメージ、防壁、回復、チェイン、衝突、移動、召喚、チーム交替、魔物レベルと総HP、戦闘不能の順に再生され、1～3倍速と停止は実際の再生時間へ反映されます。戦闘履歴は内部JSONではなく日本語の意味表現で表示し、終局画面からも確認できます。SP不足は予約時に拒否し、クールタイム中のコスチュームは消さずに使用不可状態で残します。敵の検査、自動スキル予約、自動ターン開始、直前手番への巻戻し、リセットも同じ画面から操作できます。鏡戦争で配置が固定される場合はドラッグとキーボード移動の双方を無効化します。
+### 戦闘操作
 
-UIは公式または第三者ミラーの画像、3Dモデル、音声、背景素材を読み込みません。★5キャラクター61体は、ユーザー作成の透過トークン画像、公式日本語名、属性、数値で識別します。生成画像の原寸とQA資料は`assets/character-icons`、GUI用64pxサムネイルは`ui/assets/character-icons/64`で分離管理し、実行時は64px画像だけをローカル配信します。画面はFluent 2を参考にしたフラットな中立面と、火・水・風・光・闇の5属性カラーで統一します。画面文言は`ja-JP`言語資源から取得します。コスチュームの凸・潜在力・バーストを変えた場合、範囲・SP・CT表示と、派生値を展開した現行の日本語スキル説明も該当派生へ即座に切り替わります。プレイヤーが予約できる行動は通常攻撃、ノックバック、使用可能なコスチュームスキルだけで、待機はコアAPIにも存在しません。
+- 味方ユニットをドラッグして配置し、占有マスへ移動すると2体を入れ替えます。
+- キーボードではSpaceでユニットを持ち上げ、矢印キーで移動先を選び、Enterで確定、Escで取り消します。
+- 左側のユニットカードをドラッグして行動順を変更します。
+- 選択ユニットの通常攻撃、ノックバック、使用可能なコスチュームスキルを予約します。
+- バースト対応スキルは、スキルカード内の左右ボタンでバーストなし／1／2／3を切り替えます。
+- 対象プレビューには、先行する予約行動を反映した主対象、効果範囲、範囲内ユニットが表示されます。
+- 画面中央下のひし形SP表示は、残りSP、通常消費分、バースト追加消費分を色分けします。
+- 戦闘イベントは1～3倍速で順次再生でき、一時停止、再開、直前手番への巻き戻しに対応します。
 
-GPU確認、学習、評価は独立した次のエントリーポイントを使用します。
+鏡戦争など配置が固定される場面では、盤面上の移動操作も無効になります。
+
+### 編成と能力値
+
+戦闘準備画面では、次の設定を変更できます。
+
+- ★5キャラクターとコスチューム
+- コスチュームの強化段階、潜在力、バースト、コスチュームリンク
+- 伝説UR IV装備と★5専用UR装備
+- 5部位の装備、精錬スコア18～24、副能力、専用装備の主能力
+- 刻印、覚醒、コレクションボーナス、外部バフ
+- BD2DB準拠の装備計算条件
+
+コスチューム設定を変更すると、範囲、SP、CT、日本語スキル説明が該当する派生値へ更新されます。
+
+### AI設定
+
+通常戦闘と鏡戦争の敵は、各手番で現在状態からUCT方式のMCTSを実行します。既定の探索回数は48回です。
+
+```powershell
+.\.venv\Scripts\bd2-play.exe --mcts-simulations 96
+```
+
+魔物追跡者では、魔物のスキル順序、CT、発動条件をSQLiteの定義から読み込みます。
+
+## 強化学習
+
+GPUの認識、学習、評価は個別のコマンドで実行します。
 
 ```powershell
 .\.venv\Scripts\bd2-device-check.exe
@@ -56,34 +120,90 @@ GPU確認、学習、評価は独立した次のエントリーポイントを�
 .\.venv\Scripts\bd2-evaluate.exe --database data/generated/bd2.sqlite --scenario data/scenarios/monster-chaser-current.json --checkpoint checkpoints/monster-chaser.pt
 ```
 
-GUIはRust戦闘コアを直接呼び出し、Gymnasium、PPO、学習済み方策を経由しません。GUI自体を起動しなければ学習経路にはHTTP・描画・MCTS処理が入りません。WindowsでTritonが利用できない場合はGPU CUDA Graph、利用可能な環境ではInductorを自動選択し、CUDA上でbf16/fp16混合精度を使います。
+学習環境はRustの並列シミュレータを直接使用します。GUIを起動しない学習経路には、HTTP配信、画面描画、MCTSは含まれません。WindowsではCUDA Graph、対応環境ではInductorを選択し、CUDA上でbf16またはfp16の混合精度を使用します。
 
-方策観測は最大32ユニット×56特徴、16個の戦闘全体特徴、5つの行動スロットから実ユニットへの索引、5×32の合法手マスクで構成します。HP・位置・実効能力、軽減・被ダメージ補正、回避、バリア、効果極性と主要状態タグ、CT、チェイン、召喚/部位、魔物追跡者のLv・残HP・編成を含みます。Pythonの単体環境とRustの並列環境は同じネイティブ観測生成器を使い、両者の一致を回帰テストします。チェックポイントには観測スキーマとモデル構造IDを保存し、不一致の古いモデルは読み込み時に拒否します。
+観測は最大32ユニット×56特徴、戦闘全体の16特徴、5つの行動スロットから実ユニットへの索引、5×32の合法手マスクで構成されます。HP、位置、能力値、軽減、回避、バリア、状態効果、CT、チェイン、召喚、ボス部位、魔物追跡者のレベルと残HPを含みます。チェックポイントには観測スキーマとモデル構造IDが保存され、互換性のないモデルは読み込み時に拒否されます。
+
+## プロジェクト構成
+
+| パス | 内容 |
+|---|---|
+| `crates/bd2-core` | 戦闘状態、イベント、算術、モード別ルール |
+| `crates/bd2-data` | SQLiteスキーマ、カタログ、シナリオ管理 |
+| `crates/bd2-py` | RustコアのPython拡張 |
+| `python/bd2rl` | Gymnasium環境、並列環境、PPO、評価、MCTS、GUIサーバー |
+| `tools` | データ同期、検証、シナリオ生成、ブラウザテスト |
+| `ui` | 戦闘GUIとUIテスト |
+| `assets/character-icons` | キャラクタートークンの原寸データと識別性QA資料 |
+| `docs` | 設計書、調査記録、検証資料 |
+
+## データとアセット
+
+外部カタログの同期処理は、取得したJavaScriptを実行せず、構文木から許可された静的データだけを読み取ります。各レコードには出典URL、取得日時、ダイジェスト、原文ペイロードを保存します。スキルは型付きの操作列へ変換できた派生だけが戦闘で使用されます。
+
+キャラクター名、コスチューム名、スキル名、スキル説明には公式の日本語表記を使用します。ゲーム公式または第三者サイトの画像、3Dモデル、音声、背景素材は同梱していません。GUIのキャラクタートークンはプロジェクト用に作成された透過PNGです。
+
+- 原寸画像: `assets/character-icons/source`
+- 識別性QA資料: `assets/character-icons/qa`
+- GUI用64px画像: `ui/assets/character-icons/64`
 
 ## テスト
+
+### Rust
 
 ```powershell
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+```
+
+### Python
+
+```powershell
 .\.venv\Scripts\ruff.exe format --check python
 .\.venv\Scripts\ruff.exe check python
 .\.venv\Scripts\pytest.exe -q
+```
+
+### データとUI
+
+Playwrightを初めて使う場合は、先にブラウザをインストールします。
+
+```powershell
+cd tools
+npx playwright install chromium
+cd ..
+
 node --check tools/sync-bd2db.mjs
 node --check tools/build-current-scenarios.mjs
 node --check tools/validate-catalog.mjs
 node --check tools/validate-character-icons.mjs
 node --check ui/app.js
 node --test ui/tests/*.test.mjs
+node tools/validate-catalog.mjs data/generated/catalog.json
+node tools/validate-character-icons.mjs
+
 cd tools
 npm run test:ui
 cd ..
-node tools/validate-catalog.mjs data/generated/catalog.json
-node tools/validate-character-icons.mjs
 ```
 
-データ同期で「未コンパイル」と判定されたスキルは、意味を推測して合法手へ混入させません。原文と出典ハッシュをSQLiteへ保存し、型付きDSLへの完全な変換が済んだものだけを戦闘で使用します。意味検査器は全12,509派生に加え、各衣装の攻略タグが直接命令、入れ子トリガー、オーラ、召喚先スキルのいずれかへ型付きで対応することも確認します。
+回帰テストには次の検証が含まれます。
 
-現在の回帰には、全61体の★5キャラクターを実編成へ順番に投入し、通常攻撃・ノックバック・全合法コスチューム技の対象ロック、基準マス、盤端クリップ、範囲内生存ユニットを別の実戦エンジン実行と照合する常設試験を含みます。装備はBD2DB原表から独立再計算した伝説30種・専用61種、全3,626精錬／主能力ケースをRustの本番リゾルバへ通し、91種すべてを所有者の実戦セットアップでも初期化します。UIはさらに、複数予約・配置・順番を同時に変える手番、連打時の最新予測への収束、召喚後の次手番、専用装備の所有者制約と主能力、成長・外部バフ設定、チェイン、衝突、魔物レベル・編成交替・HP追従、終局後履歴を実ブラウザで検証します。
+- 全★5キャラクターの通常攻撃、ノックバック、合法スキルについて、対象ロックと効果範囲を独立した戦闘実行と照合
+- 伝説装備30種と専用装備61種について、全3,626精錬／主能力ケースを本番能力値計算へ入力
+- 配置、行動順、複数予約、召喚、チェイン、衝突、編成交替、終局表示を実ブラウザで操作
+- 連続した対象プレビュー、装備所有者制約、成長設定、外部バフ、魔物レベルと共有HPを検証
 
-戦闘コアが再現可能であることと、ゲームクライアントとの完全一致は別の検証段階です。未取得の実機境界ケースは [実機検証マトリクス](docs/research/browndust2-combat-verification-matrix.md) に残し、通過していない項目を「完全再現済み」とは扱いません。
+## 関連資料
+
+- [戦闘シミュレータ概念設計](docs/rpg-simulator-conceptual-design.md)
+- [情報源台帳](docs/research/browndust2-combat-source-ledger.md)
+- [戦闘UIリファレンス](docs/research/browndust2-combat-ui-reference.md)
+- [実機検証マトリクス](docs/research/browndust2-combat-verification-matrix.md)
+- [UIゲームプレイ検証記録](docs/validation/ui-gameplay-bug-hunt-2026-09-01.md)
+- [BD2DB装備照合データ](docs/validation/bd2db-current-equipment-oracle.json)
+
+## ライセンス
+
+[MIT License](LICENSE)
