@@ -5,6 +5,8 @@ import {
   cellKey,
   commandCost,
   keyboardTarget,
+  knockbackPreviewCells,
+  knockbackPresentation,
   modeCapabilities,
   moveFormation,
   nextSpeed,
@@ -934,8 +936,41 @@ const commandMeta = (unit, command) => {
     return { ...costume, ...(command.ui || {}), name: costume.skill_name || costume.name, glyph: "✦" };
   }
   if (command.type === "NORMAL_ATTACK") return { name: t("action.normal"), sp_cost: 0, cooldown: 0, range: [{ row: 0, depth: 0 }], operation_summary: t("action.normalSummary"), glyph: "⚔" };
-  if (command.type === "KNOCKBACK") return { name: t("action.knockback"), sp_cost: 0, cooldown: 0, range: [{ row: 0, depth: 0 }], operation_summary: t("action.knockbackSummary"), glyph: "➤" };
+  if (command.type === "KNOCKBACK") {
+    const presentation = knockbackPresentation(entityById(unit.character_id)?.knockback_direction);
+    return {
+      name: t("action.knockback"),
+      sp_cost: 0,
+      cooldown: 0,
+      range: [{ row: 0, depth: 0 }],
+      operation_summary: t("action.knockbackSummary", {
+        direction: t(`knockback.${presentation.direction}`),
+        arrow: presentation.arrow,
+        distance: presentation.distance,
+      }),
+      description_ja: t("action.knockbackDescription", {
+        direction: t(`knockback.${presentation.direction}`),
+        distance: presentation.distance,
+      }),
+      glyph: presentation.arrow,
+      knockback_direction: presentation.direction,
+      knockback_arrow: presentation.arrow,
+      knockback_distance: presentation.distance,
+    };
+  }
   return { name: command.type, sp_cost: 0, cooldown: 0, range: [], operation_summary: "", description_ja: "", glyph: "?" };
+};
+
+const knockbackDiagramMarkup = direction => {
+  const preview = knockbackPreviewCells(direction);
+  const cells = Array.from({ length: 9 }, (_, cellIndex) => {
+    const row = Math.floor(cellIndex / 3);
+    const depth = cellIndex % 3;
+    const origin = row === preview.origin.row && depth === preview.origin.depth;
+    const destination = row === preview.destination.row && depth === preview.destination.depth;
+    return `<i class="${origin ? "origin" : ""} ${destination ? "destination" : ""}">${destination ? escapeHtml(preview.arrow) : ""}</i>`;
+  }).join("");
+  return `<span class="knockback-value"><b>${escapeHtml(preview.arrow)}</b><em>${preview.distance}</em></span><span class="knockback-grid">${cells}</span>`;
 };
 
 const plannedCost = () => plannedSpCost(plannedOrder, plannedCommands, legalFor, costumeById);
@@ -1367,6 +1402,7 @@ const renderActionDock = () => {
   const entry = legalFor(selectedUnitId);
   root.innerHTML = "";
   if (!entry) {
+    $("#game-shell").dataset.activeElement = "neutral";
     $("#reservation-unit-name").textContent = t("selection.none");
     $("#reservation-sp").textContent = "—";
     $("#selected-name").textContent = t("selection.none");
@@ -1416,11 +1452,13 @@ const renderActionDock = () => {
       || (available && !isSelected && prospectiveCost > Number(currentPlayerTeam().sp));
     const isOnCooldown = command.unavailable_reason === "COOLDOWN";
     const miniCells = rangePreviewCells(meta.range || []);
-    const miniMarkup = Array.from({ length: 12 }, (_, cellIndex) => {
-      const row = Math.floor(cellIndex / 4);
-      const depth = cellIndex % 4;
-      return `<i class="${miniCells.has(cellKey(row, depth)) ? "hit" : ""}"></i>`;
-    }).join("");
+    const miniMarkup = command.type === "KNOCKBACK"
+      ? knockbackDiagramMarkup(meta.knockback_direction)
+      : Array.from({ length: 12 }, (_, cellIndex) => {
+        const row = Math.floor(cellIndex / 4);
+        const depth = cellIndex % 4;
+        return `<i class="${miniCells.has(cellKey(row, depth)) ? "hit" : ""}"></i>`;
+      }).join("");
     card.className = `command-card ${index === 0 ? "default-command" : ""} ${isSelected ? "selected" : ""} ${isUnaffordable ? "unaffordable" : ""} ${!available ? "unavailable" : ""}`;
     if (available) card.dataset.commandIndex = String(index);
     card.dataset.commandType = command.type;
@@ -1459,7 +1497,7 @@ const renderActionDock = () => {
       ? t("action.unavailable")
       : "";
     card.dataset.burstLevel = String(Number(command.burst_level ?? 0));
-    card.innerHTML = `<span class="command-glyph">${meta.glyph}</span><span class="command-name"><b>${escapeHtml(meta.name)}</b><small>${escapeHtml(selector)} · ${escapeHtml(meta.operation_summary || "")}</small></span><span class="command-cost"><b>SP ${meta.sp_cost || 0}</b>${cooldown ? `<small>CT ${cooldown}</small>` : ""}</span><span class="command-range" aria-hidden="true">${miniMarkup}</span><span class="command-state">${escapeHtml(stateLabel)}</span>`;
+    card.innerHTML = `<span class="command-glyph">${escapeHtml(meta.glyph)}</span><span class="command-name"><b>${escapeHtml(meta.name)}</b><small>${escapeHtml(selector)} · ${escapeHtml(meta.operation_summary || "")}</small><em class="command-prediction" hidden></em></span><span class="command-cost"><b>SP ${meta.sp_cost || 0}</b>${cooldown ? `<small>CT ${cooldown}</small>` : ""}</span><span class="command-range ${command.type === "KNOCKBACK" ? "knockback-range" : ""}" aria-hidden="true">${miniMarkup}</span><span class="command-state">${escapeHtml(stateLabel)}</span>`;
     if (available) card.addEventListener("click", () => selectCommandForUnit(unit.id, index));
     wrapper.append(card);
     if (variants.length > 1 && isSelected) {
@@ -1508,6 +1546,7 @@ const renderActionDock = () => {
 const renderSelectedSkill = (unit, command) => {
   const character = entityById(unit.character_id);
   const meta = commandMeta(unit, command);
+  $("#game-shell").dataset.activeElement = elementClass(character?.element);
   const costume = command?.type === "USE_COSTUME" ? costumeById(command.costume_id) : null;
   const loadout = command?.type === "USE_COSTUME" ? unit.costume_loadout.find(item => item.costume_id === command.costume_id) : null;
   $("#selected-emblem").innerHTML = emblemContent(character);
@@ -1525,7 +1564,52 @@ const renderSelectedSkill = (unit, command) => {
   requestRangePreview(unit, command, meta);
 };
 
+const clearDamageForecast = () => {
+  $("#selected-damage").textContent = "—";
+  $("#selected-damage").closest("span")?.removeAttribute("title");
+  $$(".damage-preview").forEach(item => item.remove());
+  $$(".command-prediction").forEach(item => {
+    item.hidden = true;
+    item.textContent = "";
+  });
+};
+
+const renderDamageForecast = preview => {
+  clearDamageForecast();
+  const forecasts = Array.isArray(preview?.damage_by_target) ? preview.damage_by_target : [];
+  const total = Number(preview?.total_damage || 0);
+  const absorbed = forecasts.reduce((sum, item) => sum + Number(item.absorbed || 0), 0);
+  const readout = $("#selected-damage");
+  readout.textContent = formatNumber(total);
+  readout.closest("span")?.setAttribute("title", t("selection.predictedDamageTitle", {
+    damage: formatNumber(total),
+    absorbed: formatNumber(absorbed),
+  }));
+  const commandPrediction = $(".command-card.selected .command-prediction");
+  if (commandPrediction) {
+    commandPrediction.hidden = false;
+    commandPrediction.textContent = t("selection.predictedDamageInline", { damage: formatNumber(total) });
+  }
+  for (const forecast of forecasts) {
+    const token = $(`.battle-token[data-unit-id="${Number(forecast.target_id)}"]`);
+    const cell = token?.closest(".field-cell");
+    if (!cell) continue;
+    const marker = document.createElement("span");
+    marker.className = `damage-preview ${Number(forecast.critical_hits || 0) > 0 ? "critical" : ""}`;
+    marker.dataset.testid = `predicted-damage-${Number(forecast.target_id)}`;
+    marker.textContent = Number(forecast.evaded_hits || 0) > 0 && Number(forecast.amount || 0) === 0
+      ? t("battle.evaded")
+      : formatNumber(forecast.amount);
+    marker.setAttribute("aria-label", t("selection.predictedDamageTarget", {
+      name: displayCharacter(snapshot.state.units[String(forecast.target_id)]?.character_id),
+      damage: formatNumber(forecast.amount),
+    }));
+    cell.append(marker);
+  }
+};
+
 const renderRange = (range, preview = null, meta = {}) => {
+  clearDamageForecast();
   const root = $("#range-preview");
   root.innerHTML = "";
   const hits = rangePreviewCells(range);
@@ -1549,6 +1633,7 @@ const renderRange = (range, preview = null, meta = {}) => {
     const occupant = cell.querySelector(".battle-token")?.dataset.unitId;
     cell.classList.toggle("target-occupied", preview.affected_unit_ids?.includes(Number(occupant)) || false);
   });
+  renderDamageForecast(preview);
 };
 
 const cancelRangePreview = () => {

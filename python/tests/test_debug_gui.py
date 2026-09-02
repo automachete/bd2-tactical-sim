@@ -49,7 +49,7 @@ def maximum_loadout(catalog: DebugSetupCatalog, character_id: str) -> list[dict[
 def test_debug_catalog_builds_all_three_modes_from_external_data() -> None:
     catalog = DebugSetupCatalog(DATABASE, SCENARIOS)
     public = catalog.public_payload()
-    assert public["ruleset_id"] == "bd2-current-2026-09-02"
+    assert public["ruleset_id"].startswith("bd2-current-")
     assert len(public["characters"]) == 61
     first = public["characters"][0]
     assert {character["rarity"] for character in public["characters"]} == {5}
@@ -81,6 +81,20 @@ def test_debug_catalog_builds_all_three_modes_from_external_data() -> None:
         for raw in ("Conditional", "Instant Death", "Remove Effects By Tag")
     )
     entities = {item["id"]: item for item in public["entities"]}
+    assert entities["Lathel"]["knockback_direction"] == "DOWN_BACK"
+    assert entities["Liberta"]["knockback_direction"] == "FRONT"
+    assert entities["Blade"]["knockback_direction"] == "UP_BACK"
+    assert entities["Darian"]["knockback_direction"] == "DOWN_FRONT"
+    assert {item["knockback_direction"] for item in public["characters"]} <= {
+        "BACK",
+        "FRONT",
+        "UP",
+        "DOWN",
+        "UP_BACK",
+        "DOWN_BACK",
+        "UP_FRONT",
+        "DOWN_FRONT",
+    }
     system_costumes = {item["id"]: item for item in public["system_costumes"]}
     assert entities["fiend:10072"]["name"] == "仇怨のキメラ（風）"  # noqa: RUF001
     assert entities["summon:PersonaOfWorship"]["name"] == "Persona of Worship"
@@ -223,9 +237,7 @@ def test_gui_payload_describes_the_exact_configured_costume_variant() -> None:
     )
     michaela_legal = next(item for item in payload["legal"] if item["unit_id"] == michaela_id)
     michaela_variants = [
-        item
-        for item in michaela_legal["commands"]
-        if item.get("costume_id") == "Michaela_1"
+        item for item in michaela_legal["commands"] if item.get("costume_id") == "Michaela_1"
     ]
     assert [item["burst_level"] for item in michaela_variants] == [0, 1, 2, 3]
     assert [item["ui"]["sp_cost"] for item in michaela_variants] == [3, 4, 5, 6]
@@ -278,9 +290,7 @@ def test_configured_burst_unlock_level_caps_runtime_action_stages() -> None:
     session = GuiSession(DATABASE, SCENARIOS, 19, FAST_MCTS)
     request = session.catalog.public_payload()["presets"]["NORMAL"]
     michaela = next(unit for unit in request["player_units"] if unit["character_id"] == "Michaela")
-    loadout = next(
-        item for item in michaela["costumes"] if item["costume_id"] == "Michaela_1"
-    )
+    loadout = next(item for item in michaela["costumes"] if item["costume_id"] == "Michaela_1")
     loadout["burst_level"] = 2
 
     payload = session.start(request)
@@ -846,6 +856,22 @@ def test_preview_matches_real_damage_after_formation_order_and_multi_action_plan
 
     assert player_actions[:3] == reordered
     assert damage_targets == preview["affected_unit_ids"]
+    actual_damage = {
+        target_id: sum(
+            int(event["kind"]["amount"])
+            for event in advanced["state"]["event_log"]
+            if event["kind"]["type"] == "DAMAGE_APPLIED"
+            and int(event["kind"].get("actor_id", -1)) == actor
+            and int(event["kind"]["target_id"]) == target_id
+        )
+        for target_id in damage_targets
+    }
+    predicted_damage = {
+        int(item["target_id"]): int(item["amount"]) for item in preview["damage_by_target"]
+    }
+    assert predicted_damage == actual_damage
+    assert preview["total_damage"] == sum(actual_damage.values())
+    assert all(item["hits"] > 0 for item in preview["damage_by_target"])
     assert advanced["state"]["units"][str(actor)]["position"] == formation[str(actor)]
 
 

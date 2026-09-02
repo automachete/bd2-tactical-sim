@@ -10,6 +10,8 @@ import {
   commandCost,
   isValidCell,
   keyboardTarget,
+  knockbackPreviewCells,
+  knockbackPresentation,
   modeCapabilities,
   moveFormation,
   nextSpeed,
@@ -84,6 +86,29 @@ test("serializeFormation converts values to numbers", () => {
 });
 test("serializeFormation filters disallowed unit ids", () => {
   assert.deepEqual(serializeFormation({ 1: { row: 0, depth: 0 }, 2: { row: 1, depth: 1 } }, [2]), { 2: { row: 1, depth: 1 } });
+});
+
+for (const [direction, arrow, destination] of [
+  ["BACK", "↑", { row: 0, depth: 1 }],
+  ["FRONT", "↓", { row: 2, depth: 1 }],
+  ["UP", "→", { row: 1, depth: 2 }],
+  ["DOWN", "←", { row: 1, depth: 0 }],
+  ["UP_BACK", "↗", { row: 0, depth: 2 }],
+  ["DOWN_BACK", "↖", { row: 0, depth: 0 }],
+  ["UP_FRONT", "↘", { row: 2, depth: 2 }],
+  ["DOWN_FRONT", "↙", { row: 2, depth: 0 }],
+]) {
+  test(`knockback ${direction} has the game-facing arrow and mini-grid destination`, () => {
+    assert.deepEqual(knockbackPresentation(direction), { direction, arrow, distance: 1, row: destination.row - 1, depth: destination.depth - 1 });
+    const preview = knockbackPreviewCells(direction);
+    assert.deepEqual(preview.origin, { row: 1, depth: 1 });
+    assert.deepEqual(preview.destination, destination);
+  });
+}
+
+test("unknown knockback direction falls back to the canonical backward push", () => {
+  assert.equal(knockbackPresentation("INVALID").direction, "BACK");
+  assert.equal(knockbackPresentation("INVALID").arrow, "↑");
 });
 
 for (const [unitId, direction, expected] of [

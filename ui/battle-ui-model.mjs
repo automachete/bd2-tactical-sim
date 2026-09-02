@@ -208,6 +208,42 @@ export const projectRangeCells = (
   return cells;
 };
 
+const KNOCKBACK_PRESENTATIONS = Object.freeze({
+  BACK: Object.freeze({ arrow: "↑", row: -1, depth: 0 }),
+  FRONT: Object.freeze({ arrow: "↓", row: 1, depth: 0 }),
+  UP: Object.freeze({ arrow: "→", row: 0, depth: 1 }),
+  DOWN: Object.freeze({ arrow: "←", row: 0, depth: -1 }),
+  UP_BACK: Object.freeze({ arrow: "↗", row: -1, depth: 1 }),
+  DOWN_BACK: Object.freeze({ arrow: "↖", row: -1, depth: -1 }),
+  UP_FRONT: Object.freeze({ arrow: "↘", row: 1, depth: 1 }),
+  DOWN_FRONT: Object.freeze({ arrow: "↙", row: 1, depth: -1 }),
+});
+
+export const knockbackPresentation = direction => {
+  const normalized = String(direction || "BACK").toUpperCase();
+  return {
+    direction: KNOCKBACK_PRESENTATIONS[normalized] ? normalized : "BACK",
+    ...(KNOCKBACK_PRESENTATIONS[normalized] ?? KNOCKBACK_PRESENTATIONS.BACK),
+    distance: 1,
+  };
+};
+
+export const knockbackPreviewCells = (direction, rows = GRID_ROWS, depths = GRID_ROWS) => {
+  const presentation = knockbackPresentation(direction);
+  const origin = { row: Math.floor(rows / 2), depth: Math.floor(depths / 2) };
+  const destination = {
+    row: origin.row + presentation.row,
+    depth: origin.depth + presentation.depth,
+  };
+  return {
+    ...presentation,
+    origin,
+    destination: isValidCell(destination.row, destination.depth, rows, depths)
+      ? destination
+      : origin,
+  };
+};
+
 export const modeCapabilities = (mode, allowFormationChange = true) => ({
   formation: Boolean(allowFormationChange),
   mctsOpponent: mode !== "MONSTER_CHASER",

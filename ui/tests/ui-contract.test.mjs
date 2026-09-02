@@ -73,6 +73,20 @@ test("range preview uses the authoritative simulator endpoint", () => {
   assert.match(app, /silentApi\("\/api\/preview"/);
   assert.match(app, /projectRangeCells/);
 });
+test("authoritative preview renders per-target and total predicted damage", () => {
+  assert.match(html, /id="selected-damage"/);
+  assert.match(app, /preview\.damage_by_target/);
+  assert.match(app, /preview\?\.total_damage/);
+  assert.match(app, /marker\.dataset\.testid = `predicted-damage-/);
+  assert.match(i18n, /"selection\.predictedDamage"/);
+});
+test("knockback cards use each character's external-data direction", () => {
+  assert.match(app, /entityById\(unit\.character_id\)\?\.knockback_direction/);
+  assert.match(app, /knockbackDiagramMarkup/);
+  for (const direction of ["BACK", "FRONT", "UP", "DOWN", "UP_BACK", "DOWN_BACK", "UP_FRONT", "DOWN_FRONT"]) {
+    assert.match(i18n, new RegExp(`"knockback\\.${direction}"`));
+  }
+});
 test("battle events are replayed sequentially with visible cues", () => {
   assert.match(html, /id="battle-cue"/);
   assert.match(html, /id="target-line"/);
@@ -98,13 +112,16 @@ test("UI copy is managed through the Japanese i18n resource", () => {
 });
 test("visual tokens use Fluent surfaces plus five distinct element colors", () => {
   assert.match(css, /Fluent 2 component system/);
-  assert.match(css, /--accent:\s*#60cdff/);
+  assert.match(css, /--accent:\s*#c8cdd2/);
   assert.match(css, /--panel:\s*#202020/);
   for (const element of ["fire", "water", "wind", "light", "dark"]) {
-    assert.match(css, new RegExp(`\\.${element} \\{ --element-color:`));
+    assert.match(css, new RegExp(`--element-${element}:`));
+    assert.match(css, new RegExp(`data-active-element="${element}"`));
   }
-  const elementColors = [...css.matchAll(/--element-color:\s*(#[0-9a-f]{6})/gi)].map(match => match[1].toLowerCase());
-  assert.equal(new Set(elementColors.slice(0, 5)).size, 5);
+  const elementColors = [...css.matchAll(/--element-(?:fire|water|wind|light|dark):\s*(#[0-9a-f]{6})/gi)].map(match => match[1].toLowerCase());
+  assert.equal(new Set(elementColors).size, 5);
+  assert.doesNotMatch(css, /--accent:\s*var\(--element-water\)|--accent:\s*#55aaff/i);
+  assert.match(app, /dataset\.activeElement = elementClass\(character\?\.element\)/);
   assert.match(css, /\.character-portrait[\s\S]+object-fit:\s*contain/);
   assert.doesNotMatch(css, /gradient|Georgia|--gold/);
 });

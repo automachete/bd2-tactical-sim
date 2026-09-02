@@ -358,12 +358,25 @@ class GuiSession:
             events = preview_state["event_log"][before_count:]
             target_id: int | None = None
             anchor: dict[str, int] | None = None
+            actor_action_active = False
+            actor_action_finished = False
+            damage_by_target: dict[int, dict[str, int]] = {}
             alive_at_actor = {
                 int(raw_id) for raw_id, unit in state["units"].items() if unit["alive"]
             }
             units_at_actor = copy.deepcopy(state["units"])
+            positions_at_lock: dict[int, dict[str, int]] | None = None
+            alive_at_lock: set[int] | None = None
+            units_at_lock: dict[str, Any] | None = None
             for event in events:
                 kind = event["kind"]
+                if kind["type"] == "ACTION_STARTED":
+                    event_actor = int(kind["actor_id"])
+                    if actor_action_active and event_actor != actor_id:
+                        actor_action_active = False
+                        actor_action_finished = True
+                    elif event_actor == actor_id and not actor_action_finished:
+                        actor_action_active = True
                 if kind["type"] in {"FORMATION_CHANGED", "UNIT_MOVED"}:
                     positions[int(kind["unit_id"])] = {
                         "row": int(kind["to"]["row"]),
@@ -383,30 +396,89 @@ class GuiSession:
                             "depth": int(kind["position"]["depth"]),
                         }
                         alive_at_actor.add(summoned_id)
-                if kind.get("actor_id") != actor_id:
-                    continue
-                if kind["type"] == "TARGET_CELL_LOCKED":
+                if (
+                    anchor is None
+                    and kind.get("actor_id") == actor_id
+                    and kind["type"] == "TARGET_CELL_LOCKED"
+                ):
                     anchor = {
                         "row": int(kind["cell"]["row"]),
                         "depth": int(kind["cell"]["depth"]),
                     }
-                    break
-                if kind["type"] == "TARGET_LOCKED":
+                    positions_at_lock = copy.deepcopy(positions)
+                    alive_at_lock = set(alive_at_actor)
+                    units_at_lock = copy.deepcopy(units_at_actor)
+                elif (
+                    anchor is None
+                    and kind.get("actor_id") == actor_id
+                    and kind["type"] == "TARGET_LOCKED"
+                ):
                     target_id = int(kind["target_id"])
-                    anchor = positions.get(target_id)
-                    break
+                    anchor = copy.deepcopy(positions.get(target_id))
+                    positions_at_lock = copy.deepcopy(positions)
+                    alive_at_lock = set(alive_at_actor)
+                    units_at_lock = copy.deepcopy(units_at_actor)
 
+                if not actor_action_active:
+                    continue
+                damage_target: int | None = None
+                damage = 0
+                absorbed = 0
+                critical = False
+                evaded = False
+                collision = 0
+                if kind["type"] == "DAMAGE_APPLIED" and int(kind["actor_id"]) == actor_id:
+                    damage_target = int(kind["target_id"])
+                    damage = int(kind["amount"])
+                    critical = bool(kind["critical"])
+                elif kind["type"] == "DAMAGE_EVADED" and int(kind["actor_id"]) == actor_id:
+                    damage_target = int(kind["target_id"])
+                    evaded = True
+                elif kind["type"] == "BARRIER_ABSORBED":
+                    damage_target = int(kind["target_id"])
+                    absorbed = int(kind["amount"])
+                elif kind["type"] == "COLLISION_DAMAGE":
+                    damage_target = int(kind["occupant_id"])
+                    collision = int(kind["amount"])
+                    damage = collision
+                if damage_target is None:
+                    continue
+                forecast = damage_by_target.setdefault(
+                    damage_target,
+                    {
+                        "target_id": damage_target,
+                        "amount": 0,
+                        "hits": 0,
+                        "critical_hits": 0,
+                        "evaded_hits": 0,
+                        "absorbed": 0,
+                        "collision_damage": 0,
+                    },
+                )
+                forecast["amount"] += damage
+                forecast["absorbed"] += absorbed
+                forecast["collision_damage"] += collision
+                if damage or kind["type"] == "DAMAGE_APPLIED":
+                    forecast["hits"] += 1
+                if critical:
+                    forecast["critical_hits"] += 1
+                if evaded:
+                    forecast["evaded_hits"] += 1
+
+            footprint_positions = positions_at_lock or positions
+            footprint_alive = alive_at_lock or alive_at_actor
+            footprint_units = units_at_lock or units_at_actor
             target_side = None
             if target_id is not None:
-                target_side = units_at_actor[str(target_id)]["side"]
+                target_side = footprint_units[str(target_id)]["side"]
             elif anchor is not None:
                 actor_side = state["units"][str(actor_id)]["side"]
                 target_side = "ENEMY" if actor_side == "PLAYER" else "PLAYER"
             footprint_state = {
                 **state,
                 "units": {
-                    raw_id: {**unit, "alive": int(raw_id) in alive_at_actor}
-                    for raw_id, unit in units_at_actor.items()
+                    raw_id: {**unit, "alive": int(raw_id) in footprint_alive}
+                    for raw_id, unit in footprint_units.items()
                 },
             }
             affected_cells, affected_unit_ids = _preview_footprint(
@@ -415,8 +487,9 @@ class GuiSession:
                 command,
                 target_side,
                 anchor,
-                positions,
+                footprint_positions,
             )
+            damage_forecast = [damage_by_target[unit_id] for unit_id in sorted(damage_by_target)]
             return {
                 "actor_id": actor_id,
                 "action_index": selected,
@@ -426,6 +499,8 @@ class GuiSession:
                 "anchor": anchor,
                 "affected_cells": affected_cells,
                 "affected_unit_ids": affected_unit_ids,
+                "damage_by_target": damage_forecast,
+                "total_damage": sum(item["amount"] for item in damage_forecast),
             }
 
     def _submit_indices(

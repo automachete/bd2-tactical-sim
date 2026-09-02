@@ -33,6 +33,10 @@ const startWithCharacter = async (request, characterId) => {
   const catalog = await (await request.get("/api/catalog")).json();
   const setup = structuredClone(catalog.presets.NORMAL);
   const character = catalog.characters.find(item => item.id === characterId);
+  setup.player_units = [
+    setup.player_units[0],
+    ...setup.player_units.slice(1).filter(unit => unit.character_id !== characterId),
+  ];
   setup.player_units[0].character_id = character.id;
   setup.player_units[0].costumes = maximumLoadout(character);
   setup.mcts_simulations = 3;
@@ -93,6 +97,59 @@ test("selected costume shows the resolved official Japanese description in the b
   expect(placement.inHeader).toBe(true);
   expect(placement.width).toBeGreaterThan(300);
   expect(placement.headerBottom).toBeLessThanOrEqual(placement.workspaceTop + 1);
+});
+
+test("selection accents follow all five character elements while global chrome remains neutral", async ({ page, request }) => {
+  const samples = [
+    ["Loen", "fire"],
+    ["Wilhelmina", "water"],
+    ["Nebris", "wind"],
+    ["Michaela", "light"],
+    ["Eclipse", "dark"],
+  ];
+  const accents = new Set();
+  let waterAccent = "";
+  let baseAccent = "";
+  for (const [characterId, element] of samples) {
+    await startWithCharacter(request, characterId);
+    await page.reload();
+    await expect(page.getByTestId("player-token-1")).toBeVisible();
+    await page.getByTestId("player-token-1").click();
+    await expect(page.locator("#game-shell")).toHaveAttribute("data-active-element", element);
+    const colors = await page.locator("#game-shell").evaluate(node => ({
+      selected: getComputedStyle(node).getPropertyValue("--selection-accent").trim(),
+      base: getComputedStyle(node).getPropertyValue("--accent").trim(),
+    }));
+    accents.add(colors.selected);
+    baseAccent = colors.base;
+    if (element === "water") waterAccent = colors.selected;
+    const selectedBorder = await page.locator(".command-card.selected").evaluate(node => getComputedStyle(node).borderColor);
+    expect(selectedBorder).toBeTruthy();
+  }
+  expect(accents.size).toBe(5);
+  expect(baseAccent).not.toBe(waterAccent);
+});
+
+test("knockback card exposes each character's unique direction and one-cell vector", async ({ page, request }) => {
+  for (const [characterId, arrow] of [["Loen", "↗"], ["Liberta", "↓"], ["Lathel", "↖"]]) {
+    await startWithCharacter(request, characterId);
+    await page.reload();
+    await expect(page.getByTestId("player-token-1")).toBeVisible();
+    await page.getByTestId("player-token-1").click();
+    const knockback = page.locator("#costume-strip [data-command-type='KNOCKBACK']");
+    await expect(knockback).toContainText(arrow);
+    await expect(knockback.locator(".knockback-value em")).toHaveText("1");
+    await expect(knockback.locator(".knockback-grid .origin")).toHaveCount(1);
+    await expect(knockback.locator(".knockback-grid .destination")).toHaveCount(1);
+  }
+});
+
+test("selected attack shows authoritative total and per-target predicted damage", async ({ page }) => {
+  await page.locator("#costume-strip [data-costume-id='Loen_1']").click();
+  await expect(page.locator("#selected-damage")).not.toHaveText("—", { timeout: 5_000 });
+  await expect.poll(async () => Number((await page.locator("#selected-damage").textContent()).replaceAll(",", ""))).toBeGreaterThan(0);
+  await expect.poll(() => page.locator("[data-testid^='predicted-damage-']").count()).toBeGreaterThan(0);
+  await expect(page.locator(".command-card.selected .command-prediction")).toContainText("予測");
 });
 
 test("content switching never injects runtime summons such as ET001 into setup", async ({ page }) => {
@@ -596,6 +653,9 @@ test("multi-hit playback exposes chain changes instead of silently skipping them
 test("knockback collision shows each authoritative damage event only once", async ({ page, request }) => {
   const catalog = await (await request.get("/api/catalog")).json();
   const setup = structuredClone(catalog.presets.NORMAL);
+  const justia = catalog.characters.find(character => character.id === "Justia");
+  setup.player_units[0].character_id = justia.id;
+  setup.player_units[0].costumes = maximumLoadout(justia);
   setup.enemy_units[0].row = 0;
   setup.enemy_units[0].depth = 0;
   setup.enemy_units[1].row = 0;
