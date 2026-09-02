@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "observed_at": "2026-09-01T09:58:58.489Z",
+  "observed_at": "2026-09-02T00:28:43.992Z",
   "source": {
     "site": "https://browndust2-db.souseha.com/ja/",
     "equipment_list": "https://browndust2-db.souseha.com/ja/weapons",
@@ -8,8 +8,8 @@
     "stat_calculator": "https://browndust2-db.souseha.com/ja/stat-calculator",
     "gear_picker": "https://browndust2-db.souseha.com/ja/gear-picker",
     "equipment_bundle": "https://browndust2-db.souseha.com/assets/db-weapons-BcoUdYdZ.js",
-    "calculator_bundle": "https://browndust2-db.souseha.com/assets/core-BE8_J5Iu.js",
-    "digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090"
+    "calculator_bundle": "https://browndust2-db.souseha.com/assets/core-ChkTq53z.js",
+    "digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e"
   },
   "scope": {
     "kinds": [
@@ -319,8 +319,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment201_21",
@@ -647,8 +647,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment103_18",
@@ -975,8 +975,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment301_26",
@@ -1303,8 +1303,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment401_31",
@@ -1631,8 +1631,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment502_37",
@@ -1959,8 +1959,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment604_44",
@@ -2287,8 +2287,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9008_92",
@@ -2615,8 +2615,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9010_91",
@@ -2951,8 +2951,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9007_93",
@@ -3279,8 +3279,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9011_94",
@@ -3607,8 +3607,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9012_95",
@@ -3935,8 +3935,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9603_112",
@@ -4271,8 +4271,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9604_113",
@@ -4599,8 +4599,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9605_114",
@@ -4927,8 +4927,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9606_115",
@@ -5255,8 +5255,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9607_116",
@@ -5583,8 +5583,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9608_117",
@@ -5919,8 +5919,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9609_118",
@@ -6247,8 +6247,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9610_119",
@@ -6575,8 +6575,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9611_120",
@@ -6903,8 +6903,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9664_158",
@@ -7231,8 +7231,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9669_160",
@@ -7559,8 +7559,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9670_161",
@@ -7887,8 +7887,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9024_96",
@@ -8215,8 +8215,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9614_159",
@@ -8543,8 +8543,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9651_121",
@@ -8871,8 +8871,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9672_163",
@@ -9199,8 +9199,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9671_162",
@@ -9527,8 +9527,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9673_164",
@@ -9855,8 +9855,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9674_165",
@@ -10183,8 +10183,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9676_167",
@@ -10511,8 +10511,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "Roxy_Exclusive_Gear_Staff_GL_75b06d8d45",
@@ -10839,8 +10839,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "00000284A7430EB8",
@@ -11167,8 +11167,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "00000243FF30BD38",
@@ -11495,8 +11495,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "_9d486bb696",
@@ -11823,8 +11823,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "_2ad6d217eb",
@@ -12151,8 +12151,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "_07e13527ee",
@@ -12487,8 +12487,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "000002709B2CA230",
@@ -12815,8 +12815,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "0000022895249DF0",
@@ -13143,8 +13143,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "000001AEB5475FF0",
@@ -13471,8 +13471,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "00000265BDAA16B0",
@@ -13799,8 +13799,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "000002655D3E97F0",
@@ -14127,8 +14127,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "000001B61BDFE0F0",
@@ -14455,8 +14455,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "_3c843a9d5f",
@@ -14791,8 +14791,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "000001571FF11AB8",
@@ -15119,8 +15119,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "000001E03277ACB8",
@@ -15447,8 +15447,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "0000021C19A51878_0410_1",
@@ -15775,8 +15775,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "0000017851D853B8_250508_1",
@@ -16103,8 +16103,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "0000017851D79E78_250508_2",
@@ -16431,8 +16431,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "0000017851D7C0B8_250508_3",
@@ -16759,8 +16759,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "00000248552F9238_20250522_1",
@@ -17087,8 +17087,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "00000254E32869F8_250717_1",
@@ -17423,8 +17423,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "000001CCC82E5678_250911_1",
@@ -17751,8 +17751,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "000002605D95E5B8_250925_1",
@@ -18079,8 +18079,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "000002BE9AE93438_251002_1",
@@ -18407,8 +18407,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "0000017EE3159FA0_260115_1",
@@ -18735,8 +18735,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "0000021CF113D860_260312_1",
@@ -19063,8 +19063,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "0000027F801C14E0_260326_1",
@@ -19391,8 +19391,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "000001A5F54BA7E0_260409_1",
@@ -19719,8 +19719,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "000001CC96DD35A0_260604_2",
@@ -20047,8 +20047,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment9709_200",
@@ -20218,8 +20218,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4101_61",
@@ -20376,8 +20376,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4102_62",
@@ -20527,8 +20527,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4103_63",
@@ -20685,8 +20685,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4104_64",
@@ -20843,8 +20843,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4105_65",
@@ -20994,8 +20994,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4106_66",
@@ -21145,8 +21145,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4301_73",
@@ -21303,8 +21303,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4302_74",
@@ -21461,8 +21461,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4303_75",
@@ -21612,8 +21612,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4304_76",
@@ -21770,8 +21770,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4305_77",
@@ -21928,8 +21928,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4306_78",
@@ -22079,8 +22079,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4401_67",
@@ -22237,8 +22237,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4402_68",
@@ -22395,8 +22395,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4403_69",
@@ -22546,8 +22546,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4404_70",
@@ -22704,8 +22704,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4405_71",
@@ -22862,8 +22862,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4406_72",
@@ -23021,8 +23021,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4504_88",
@@ -23187,8 +23187,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4505_89",
@@ -23353,8 +23353,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4506_90",
@@ -23512,8 +23512,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4501_85",
@@ -23678,8 +23678,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4502_86",
@@ -23844,8 +23844,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4503_87",
@@ -24002,8 +24002,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4202_80",
@@ -24153,8 +24153,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4201_79",
@@ -24311,8 +24311,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4203_81",
@@ -24469,8 +24469,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4204_82",
@@ -24620,8 +24620,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4206_84",
@@ -24778,8 +24778,8 @@
       "source": {
         "source_id": "BD2DB_UR4_AND_EX_UR_EQUIPMENT_CALCULATORS",
         "source_url": "https://browndust2-db.souseha.com/ja/option-calculator",
-        "observed_at": "2026-09-01T09:58:58.489Z",
-        "source_digest": "6d470ccfee01928b43fbaf5638ac4cb5f158aa6bd66fda2d73dfe889339ee090",
+        "observed_at": "2026-09-02T00:28:43.992Z",
+        "source_digest": "66e4b8dc3dfbfab1c72a4dbc7fc533684c7609564302d3a6cf31d5655db6055e",
         "raw_payload": {
           "equipment": {
             "weaponId": "icon_equipment4205_83",
