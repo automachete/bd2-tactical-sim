@@ -220,10 +220,12 @@ const KNOCKBACK_PRESENTATIONS = Object.freeze({
 });
 
 export const knockbackPresentation = direction => {
-  const normalized = String(direction || "BACK").toUpperCase();
+  const normalized = String(direction ?? "").toUpperCase();
+  const presentation = KNOCKBACK_PRESENTATIONS[normalized];
+  if (!presentation) throw new Error(`Unsupported knockback direction: ${direction}`);
   return {
-    direction: KNOCKBACK_PRESENTATIONS[normalized] ? normalized : "BACK",
-    ...(KNOCKBACK_PRESENTATIONS[normalized] ?? KNOCKBACK_PRESENTATIONS.BACK),
+    direction: normalized,
+    ...presentation,
     distance: 1,
   };
 };

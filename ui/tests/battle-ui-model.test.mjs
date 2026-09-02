@@ -106,9 +106,9 @@ for (const [direction, arrow, destination] of [
   });
 }
 
-test("unknown knockback direction falls back to the canonical backward push", () => {
-  assert.equal(knockbackPresentation("INVALID").direction, "BACK");
-  assert.equal(knockbackPresentation("INVALID").arrow, "↑");
+test("unknown or missing knockback directions fail closed", () => {
+  assert.throws(() => knockbackPresentation("INVALID"), /Unsupported knockback direction/);
+  assert.throws(() => knockbackPresentation(undefined), /Unsupported knockback direction/);
 });
 
 for (const [unitId, direction, expected] of [

@@ -413,30 +413,40 @@ function integer(value) {
 }
 
 function element(value) {
-  const resolved = ({ "火": "FIRE", "水": "WATER", "風": "WIND", "光": "LIGHT", "闇": "DARK", "暗": "DARK" })[value];
+  const values = { "火": "FIRE", "水": "WATER", "風": "WIND", "光": "LIGHT", "闇": "DARK", "暗": "DARK" };
+  const resolved = Object.hasOwn(values, value) ? values[value] : undefined;
   if (!resolved) throw new Error(`unsupported character element: ${value}`);
   return resolved;
 }
 
 function attackType(value) {
-  const resolved = ({ "物": "PHYSICAL", "魔": "MAGICAL" })[value];
+  const values = { "物": "PHYSICAL", "魔": "MAGICAL" };
+  const resolved = Object.hasOwn(values, value) ? values[value] : undefined;
   if (!resolved) throw new Error(`unsupported character attack type: ${value}`);
   return resolved;
 }
 
 function selector(value) {
   const label = String(value ?? "").trim();
-  if (label.includes("跳過") || label.includes("過人") || label.includes("スキップ")) return "SKIP";
-  if (label.includes("自身") || label.includes("自己") || label.includes("戰場")) return "SELF_UNIT";
-  if (label.includes("我方") || label.includes("我軍") || label.includes("Ally")) return "ALLY_FRONT";
-  if (label.includes("最前") || label.includes("直擊")) return "FRONT";
+  const values = {
+    "跳過": "SKIP",
+    "過人": "SKIP",
+    "自身": "SELF_UNIT",
+    "自己": "SELF_UNIT",
+    "戰場": "SELF_UNIT",
+    "我方": "ALLY_FRONT",
+    "最前": "FRONT",
+    "最前方": "FRONT",
+    "直擊": "FRONT",
+  };
+  if (Object.hasOwn(values, label)) return values[label];
   throw new Error(`unsupported target selector: ${label}`);
 }
 
 // Source labels describe direction from the target's point of view. Both
 // battle boards use local coordinates with their front edge at depth 0.
 function knockbackDirection(value) {
-  const normalized = String(value ?? "後").trim();
+  const normalized = String(value ?? "").trim();
   const directions = {
     "後": "BACK",
     "前": "FRONT",
@@ -447,8 +457,54 @@ function knockbackDirection(value) {
     "右前": "UP_FRONT",
     "左前": "DOWN_FRONT",
   };
-  if (!directions[normalized]) throw new Error(`unsupported character knockback direction: ${normalized}`);
+  if (!Object.hasOwn(directions, normalized)) throw new Error(`unsupported character knockback direction: ${normalized}`);
   return directions[normalized];
+}
+
+function fiendAttackType(value) {
+  const values = { ATK: "PHYSICAL", MATK: "MAGICAL" };
+  const resolved = Object.hasOwn(values, value) ? values[value] : undefined;
+  if (!resolved) throw new Error(`unsupported fiend attack type: ${value}`);
+  return resolved;
+}
+
+function fiendTargeting(value) {
+  const type = value?.type;
+  if (type === "main") {
+    if (value.mainTargetMode !== "front") throw new Error(`unsupported fiend main-target mode: ${value.mainTargetMode}`);
+    return { selector: "FRONT", fixed_target_cell: null, target_all: false };
+  }
+  if (type === "all") return { selector: "EXPLICIT", fixed_target_cell: null, target_all: true };
+  if (type === "fixed") {
+    const sourceCoordinates = String(value.fixedTargetCellId ?? "").trim();
+    if (!/^-?\d+,-?\d+$/.test(sourceCoordinates)) {
+      throw new Error(`invalid fiend fixed-target cell: ${value.fixedTargetCellId}`);
+    }
+    const coordinates = sourceCoordinates.split(",").map(Number);
+    const [depth, row] = coordinates;
+    return { selector: "EXPLICIT", fixed_target_cell: { row, depth }, target_all: false };
+  }
+  throw new Error(`unsupported fiend targeting type: ${type}`);
+}
+
+function fiendRange(skill, targeting) {
+  const offsets = skill.gameFacingRangeOffsets;
+  if (targeting.target_all && Array.isArray(offsets) && offsets.length === 0) return [];
+  if (!Array.isArray(offsets) || offsets.length === 0) {
+    throw new Error(`missing fiend range offsets: ${skill.skillId}`);
+  }
+  return offsets.map((offset) => {
+    if (!Number.isInteger(offset?.x) || !Number.isInteger(offset?.y)) {
+      throw new Error(`invalid fiend range offset: ${skill.skillId}`);
+    }
+    return { row: offset.x, depth: offset.y };
+  });
+}
+
+function fiendEffectPolarity(value) {
+  const values = { Buff: "BENEFICIAL", Debuff: "HARMFUL" };
+  if (!Object.hasOwn(values, value)) throw new Error(`unsupported fiend state type: ${value}`);
+  return values[value];
 }
 
 function rangeCode(raw) {
@@ -1361,6 +1417,7 @@ function transformCharacters(rawCharacters, costumeI18n, ranges, source) {
 function transformFiend(raw, source) {
   if (!raw) return { monsters: {}, characters: {}, costumes: {} };
   const fiend = raw.environment.fiend;
+  const damageKind = fiendAttackType(fiend.atkType);
   const id = String(raw.monsterId);
   const statsByLevel = {};
   for (const level of raw.levels ?? []) {
@@ -1383,6 +1440,13 @@ function transformFiend(raw, source) {
   const costumeIds = [];
   const costumes = {};
   for (const skill of raw.skills ?? []) {
+    if (skill.kind !== "normal" && skill.kind !== "conditional") {
+      throw new Error(`unsupported fiend skill kind: ${skill.kind}`);
+    }
+    if (skill.turnEndMode !== "normal" && skill.turnEndMode !== "instantDeath") {
+      throw new Error(`unsupported fiend turn-end mode: ${skill.turnEndMode}`);
+    }
+    const targeting = fiendTargeting(skill.targeting);
     const timedOperations = [];
     let operationSequence = 0;
     const diagnostics = [];
@@ -1419,7 +1483,7 @@ function transformFiend(raw, source) {
       if (coefficients.length === 1) {
         schedule({
           op: "DEAL_DAMAGE",
-          kind: fiend.atkType === "MATK" ? "MAGICAL" : "PHYSICAL",
+          kind: damageKind,
           coefficient_bp: percent(coefficients[0]),
           hits: hitDamage.length,
           can_crit: false,
@@ -1429,7 +1493,7 @@ function transformFiend(raw, source) {
         }, group.groupId);
       } else {
         for (const hit of hitDamage) {
-          schedule({ op: "DEAL_DAMAGE", kind: fiend.atkType === "MATK" ? "MAGICAL" : "PHYSICAL", coefficient_bp: percent(hit.damage), hits: 1, can_crit: false, can_evade: true, chain_per_hit: 1, main_target_bonus_bp: 0 }, group.groupId);
+          schedule({ op: "DEAL_DAMAGE", kind: damageKind, coefficient_bp: percent(hit.damage), hits: 1, can_crit: false, can_evade: true, chain_per_hit: 1, main_target_bonus_bp: 0 }, group.groupId);
         }
       }
     }
@@ -1449,10 +1513,10 @@ function transformFiend(raw, source) {
         else if (preset.buffKey === "DMG") modifiers.outgoing_damage_bp = percent(preset.value);
         else if (preset.buffKey === "Chain") modifiers.chain_received_delta = integer(preset.value);
         else if (preset.stateKey === "ChainRetention") modifiers.chain_retention = integer(preset.value);
-        else tags.push(preset.buffKey ?? preset.stateKey ?? preset.customStateTitle);
+        else throw new Error(`unsupported fiend state preset: ${preset.customStateId}`);
         operation = effect(
           stateEffect.customStateId,
-          preset.stateType === "Buff" ? "BENEFICIAL" : "HARMFUL",
+          fiendEffectPolarity(preset.stateType),
           "TARGET_SIDE",
           integer(preset.remainingDuration),
           modifiers,
@@ -1460,9 +1524,12 @@ function transformFiend(raw, source) {
           { duration_clock: "GAME_TURN" },
         );
       } else {
-        diagnostics.push(`unsupported monster state operation ${stateEffect.operation}`);
+        throw new Error(`unsupported fiend state operation: ${stateEffect.operation}`);
       }
       if (!operation) continue;
+      if (stateEffect.condition && stateEffect.condition.type !== "targetChainAtLeast") {
+        throw new Error(`unsupported fiend state condition: ${stateEffect.condition.type}`);
+      }
       if (stateEffect.condition?.type === "targetChainAtLeast") {
         operation = { op: "CONDITIONAL", condition: { type: "TARGET_CHAIN_AT_LEAST", value: integer(stateEffect.condition.chainAtLeast) }, operations: [operation] };
       }
@@ -1482,18 +1549,16 @@ function transformFiend(raw, source) {
       character_id: `fiend:${id}`,
       names: skill.localizedName ?? {},
       skill_names: skill.localizedName ?? {},
-      range: (skill.gameFacingRangeOffsets?.length ? skill.gameFacingRangeOffsets : [{ x: 0, y: 0 }]).map((offset) => ({ row: offset.x, depth: offset.y })),
+      range: fiendRange(skill, targeting),
       variants: [{
         enhancement: 0,
         burst_level: 0,
         potential_mask: 0,
         sp_cost: 0,
         cooldown: 0,
-        selector: skill.targeting?.type === "main" ? "FRONT" : "EXPLICIT",
-        fixed_target_cell: skill.targeting?.fixedTargetCellId
-          ? (() => { const [depth, row] = skill.targeting.fixedTargetCellId.split(",").map(Number); return { row, depth }; })()
-          : null,
-        target_all: skill.targeting?.type === "all",
+        selector: targeting.selector,
+        fixed_target_cell: targeting.fixed_target_cell,
+        target_all: targeting.target_all,
         range_override: null,
         operations,
         consume_remaining_sp: false,
@@ -1517,7 +1582,7 @@ function transformFiend(raw, source) {
       names: raw.localizedName ?? {},
       rarity: 0,
       element: element(fiend.attribute),
-      attack_type: fiend.atkType === "MATK" ? "MAGICAL" : "PHYSICAL",
+      attack_type: damageKind,
       target_selector: "FRONT",
       knockback_direction: "BACK",
       level_100: topLevel,

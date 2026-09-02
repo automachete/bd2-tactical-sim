@@ -94,20 +94,29 @@ function rawInteger(value) {
 }
 
 function rawElement(value) {
-  return ({ "火": "FIRE", "水": "WATER", "風": "WIND", "光": "LIGHT", "闇": "DARK", "暗": "DARK" })[value];
+  const values = { "火": "FIRE", "水": "WATER", "風": "WIND", "光": "LIGHT", "闇": "DARK", "暗": "DARK" };
+  return Object.hasOwn(values, value) ? values[value] : undefined;
 }
 
 function rawAttackType(value) {
-  return ({ "物": "PHYSICAL", "魔": "MAGICAL" })[value];
+  const values = { "物": "PHYSICAL", "魔": "MAGICAL" };
+  return Object.hasOwn(values, value) ? values[value] : undefined;
 }
 
 function rawSelector(value) {
-  const label = String(value ?? "");
-  if (label.includes("跳過") || label.includes("過人") || label.includes("スキップ")) return "SKIP";
-  if (label.includes("自身") || label.includes("自己") || label.includes("戰場")) return "SELF_UNIT";
-  if (label.includes("我方") || label.includes("我軍") || label.includes("Ally")) return "ALLY_FRONT";
-  if (label.includes("最前") || label.includes("直擊")) return "FRONT";
-  return undefined;
+  const values = {
+    "跳過": "SKIP",
+    "過人": "SKIP",
+    "自身": "SELF_UNIT",
+    "自己": "SELF_UNIT",
+    "戰場": "SELF_UNIT",
+    "我方": "ALLY_FRONT",
+    "最前": "FRONT",
+    "最前方": "FRONT",
+    "直擊": "FRONT",
+  };
+  const label = String(value ?? "").trim();
+  return Object.hasOwn(values, label) ? values[label] : undefined;
 }
 
 function rawRangeCode(value) {
@@ -145,7 +154,7 @@ function resolvedSourceVariant(raw, enhancement, burstLevel, potentialMask) {
 }
 
 function rawKnockbackDirection(value) {
-  return ({
+  const values = {
     "後": "BACK",
     "前": "FRONT",
     "右": "UP",
@@ -154,7 +163,9 @@ function rawKnockbackDirection(value) {
     "左後": "DOWN_BACK",
     "右前": "UP_FRONT",
     "左前": "DOWN_FRONT",
-  })[String(value ?? "後").trim()];
+  };
+  const label = String(value ?? "").trim();
+  return Object.hasOwn(values, label) ? values[label] : undefined;
 }
 
 function rawStatModifiers(entries) {
