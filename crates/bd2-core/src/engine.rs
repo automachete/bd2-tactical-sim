@@ -143,8 +143,11 @@ impl BattleEngine {
                     .cumulative_hp_by_level
                     .get(selected_index)
                     .copied()
-                    .unwrap_or_default(),
-                segment_hp_remaining: level_hp_segments.first().copied().unwrap_or_default(),
+                    .expect("validated Monster Chaser level must have an HP threshold"),
+                segment_hp_remaining: level_hp_segments
+                    .first()
+                    .copied()
+                    .expect("validated Monster Chaser level must have an HP segment"),
                 level_hp_segments,
                 cumulative_damage: 0,
                 current_party: 1,
@@ -207,6 +210,7 @@ impl BattleEngine {
             engine.sync_monster_part_hp();
         }
         engine.execute_preemptives()?;
+        validate_state(&catalog, &engine.state)?;
         Ok(engine)
     }
 
@@ -217,6 +221,7 @@ impl BattleEngine {
                 state.ruleset_id, catalog.ruleset_id
             )));
         }
+        validate_state(&catalog, &state)?;
         Ok(Self {
             catalog,
             state,
@@ -237,6 +242,10 @@ impl BattleEngine {
         self.state.clone()
     }
 
+    pub fn new_battle(&self, setup: BattleSetup, seed: u64) -> Result<Self> {
+        Self::new(Arc::clone(&self.catalog), setup, seed)
+    }
+
     pub fn state_json(&self) -> Result<String> {
         Ok(serde_json::to_string(&self.state)?)
     }
@@ -246,6 +255,7 @@ impl BattleEngine {
         if state.ruleset_id != self.catalog.ruleset_id {
             return Err(BattleError::InvalidScenario("ruleset mismatch".into()));
         }
+        validate_state(&self.catalog, &state)?;
         self.state = state;
         Ok(())
     }
@@ -275,7 +285,7 @@ impl BattleEngine {
             action_mask.push(
                 self.legal_actions_for_unit(unit.id)
                     .map(|actions| vec![true; actions.commands.len()])
-                    .unwrap_or_default(),
+                    .expect("validated battle state must produce legal-action metadata"),
             );
         }
         Observation {
@@ -293,7 +303,10 @@ impl BattleEngine {
         self.state.teams[side.index()]
             .action_order
             .iter()
-            .filter_map(|id| self.legal_actions_for_unit(*id).ok())
+            .map(|id| {
+                self.legal_actions_for_unit(*id)
+                    .expect("validated battle state must produce legal-action metadata")
+            })
             .collect()
     }
 
@@ -319,31 +332,35 @@ impl BattleEngine {
         if !has_tag(unit, "SILENCE") {
             let available_sp = self.state.teams[unit.side.index()].sp;
             for loadout in &unit.costume_loadout {
-                if unit
-                    .cooldowns
-                    .get(&loadout.costume_id)
-                    .copied()
-                    .unwrap_or(0)
-                    > 0
-                {
+                let cooldown = unit.cooldowns.get(&loadout.costume_id).ok_or_else(|| {
+                    BattleError::InvalidScenario(format!(
+                        "unit {} is missing cooldown state for '{}'",
+                        unit.id, loadout.costume_id
+                    ))
+                })?;
+                if *cooldown > 0 {
                     continue;
                 }
-                let Some(costume) = self.catalog.costumes.get(&loadout.costume_id) else {
-                    continue;
-                };
+                let costume = self
+                    .catalog
+                    .costumes
+                    .get(&loadout.costume_id)
+                    .ok_or_else(|| BattleError::MissingCatalogEntry {
+                        kind: "costume",
+                        id: loadout.costume_id.clone(),
+                    })?;
                 if !costume.executable {
                     continue;
                 }
                 for burst_level in 0..=loadout.burst_level {
-                    let Some(variant) = select_variant(
+                    let variant = select_variant(
                         costume,
                         loadout.enhancement,
                         burst_level,
                         loadout.potential_mask,
-                    ) else {
-                        continue;
-                    };
-                    if variant.burst_level != burst_level || !variant.executable {
+                    )
+                    .expect("validated loadout must contain every unlocked burst variant");
+                    if !variant.executable {
                         continue;
                     }
                     let cost = adjusted_sp_cost(variant.sp_cost, &effective_modifiers(unit));
@@ -365,14 +382,18 @@ impl BattleEngine {
         let mut commands = BTreeMap::new();
         let mut reserved_sp = self.state.teams[side.index()].sp;
         for unit_id in &order {
-            let Some(unit) = self.state.units.get(unit_id) else {
-                continue;
-            };
+            let unit = self
+                .state
+                .units
+                .get(unit_id)
+                .expect("validated action order must reference an existing unit");
             if !unit.alive || !unit.can_act {
                 continue;
             }
-            let legal = self.legal_actions_for_unit(*unit_id).ok();
-            let mut candidates = legal.map(|x| x.commands).unwrap_or_default();
+            let mut candidates = self
+                .legal_actions_for_unit(*unit_id)
+                .expect("validated battle state must produce legal actions")
+                .commands;
             candidates.retain(|command| match command {
                 UnitCommand::UseCostume {
                     costume_id,
@@ -386,7 +407,7 @@ impl BattleEngine {
                                 && side == Side::Enemy
                                 && variant.activation_condition.is_some())
                     })
-                    .unwrap_or(false),
+                    .expect("legal costume command must resolve exactly"),
                 _ => true,
             });
             let scripted =
@@ -396,7 +417,7 @@ impl BattleEngine {
                         .iter()
                         .filter_map(|loadout| {
                             self.resolve_variant(unit, &loadout.costume_id, loadout.burst_level)
-                                .ok()?
+                                .expect("validated loadout must contain its exact variant")
                                 .ai_sequence_index
                         })
                         .max()
@@ -416,8 +437,8 @@ impl BattleEngine {
                                 ..
                             } => {
                                 self.resolve_variant(unit, costume_id, *burst_level)
-                                    .ok()
-                                    .and_then(|variant| variant.ai_sequence_index)
+                                    .expect("legal costume command must resolve exactly")
+                                    .ai_sequence_index
                                     == Some(wanted)
                             }
                             _ => false,
@@ -433,14 +454,17 @@ impl BattleEngine {
                     candidates.iter().rev().find(|command| matches!(command, UnitCommand::UseCostume { costume_id, .. } if costume_id == wanted)).cloned()
                 })
                 .or_else(|| candidates.iter().rev().find(|command| matches!(command, UnitCommand::UseCostume { .. })).cloned())
-            ).unwrap_or(UnitCommand::NormalAttack);
+            ).or_else(|| candidates.iter().find(|command| matches!(command, UnitCommand::NormalAttack)).cloned())
+                .expect("every actionable unit must have a legal normal attack");
             if let UnitCommand::UseCostume {
                 costume_id,
                 burst_level,
                 ..
             } = &selected
-                && let Ok(variant) = self.resolve_variant(unit, costume_id, *burst_level)
             {
+                let variant = self
+                    .resolve_variant(unit, costume_id, *burst_level)
+                    .expect("selected legal costume command must resolve exactly");
                 if variant.consume_remaining_sp {
                     reserved_sp = 0;
                 } else {
@@ -469,9 +493,11 @@ impl BattleEngine {
         ] {
             let ids = self.state.teams[side.index()].action_order.clone();
             for id in ids {
-                let Some(unit) = self.state.units.get(&id).cloned() else {
-                    continue;
-                };
+                let unit = self.state.units.get(&id).cloned().ok_or_else(|| {
+                    BattleError::InvalidScenario(format!(
+                        "action order references missing preemptive unit {id}"
+                    ))
+                })?;
                 if !unit.alive {
                     continue;
                 }
@@ -489,24 +515,16 @@ impl BattleEngine {
                     if !seen.insert(costume_id.clone()) {
                         continue;
                     }
-                    let Some(loadout) = unit
+                    let loadout = unit
                         .costume_loadout
                         .iter()
                         .find(|loadout| &loadout.costume_id == costume_id)
-                    else {
-                        continue;
-                    };
-                    let Some(costume) = self.catalog.costumes.get(costume_id) else {
-                        continue;
-                    };
-                    let Some(variant) = select_variant(
-                        costume,
-                        loadout.enhancement,
-                        loadout.burst_level,
-                        loadout.potential_mask,
-                    ) else {
-                        continue;
-                    };
+                        .ok_or_else(|| {
+                            BattleError::InvalidScenario(format!(
+                                "preemptive priority references unequipped costume '{costume_id}'"
+                            ))
+                        })?;
+                    let variant = self.resolve_variant(&unit, costume_id, loadout.burst_level)?;
                     if variant.preemptive && variant.executable {
                         self.execute_command(
                             id,
@@ -563,13 +581,66 @@ impl BattleEngine {
         };
         self.state.teams[side.index()].action_order = order.clone();
 
+        let mut expected_commands = BTreeSet::new();
+        for unit_id in &order {
+            let unit = self.state.units.get(unit_id).ok_or_else(|| {
+                BattleError::InvalidScenario(format!(
+                    "action order references missing unit {unit_id}"
+                ))
+            })?;
+            if unit.alive && unit.can_act {
+                expected_commands.insert(unit.id);
+            }
+        }
+        let actual_commands: BTreeSet<_> = plan.commands.keys().copied().collect();
+        if actual_commands != expected_commands {
+            return Err(BattleError::IllegalAction(
+                "commands must contain every actionable unit and no other unit".into(),
+            ));
+        }
+        let mut reserved_sp = self.state.teams[side.index()].sp;
+        for unit_id in &order {
+            let unit = &self.state.units[unit_id];
+            if !unit.alive || !unit.can_act {
+                continue;
+            }
+            let command = &plan.commands[unit_id];
+            let legal = self.legal_actions_for_unit(*unit_id)?;
+            if !legal.commands.contains(command) {
+                return Err(BattleError::IllegalAction(format!(
+                    "unit {unit_id} command was not legal when the turn was reserved"
+                )));
+            }
+            if let UnitCommand::UseCostume {
+                costume_id,
+                burst_level,
+                ..
+            } = command
+            {
+                let variant = self.resolve_variant(unit, costume_id, *burst_level)?;
+                let cost = adjusted_sp_cost(variant.sp_cost, &effective_modifiers(unit));
+                if cost > reserved_sp {
+                    return Err(BattleError::IllegalAction(
+                        "turn plan reserves more SP than the team currently has".into(),
+                    ));
+                }
+                if variant.consume_remaining_sp {
+                    reserved_sp = 0;
+                } else {
+                    reserved_sp -= cost;
+                }
+            }
+        }
+
         for unit_id in order {
             if self.state.terminal.is_some() {
                 break;
             }
-            let Some(actor) = self.state.units.get(&unit_id) else {
-                continue;
-            };
+            let actor = self.state.units.get(&unit_id).ok_or_else(|| {
+                BattleError::InvalidScenario(format!(
+                    "action order references missing unit {unit_id}"
+                ))
+            })?;
             if !actor.alive {
                 self.emit(BattleEventKind::ActionSkipped {
                     actor_id: unit_id,
@@ -588,13 +659,17 @@ impl BattleEngine {
                 .commands
                 .get(&unit_id)
                 .cloned()
-                .unwrap_or(UnitCommand::NormalAttack);
-            if let Err(error) = self.execute_command(unit_id, command.clone()) {
-                self.emit(BattleEventKind::ActionSkipped {
-                    actor_id: unit_id,
-                    reason: error.to_string(),
-                });
-                self.execute_command(unit_id, UnitCommand::NormalAttack)?;
+                .expect("validated turn plan must contain every actionable unit");
+            match self.execute_command(unit_id, command) {
+                Ok(()) => {}
+                Err(BattleError::IllegalAction(reason)) => {
+                    self.emit(BattleEventKind::ActionSkipped {
+                        actor_id: unit_id,
+                        reason,
+                    });
+                    self.execute_command(unit_id, UnitCommand::NormalAttack)?;
+                }
+                Err(error) => return Err(error),
             }
             self.state.action_sequence += 1;
             self.tick_action_effects(unit_id);
@@ -620,9 +695,11 @@ impl BattleEngine {
     fn trigger_monster_conditionals(&mut self) -> Result<()> {
         let enemy_ids = self.state.teams[Side::Enemy.index()].action_order.clone();
         for actor_id in enemy_ids {
-            let Some(unit) = self.state.units.get(&actor_id).cloned() else {
-                continue;
-            };
+            let unit = self.state.units.get(&actor_id).cloned().ok_or_else(|| {
+                BattleError::InvalidScenario(format!(
+                    "Monster Chaser action order references missing unit {actor_id}"
+                ))
+            })?;
             if !unit.alive {
                 continue;
             }
@@ -719,7 +796,7 @@ impl BattleEngine {
                 });
                 self.apply_raw_damage(actor_id, target, 1, false, 1);
                 if self.state.units.get(&target).is_some_and(|unit| unit.alive) {
-                    self.knockback(target, direction, 1, 2_500)?;
+                    self.knockback(actor_id, target, direction, 1, 2_500)?;
                 }
                 self.change_sp(self.state.units[&actor_id].side, 1, "KNOCKBACK");
                 Ok(())
@@ -750,7 +827,12 @@ impl BattleEngine {
                 if self.state.teams[unit.side.index()].sp < base_cost {
                     return Err(BattleError::IllegalAction("insufficient SP".into()));
                 }
-                if unit.cooldowns.get(&costume_id).copied().unwrap_or(0) > 0 {
+                let cooldown = unit.cooldowns.get(&costume_id).ok_or_else(|| {
+                    BattleError::InvalidScenario(format!(
+                        "unit {actor_id} is missing cooldown state for '{costume_id}'"
+                    ))
+                })?;
+                if *cooldown > 0 {
                     return Err(BattleError::IllegalAction("costume is on cooldown".into()));
                 }
                 let side = unit.side;
@@ -818,7 +900,11 @@ impl BattleEngine {
                     .cooldowns
                     .get(&costume_id)
                     .copied()
-                    .unwrap_or(0);
+                    .ok_or_else(|| {
+                        BattleError::InvalidScenario(format!(
+                            "unit {actor_id} is missing cooldown state for '{costume_id}'"
+                        ))
+                    })?;
                 let modifiers = effective_modifiers(&self.state.units[&actor_id]);
                 let after =
                     (variant.cooldown as i32 + modifiers.cooldown_delta as i32).max(0) as u16;
@@ -1042,8 +1128,15 @@ impl BattleEngine {
                         .state
                         .units
                         .get(&target_id)
-                        .map(|unit| unit.cooldowns.keys().cloned().collect())
-                        .unwrap_or_default();
+                        .ok_or_else(|| {
+                            BattleError::InvalidScenario(format!(
+                                "cooldown operation resolved missing unit {target_id}"
+                            ))
+                        })?
+                        .cooldowns
+                        .keys()
+                        .cloned()
+                        .collect();
                     for key in keys {
                         let before = self.state.units[&target_id].cooldowns[&key];
                         let after = (i32::from(before) + i32::from(amount))
@@ -1069,7 +1162,11 @@ impl BattleEngine {
                     .cooldowns
                     .get(&costume_id)
                     .copied()
-                    .unwrap_or(0);
+                    .ok_or_else(|| {
+                        BattleError::InvalidScenario(format!(
+                            "unit {actor_id} does not have cooldown state for '{costume_id}'"
+                        ))
+                    })?;
                 let after =
                     (i32::from(before) + i32::from(amount)).clamp(0, i32::from(u16::MAX)) as u16;
                 self.state
@@ -1114,7 +1211,13 @@ impl BattleEngine {
                 collision_coefficient_bp,
             } => {
                 for target in targets.iter().copied() {
-                    self.knockback(target, direction, distance, collision_coefficient_bp)?;
+                    self.knockback(
+                        actor_id,
+                        target,
+                        direction,
+                        distance,
+                        collision_coefficient_bp,
+                    )?;
                 }
             }
             SkillOperation::Conditional {
@@ -1136,12 +1239,7 @@ impl BattleEngine {
                     if remove_beneficial_effects {
                         self.remove_effects(target, EffectPolarity::Beneficial, u16::MAX);
                     }
-                    let hp = self
-                        .state
-                        .units
-                        .get(&target)
-                        .map(|unit| unit.hp)
-                        .unwrap_or(0);
+                    let hp = self.state.units[&target].hp;
                     self.apply_raw_damage(actor_id, target, hp, false, 1);
                 }
             }
@@ -1163,12 +1261,7 @@ impl BattleEngine {
                 }
             }
             SkillOperation::SelfDestruct => {
-                let hp = self
-                    .state
-                    .units
-                    .get(&actor_id)
-                    .map(|unit| unit.hp)
-                    .unwrap_or(0);
+                let hp = self.state.units[&actor_id].hp;
                 self.apply_raw_damage(actor_id, actor_id, hp, false, 1);
             }
             SkillOperation::ApplyEffectPerMatchingEnemy {
@@ -1310,7 +1403,6 @@ impl BattleEngine {
                 crate::Element::Wind => target_mods.wind_incoming_damage_bp,
                 crate::Element::Light => target_mods.light_incoming_damage_bp,
                 crate::Element::Dark => target_mods.dark_incoming_damage_bp,
-                crate::Element::None => 0,
             };
             let conditional_outgoing: i32 = actor
                 .effects
@@ -1376,7 +1468,9 @@ impl BattleEngine {
             }
             self.apply_raw_damage(actor_id, target_id, amount.max(0), critical, hit);
             *self.state.damage_by_source.entry(actor_id).or_default() += amount.max(0);
-            self.change_chain(actor_id, target_id, chain_per_hit);
+            if chain_per_hit > 0 {
+                self.change_chain(actor_id, target_id, chain_per_hit);
+            }
         }
         Ok(())
     }
@@ -1396,31 +1490,34 @@ impl BattleEngine {
             .and_then(|unit| unit.hp_owner)
             .unwrap_or(target_id);
         let mut barrier_events = Vec::new();
-        if let Some(target) = self.state.units.get_mut(&hp_owner) {
-            if target.external_energy_guard > 0 && amount > 0 {
-                let absorbed = amount.min(target.external_energy_guard);
-                amount -= absorbed;
-                target.external_energy_guard -= absorbed;
-                barrier_events.push((
-                    "external:energy_guard".to_string(),
-                    absorbed,
-                    target.external_energy_guard,
-                ));
+        let target = self
+            .state
+            .units
+            .get_mut(&hp_owner)
+            .expect("validated damage target HP owner must exist");
+        if target.external_energy_guard > 0 && amount > 0 {
+            let absorbed = amount.min(target.external_energy_guard);
+            amount -= absorbed;
+            target.external_energy_guard -= absorbed;
+            barrier_events.push((
+                "external:energy_guard".to_string(),
+                absorbed,
+                target.external_energy_guard,
+            ));
+        }
+        for effect in &mut target.effects {
+            if amount == 0 {
+                break;
             }
-            for effect in &mut target.effects {
-                if amount == 0 {
-                    break;
-                }
-                if effect.barrier_remaining > 0 {
-                    let absorbed = amount.min(effect.barrier_remaining);
-                    amount -= absorbed;
-                    effect.barrier_remaining -= absorbed;
-                    barrier_events.push((
-                        effect.spec.effect_id.clone(),
-                        absorbed,
-                        effect.barrier_remaining,
-                    ));
-                }
+            if effect.barrier_remaining > 0 {
+                let absorbed = amount.min(effect.barrier_remaining);
+                amount -= absorbed;
+                effect.barrier_remaining -= absorbed;
+                barrier_events.push((
+                    effect.spec.effect_id.clone(),
+                    absorbed,
+                    effect.barrier_remaining,
+                ));
             }
         }
         for (effect_id, absorbed, remaining) in barrier_events {
@@ -1442,15 +1539,15 @@ impl BattleEngine {
                 .state
                 .monster_chaser
                 .as_ref()
-                .map(|progress| progress.battle_hp_remaining)
-                .unwrap_or(0);
+                .expect("validated Monster Chaser state must exist")
+                .battle_hp_remaining;
             let (advances, exhausted) = self.apply_monster_segment_damage(amount);
             let after = self
                 .state
                 .monster_chaser
                 .as_ref()
-                .map(|progress| progress.battle_hp_remaining)
-                .unwrap_or(0);
+                .expect("validated Monster Chaser state must exist")
+                .battle_hp_remaining;
             self.emit(BattleEventKind::DamageApplied {
                 actor_id,
                 target_id,
@@ -1478,9 +1575,12 @@ impl BattleEngine {
                     .map(|unit| unit.id)
                     .collect();
                 for id in linked {
-                    if let Some(unit) = self.state.units.get_mut(&id)
-                        && unit.alive
-                    {
+                    let unit = self
+                        .state
+                        .units
+                        .get_mut(&id)
+                        .expect("linked Monster Chaser unit must exist");
+                    if unit.alive {
                         unit.alive = false;
                         unit.hp = 0;
                         self.emit(BattleEventKind::UnitDied { unit_id: id });
@@ -1500,9 +1600,11 @@ impl BattleEngine {
             }
             return;
         }
-        let Some(owner) = self.state.units.get_mut(&hp_owner) else {
-            return;
-        };
+        let owner = self
+            .state
+            .units
+            .get_mut(&hp_owner)
+            .expect("validated damage target HP owner must exist");
         let before = owner.hp;
         owner.hp = owner.hp.saturating_sub(amount).max(0);
         let after = owner.hp;
@@ -2209,14 +2311,25 @@ impl BattleEngine {
 
     fn knockback(
         &mut self,
+        source_id: UnitId,
         target_id: UnitId,
         direction: crate::KnockbackDirection,
         distance: u8,
         collision_coefficient_bp: i32,
     ) -> Result<()> {
-        let Some(target) = self.state.units.get(&target_id).cloned() else {
-            return Ok(());
-        };
+        let target = self.state.units.get(&target_id).cloned().ok_or_else(|| {
+            BattleError::InvalidScenario(format!(
+                "knockback target {target_id} is missing for source {source_id}"
+            ))
+        })?;
+        let source = self.state.units.get(&source_id).ok_or_else(|| {
+            BattleError::InvalidScenario(format!("knockback source {source_id} is missing"))
+        })?;
+        if source.side == target.side {
+            return Err(BattleError::InvalidScenario(format!(
+                "knockback source {source_id} and target {target_id} are allied"
+            )));
+        }
         if has_tag(&target, "KNOCKBACK_IMMUNE") {
             return Ok(());
         }
@@ -2257,26 +2370,50 @@ impl BattleEngine {
         }
         if let Some(occupant_id) = occupant {
             let before = self.state.units[&occupant_id].hp;
-            self.deal_damage(
-                target_id,
-                occupant_id,
-                DamageKind::Collision,
-                collision_coefficient_bp,
-                Some(StatReference::MaxHp),
-                false,
-                false,
-                1,
-                0,
-                0,
-            )?;
+            self.deal_collision_damage(source_id, target_id, occupant_id, collision_coefficient_bp);
             let damage = before.saturating_sub(self.state.units[&occupant_id].hp);
             self.emit(BattleEventKind::CollisionDamage {
+                source_id,
                 moving_id: target_id,
                 occupant_id,
                 amount: damage,
             });
         }
         Ok(())
+    }
+
+    fn deal_collision_damage(
+        &mut self,
+        source_id: UnitId,
+        moving_id: UnitId,
+        occupant_id: UnitId,
+        coefficient_bp: i32,
+    ) {
+        let moving = self
+            .state
+            .units
+            .get(&moving_id)
+            .expect("validated moving collision unit must exist");
+        let occupant = self
+            .state
+            .units
+            .get(&occupant_id)
+            .expect("validated collision occupant must exist");
+        let occupant_stats = effective_stats(occupant);
+        let occupant_modifiers = effective_modifiers(occupant);
+        let resistance = occupant_stats.defense_bp.clamp(-100_000, 9_000);
+        let mut amount = mul_floor(effective_stats(moving).max_hp, coefficient_bp);
+        amount = mul_floor(amount, 10_000 - resistance);
+        amount = mul_floor(
+            amount,
+            (10_000 + occupant_stats.incoming_damage_bp - occupant_modifiers.damage_reduction_bp
+                + occupant_modifiers.physical_incoming_damage_bp
+                - occupant_modifiers.physical_damage_reduction_bp)
+                .max(0),
+        )
+        .max(0);
+        self.apply_raw_damage(source_id, occupant_id, amount, false, 1);
+        *self.state.damage_by_source.entry(source_id).or_default() += amount;
     }
 
     fn select_main_target(
@@ -2572,8 +2709,8 @@ impl BattleEngine {
                 .state
                 .monster_chaser
                 .as_ref()
-                .map(|state| state.turn_sp_recovery)
-                .unwrap_or(0);
+                .expect("validated Monster Chaser state must exist")
+                .turn_sp_recovery;
             if recovery != 0 {
                 self.change_sp(Side::Player, recovery, "MONSTER_CHASER_RECOVERY");
             }
@@ -2586,7 +2723,7 @@ impl BattleEngine {
                     .units
                     .get(&target_id)
                     .map(|unit| effective_modifiers(unit).chain_retention)
-                    .unwrap_or(0);
+                    .expect("validated chain target must exist");
                 let retained = chain.min(retention);
                 if retained > 0 {
                     self.state.teams[side.index()]
@@ -2774,10 +2911,9 @@ impl BattleEngine {
 
     fn change_sp(&mut self, side: Side, delta: i32, reason: &str) {
         let before = self.state.teams[side.index()].sp;
-        let mut after = (before + delta).max(0);
-        if let Some(cap) = self.state.rules.sp_cap {
-            after = after.min(cap);
-        }
+        let after = before
+            .saturating_add(delta)
+            .clamp(0, self.state.rules.sp_cap);
         self.state.teams[side.index()].sp = after;
         self.emit(BattleEventKind::SpChanged {
             side,
@@ -2799,13 +2935,13 @@ impl BattleEngine {
             .units
             .get(&target_id)
             .map(|unit| effective_modifiers(unit).chain_received_delta)
-            .unwrap_or(0);
+            .expect("damage target must exist");
         let dealt_delta = self
             .state
             .units
             .get(&actor_id)
             .map(|unit| effective_modifiers(unit).chain_dealt_delta)
-            .unwrap_or(0);
+            .expect("damage actor must exist");
         let adjusted =
             (i32::from(amount) + i32::from(received_delta) + i32::from(dealt_delta)).max(0) as u16;
         let after = before.saturating_add(adjusted);
@@ -2853,9 +2989,11 @@ impl BattleEngine {
     fn apply_monster_segment_damage(&mut self, amount: i64) -> (Vec<(u8, i64)>, bool) {
         let mut advances = Vec::new();
         {
-            let Some(progress) = self.state.monster_chaser.as_mut() else {
-                return (advances, false);
-            };
+            let progress = self
+                .state
+                .monster_chaser
+                .as_mut()
+                .expect("Monster Chaser damage requires mode state");
             progress.cumulative_damage = progress.cumulative_damage.saturating_add(amount);
             progress.battle_hp_remaining =
                 progress.battle_hp_remaining.saturating_sub(amount).max(0);
@@ -2879,28 +3017,26 @@ impl BattleEngine {
             .state
             .monster_chaser
             .as_ref()
-            .is_some_and(|progress| progress.battle_hp_remaining == 0);
+            .expect("Monster Chaser damage requires mode state")
+            .battle_hp_remaining
+            == 0;
         (advances, exhausted)
     }
 
     fn update_monster_stats(&mut self, level: u8) {
-        let Some(monster_id) = self
+        let monster_id = self
             .state
             .monster_chaser
             .as_ref()
             .map(|progress| progress.monster_id.clone())
-        else {
-            return;
-        };
-        let Some(stats) = self
+            .expect("Monster Chaser stat synchronization requires mode state");
+        let stats = self
             .catalog
             .monsters
             .get(&monster_id)
             .and_then(|monster| monster.stats_by_level.get(&level))
             .cloned()
-        else {
-            return;
-        };
+            .expect("validated Monster Chaser level stats must exist");
         for unit in self
             .state
             .units
@@ -2916,8 +3052,8 @@ impl BattleEngine {
             .state
             .monster_chaser
             .as_ref()
-            .map(|progress| progress.battle_hp_remaining)
-            .unwrap_or(0);
+            .expect("Monster Chaser HP synchronization requires mode state")
+            .battle_hp_remaining;
         for unit in self
             .state
             .units
@@ -2984,9 +3120,11 @@ impl BattleEngine {
     }
 
     fn activate_next_monster_party(&mut self) -> bool {
-        let Some(progress) = self.state.monster_chaser.as_mut() else {
-            return false;
-        };
+        let progress = self
+            .state
+            .monster_chaser
+            .as_mut()
+            .expect("Monster Chaser party activation requires mode state");
         if progress.current_party >= progress.party_limit {
             return false;
         }
@@ -3003,13 +3141,16 @@ impl BattleEngine {
         }
         progress.current_party = next_party;
         for id in &next_ids {
-            if let Some(unit) = self.state.units.get_mut(id) {
-                unit.alive = true;
-                unit.hp = unit.base_stats.max_hp;
-                unit.effects.clear();
-                for cooldown in unit.cooldowns.values_mut() {
-                    *cooldown = 0;
-                }
+            let unit = self
+                .state
+                .units
+                .get_mut(id)
+                .expect("next Monster Chaser party unit must exist");
+            unit.alive = true;
+            unit.hp = unit.base_stats.max_hp;
+            unit.effects.clear();
+            for cooldown in unit.cooldowns.values_mut() {
+                *cooldown = 0;
             }
         }
         for enemy in self
@@ -3028,8 +3169,13 @@ impl BattleEngine {
         self.state.teams[Side::Player.index()]
             .chain_by_target
             .clear();
-        self.state.teams[Side::Player.index()].sp =
-            self.state.rules.initial_sp[Side::Player.index()];
+        let current_sp = self.state.teams[Side::Player.index()].sp;
+        let reset_sp = self.state.rules.initial_sp[Side::Player.index()];
+        self.change_sp(
+            Side::Player,
+            reset_sp.saturating_sub(current_sp),
+            "MONSTER_PARTY_RESET",
+        );
         self.emit(BattleEventKind::MonsterPartyActivated {
             party_no: next_party,
             unit_ids: next_ids,
@@ -3079,7 +3225,400 @@ impl SimulatorBatch {
     }
 }
 
+/// Validate the immutable current-ruleset catalog before it is persisted or
+/// used by a simulator. This rejects structural ambiguity rather than letting
+/// individual battle paths discover (or silently skip) malformed records.
+pub fn validate_catalog(catalog: &Catalog) -> Result<()> {
+    if catalog.ruleset_id.trim().is_empty() {
+        return Err(BattleError::InvalidScenario(
+            "catalog ruleset id cannot be empty".into(),
+        ));
+    }
+    if !catalog.skills.is_empty() {
+        return Err(BattleError::InvalidScenario(
+            "legacy catalog.skills records are unsupported; use costumes".into(),
+        ));
+    }
+
+    for (key, character) in &catalog.characters {
+        if key != &character.id || character.id.trim().is_empty() {
+            return Err(BattleError::InvalidScenario(format!(
+                "character map key '{key}' does not match its record id"
+            )));
+        }
+        if !character.level_100.validate() {
+            return Err(BattleError::InvalidScenario(format!(
+                "character '{}' has invalid level-100 stats",
+                character.id
+            )));
+        }
+        let ids: BTreeSet<_> = character.costume_ids.iter().collect();
+        if ids.len() != character.costume_ids.len() {
+            return Err(BattleError::InvalidScenario(format!(
+                "character '{}' contains duplicate costume ids",
+                character.id
+            )));
+        }
+        for costume_id in &character.costume_ids {
+            let costume = catalog.costumes.get(costume_id).ok_or_else(|| {
+                BattleError::MissingCatalogEntry {
+                    kind: "costume",
+                    id: costume_id.clone(),
+                }
+            })?;
+            if costume.character_id != character.id {
+                return Err(BattleError::InvalidScenario(format!(
+                    "character '{}' lists costume '{}' owned by '{}'",
+                    character.id, costume_id, costume.character_id
+                )));
+            }
+        }
+    }
+
+    for (key, costume) in &catalog.costumes {
+        if key != &costume.id || costume.id.trim().is_empty() {
+            return Err(BattleError::InvalidScenario(format!(
+                "costume map key '{key}' does not match its record id"
+            )));
+        }
+        let owner = catalog
+            .characters
+            .get(&costume.character_id)
+            .ok_or_else(|| BattleError::MissingCatalogEntry {
+                kind: "costume character",
+                id: costume.character_id.clone(),
+            })?;
+        if !owner.costume_ids.contains(&costume.id) {
+            return Err(BattleError::InvalidScenario(format!(
+                "costume '{}' is absent from owner '{}'",
+                costume.id, owner.id
+            )));
+        }
+        if costume.variants.is_empty() {
+            return Err(BattleError::InvalidScenario(format!(
+                "costume '{}' has no variants",
+                costume.id
+            )));
+        }
+        if !costume.executable || !costume.compile_diagnostics.is_empty() {
+            return Err(BattleError::InvalidScenario(format!(
+                "costume '{}' is not fully compiled: {}",
+                costume.id,
+                costume.compile_diagnostics.join("; ")
+            )));
+        }
+        let mut variant_keys = BTreeSet::new();
+        let mut has_executable = false;
+        for variant in &costume.variants {
+            let variant_key = (
+                variant.enhancement,
+                variant.burst_level,
+                variant.potential_mask,
+            );
+            if !variant_keys.insert(variant_key) {
+                return Err(BattleError::InvalidScenario(format!(
+                    "costume '{}' duplicates variant +{}/B{}/P{}",
+                    costume.id, variant.enhancement, variant.burst_level, variant.potential_mask
+                )));
+            }
+            if variant.potential_mask > 0b111 || variant.sp_cost < 0 {
+                return Err(BattleError::InvalidScenario(format!(
+                    "costume '{}' has invalid variant parameters",
+                    costume.id
+                )));
+            }
+            if !variant.executable || !variant.compile_diagnostics.is_empty() {
+                return Err(BattleError::InvalidScenario(format!(
+                    "costume '{}' contains an uncompiled variant +{}/B{}/P{}: {}",
+                    costume.id,
+                    variant.enhancement,
+                    variant.burst_level,
+                    variant.potential_mask,
+                    variant.compile_diagnostics.join("; ")
+                )));
+            }
+            if variant.operations.is_empty() {
+                return Err(BattleError::InvalidScenario(format!(
+                    "costume '{}' marks an empty variant executable",
+                    costume.id
+                )));
+            }
+            has_executable |= variant.executable;
+            if variant.max_uses_per_party == Some(0) || variant.ai_sequence_index == Some(0) {
+                return Err(BattleError::InvalidScenario(format!(
+                    "costume '{}' has zero-valued encounter trigger metadata",
+                    costume.id
+                )));
+            }
+            if let Some(condition) = &variant.activation_condition {
+                validate_condition(condition, &costume.id)?;
+            }
+            validate_operations(catalog, &variant.operations, &costume.id)?;
+        }
+        if costume.executable != has_executable {
+            return Err(BattleError::InvalidScenario(format!(
+                "costume '{}' executable flag disagrees with its variants",
+                costume.id
+            )));
+        }
+    }
+
+    for (key, monster) in &catalog.monsters {
+        if key != &monster.id || monster.id.trim().is_empty() {
+            return Err(BattleError::InvalidScenario(format!(
+                "monster map key '{key}' does not match its record id"
+            )));
+        }
+        if monster.stats_by_level.is_empty() {
+            return Err(BattleError::InvalidScenario(format!(
+                "monster '{}' has no level stats",
+                monster.id
+            )));
+        }
+        let mut previous_hp = 0_i64;
+        for (index, (level, stats)) in monster.stats_by_level.iter().enumerate() {
+            if usize::from(*level) != index + 1 || !stats.validate() || stats.max_hp <= previous_hp
+            {
+                return Err(BattleError::InvalidScenario(format!(
+                    "monster '{}' level stats must be contiguous with increasing HP",
+                    monster.id
+                )));
+            }
+            previous_hp = stats.max_hp;
+        }
+        let mut part_ids = BTreeSet::new();
+        let mut part_cells = BTreeSet::new();
+        for part in &monster.parts {
+            if part.id.trim().is_empty()
+                || !part_ids.insert(part.id.as_str())
+                || !part_cells.insert((part.position.row, part.position.depth))
+            {
+                return Err(BattleError::InvalidScenario(format!(
+                    "monster '{}' contains duplicate or empty part metadata",
+                    monster.id
+                )));
+            }
+        }
+        let mut skill_ids = BTreeSet::new();
+        for skill_id in &monster.skill_ids {
+            let skill =
+                catalog
+                    .costumes
+                    .get(skill_id)
+                    .ok_or_else(|| BattleError::MissingCatalogEntry {
+                        kind: "monster skill",
+                        id: skill_id.clone(),
+                    })?;
+            if !skill_ids.insert(skill_id) || skill.character_id != format!("fiend:{}", monster.id)
+            {
+                return Err(BattleError::InvalidScenario(format!(
+                    "monster '{}' has duplicate or foreign skill '{}'",
+                    monster.id, skill_id
+                )));
+            }
+        }
+    }
+
+    for (key, equipment) in &catalog.equipment {
+        if key != &equipment.id || equipment.id.trim().is_empty() {
+            return Err(BattleError::InvalidScenario(format!(
+                "equipment map key '{key}' does not match its record id"
+            )));
+        }
+        if let Some(owner_id) = &equipment.owner_character_id
+            && !catalog.characters.contains_key(owner_id)
+        {
+            return Err(BattleError::MissingCatalogEntry {
+                kind: "exclusive equipment owner",
+                id: owner_id.clone(),
+            });
+        }
+        let scores: BTreeSet<_> = equipment
+            .modifiers_by_refinement_score
+            .keys()
+            .copied()
+            .collect();
+        if scores != BTreeSet::from([18, 19, 20, 21, 22, 23, 24]) {
+            return Err(BattleError::InvalidScenario(format!(
+                "equipment '{}' does not materialize every supported refinement score",
+                equipment.id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_operations(
+    catalog: &Catalog,
+    operations: &[SkillOperation],
+    context: &str,
+) -> Result<()> {
+    for operation in operations {
+        match operation {
+            SkillOperation::DealDamage { hits, .. } if *hits == 0 => {
+                return Err(BattleError::InvalidScenario(format!(
+                    "{context} contains zero-hit damage"
+                )));
+            }
+            SkillOperation::ApplyEffect { effect } => {
+                validate_effect(catalog, effect, context)?;
+            }
+            SkillOperation::ApplyEffectPerMatchingEnemy {
+                effect,
+                stacks_per_unit,
+                max_stacks,
+                ..
+            } => {
+                if *stacks_per_unit == 0 || *max_stacks == 0 {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "{context} contains invalid per-enemy stack counts"
+                    )));
+                }
+                validate_effect(catalog, effect, context)?;
+            }
+            SkillOperation::AbsorbEffectsAndApplyStacks {
+                effect, max_stacks, ..
+            } => {
+                if *max_stacks == 0 {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "{context} contains a zero stack limit"
+                    )));
+                }
+                validate_effect(catalog, effect, context)?;
+            }
+            SkillOperation::Conditional {
+                condition,
+                operations,
+            } => {
+                validate_condition(condition, context)?;
+                if operations.is_empty() {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "{context} contains an empty conditional operation"
+                    )));
+                }
+                validate_operations(catalog, operations, context)?;
+            }
+            SkillOperation::Summon {
+                character_id,
+                costume_id,
+                count,
+                enhancement,
+                ..
+            } => {
+                if *count == 0 {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "{context} contains a zero-count summon"
+                    )));
+                }
+                let character = catalog.characters.get(character_id).ok_or_else(|| {
+                    BattleError::MissingCatalogEntry {
+                        kind: "summon character",
+                        id: character_id.clone(),
+                    }
+                })?;
+                let costume = catalog.costumes.get(costume_id).ok_or_else(|| {
+                    BattleError::MissingCatalogEntry {
+                        kind: "summon costume",
+                        id: costume_id.clone(),
+                    }
+                })?;
+                if costume.character_id != character.id
+                    || select_variant(costume, *enhancement, 0, 0).is_none()
+                {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "{context} contains an invalid summon definition"
+                    )));
+                }
+            }
+            SkillOperation::ChangeCostumeCooldown { costume_id, .. }
+                if !catalog.costumes.contains_key(costume_id) =>
+            {
+                return Err(BattleError::MissingCatalogEntry {
+                    kind: "cooldown costume",
+                    id: costume_id.clone(),
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn validate_effect(catalog: &Catalog, effect: &crate::EffectSpec, context: &str) -> Result<()> {
+    if effect.effect_id.trim().is_empty()
+        || effect.duration == 0
+        || effect.charges == Some(0)
+        || effect.max_stacks == Some(0)
+        || effect
+            .periodic
+            .as_ref()
+            .is_some_and(|periodic| periodic.stacks == 0)
+    {
+        return Err(BattleError::InvalidScenario(format!(
+            "{context} contains invalid effect metadata"
+        )));
+    }
+    for modifier in &effect.conditional_outgoing {
+        validate_condition(&modifier.condition, context)?;
+    }
+    if let Some(nested) = &effect.on_hit_received_allies {
+        validate_effect(catalog, nested, context)?;
+    }
+    if let Some(nested) = &effect.aura_allies {
+        validate_effect(catalog, nested, context)?;
+    }
+    if let Some(nested) = &effect.aura_opponents {
+        validate_effect(catalog, nested, context)?;
+    }
+    if let Some(trigger) = &effect.on_chain_dealt {
+        if trigger.threshold == 0 {
+            return Err(BattleError::InvalidScenario(format!(
+                "{context} contains a zero chain threshold"
+            )));
+        }
+        validate_effect(catalog, &trigger.stack_effect, context)?;
+        validate_effect(catalog, &trigger.threshold_effect, context)?;
+    }
+    validate_operations(catalog, &effect.on_hit_received_operations, context)?;
+    validate_operations(catalog, &effect.on_turn_end_operations, context)
+}
+
+fn validate_condition(condition: &crate::SkillCondition, context: &str) -> Result<()> {
+    use crate::SkillCondition::*;
+    match condition {
+        Any { conditions } | All { conditions } => {
+            if conditions.is_empty() {
+                return Err(BattleError::InvalidScenario(format!(
+                    "{context} contains an empty logical condition"
+                )));
+            }
+            for nested in conditions {
+                validate_condition(nested, context)?;
+            }
+        }
+        TargetChainMultipleOf { value } | TargetChainNotMultipleOf { value } if *value == 0 => {
+            return Err(BattleError::InvalidScenario(format!(
+                "{context} contains modulo-by-zero chain condition"
+            )));
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn validate_setup(catalog: &Catalog, setup: &BattleSetup) -> Result<()> {
+    if catalog.ruleset_id.trim().is_empty() {
+        return Err(BattleError::InvalidScenario(
+            "catalog ruleset id cannot be empty".into(),
+        ));
+    }
+    if setup.scenario_id.trim().is_empty() {
+        return Err(BattleError::InvalidScenario(
+            "scenario id cannot be empty".into(),
+        ));
+    }
+    validate_rule_structure(&setup.rules)?;
+    validate_sp_rules(&setup.rules)?;
     if setup.units.is_empty() {
         return Err(BattleError::InvalidScenario(
             "at least one unit is required".into(),
@@ -3088,6 +3627,7 @@ fn validate_setup(catalog: &Catalog, setup: &BattleSetup) -> Result<()> {
     let mut ids = BTreeSet::new();
     let mut cells: BTreeSet<(Side, u8, i8, i8)> = BTreeSet::new();
     let mut player_party_sizes = BTreeMap::<u8, usize>::new();
+    let mut side_unit_counts = [0_usize; 2];
     for unit in &setup.units {
         if !ids.insert(unit.unit_id) {
             return Err(BattleError::InvalidScenario(format!(
@@ -3101,6 +3641,19 @@ fn validate_setup(catalog: &Catalog, setup: &BattleSetup) -> Result<()> {
                 unit.unit_id
             )));
         }
+        if unit.party_no == 0 {
+            return Err(BattleError::InvalidScenario(format!(
+                "unit {} has invalid party number zero",
+                unit.unit_id
+            )));
+        }
+        if setup.rules.mode != BattleMode::MonsterChaser && unit.party_no != 1 {
+            return Err(BattleError::InvalidScenario(format!(
+                "unit {} uses a Monster Chaser party number outside Monster Chaser mode",
+                unit.unit_id
+            )));
+        }
+        side_unit_counts[unit.side.index()] += 1;
         let party_key =
             if setup.rules.mode == BattleMode::MonsterChaser && unit.side == Side::Player {
                 unit.party_no
@@ -3134,7 +3687,14 @@ fn validate_setup(catalog: &Catalog, setup: &BattleSetup) -> Result<()> {
         }
         validate_build_settings(&unit.build_settings)?;
         resolve_equipment_modifiers(catalog, &unit.character_id, &unit.equipment)?;
+        let mut costume_ids = BTreeSet::new();
         for loadout in &unit.costume_loadout {
+            if !costume_ids.insert(loadout.costume_id.as_str()) {
+                return Err(BattleError::InvalidScenario(format!(
+                    "unit {} equips costume '{}' more than once",
+                    unit.unit_id, loadout.costume_id
+                )));
+            }
             let costume = catalog.costumes.get(&loadout.costume_id).ok_or_else(|| {
                 BattleError::MissingCatalogEntry {
                     kind: "costume",
@@ -3151,6 +3711,39 @@ fn validate_setup(catalog: &Catalog, setup: &BattleSetup) -> Result<()> {
                 return Err(BattleError::InvalidScenario(format!(
                     "costume '{}' has an invalid potential mask",
                     loadout.costume_id
+                )));
+            }
+            for burst_level in 0..=loadout.burst_level {
+                if select_variant(
+                    costume,
+                    loadout.enhancement,
+                    burst_level,
+                    loadout.potential_mask,
+                )
+                .is_none()
+                {
+                    return Err(BattleError::MissingCatalogEntry {
+                        kind: "skill variant",
+                        id: format!(
+                            "{}/+{}/b{burst_level}/p{}",
+                            loadout.costume_id, loadout.enhancement, loadout.potential_mask
+                        ),
+                    });
+                }
+            }
+        }
+        let mut priorities = BTreeSet::new();
+        for costume_id in &unit.ai_priority {
+            if !costume_ids.contains(costume_id.as_str()) {
+                return Err(BattleError::InvalidScenario(format!(
+                    "unit {} AI priority references unequipped costume '{}'",
+                    unit.unit_id, costume_id
+                )));
+            }
+            if !priorities.insert(costume_id) {
+                return Err(BattleError::InvalidScenario(format!(
+                    "unit {} AI priority repeats costume '{}'",
+                    unit.unit_id, costume_id
                 )));
             }
         }
@@ -3187,6 +3780,11 @@ fn validate_setup(catalog: &Catalog, setup: &BattleSetup) -> Result<()> {
             }
         }
     }
+    if side_unit_counts.contains(&0) {
+        return Err(BattleError::InvalidScenario(
+            "both sides require at least one unit".into(),
+        ));
+    }
     if player_party_sizes
         .values()
         .any(|size| *size > setup.rules.grid.deployment_limit)
@@ -3197,11 +3795,21 @@ fn validate_setup(catalog: &Catalog, setup: &BattleSetup) -> Result<()> {
     }
     match (&setup.rules.mode, &setup.monster_chaser) {
         (BattleMode::MonsterChaser, Some(config)) => {
+            if config.turn_sp_recovery < 0 {
+                return Err(BattleError::InvalidScenario(
+                    "Monster Chaser SP recovery cannot be negative".into(),
+                ));
+            }
             if !catalog.monsters.contains_key(&config.monster_id) {
                 return Err(BattleError::MissingCatalogEntry {
                     kind: "monster",
                     id: config.monster_id.clone(),
                 });
+            }
+            if config.party_limit == 0 {
+                return Err(BattleError::InvalidScenario(
+                    "Monster Chaser party limit must be positive".into(),
+                ));
             }
             if config.selected_level == 0
                 || usize::from(config.selected_level) > config.cumulative_hp_by_level.len()
@@ -3221,6 +3829,37 @@ fn validate_setup(catalog: &Catalog, setup: &BattleSetup) -> Result<()> {
                         .into(),
                 ));
             }
+            let monster = &catalog.monsters[&config.monster_id];
+            let expected_hp: Vec<_> = monster
+                .stats_by_level
+                .values()
+                .map(|stats| stats.max_hp)
+                .collect();
+            if config.cumulative_hp_by_level != expected_hp {
+                return Err(BattleError::InvalidScenario(
+                    "monster cumulative HP table does not exactly match the catalog".into(),
+                ));
+            }
+            if setup
+                .units
+                .iter()
+                .any(|unit| unit.side == Side::Player && unit.party_no > config.party_limit)
+            {
+                return Err(BattleError::InvalidScenario(
+                    "player party number exceeds the Monster Chaser party limit".into(),
+                ));
+            }
+            let parties: BTreeSet<_> = setup
+                .units
+                .iter()
+                .filter(|unit| unit.side == Side::Player)
+                .map(|unit| unit.party_no)
+                .collect();
+            if parties.iter().copied().ne(1..=parties.len() as u8) {
+                return Err(BattleError::InvalidScenario(
+                    "Monster Chaser player parties must be contiguous from party 1".into(),
+                ));
+            }
             for unit in setup.units.iter().filter(|unit| unit.hp_owner.is_some()) {
                 let owner_id = unit.hp_owner.unwrap();
                 let Some(owner) = setup
@@ -3237,6 +3876,11 @@ fn validate_setup(catalog: &Catalog, setup: &BattleSetup) -> Result<()> {
                         "boss-part HP owner must be a root unit on the same side".into(),
                     ));
                 }
+                if unit.side != Side::Enemy {
+                    return Err(BattleError::InvalidScenario(
+                        "only Monster Chaser enemy parts may share an HP owner".into(),
+                    ));
+                }
             }
         }
         (BattleMode::MonsterChaser, None) => {
@@ -3251,7 +3895,493 @@ fn validate_setup(catalog: &Catalog, setup: &BattleSetup) -> Result<()> {
         }
         (_, None) => {}
     }
+    if setup.rules.mode != BattleMode::MonsterChaser
+        && setup.units.iter().any(|unit| unit.hp_owner.is_some())
+    {
+        return Err(BattleError::InvalidScenario(
+            "shared boss-part HP is only valid in Monster Chaser mode".into(),
+        ));
+    }
     Ok(())
+}
+
+fn validate_rule_structure(rules: &crate::ModeRules) -> Result<()> {
+    let grid = &rules.grid;
+    if grid.rows <= 0 || grid.depths <= 0 {
+        return Err(BattleError::InvalidScenario(
+            "grid dimensions must be positive".into(),
+        ));
+    }
+    if grid
+        .blocked
+        .iter()
+        .any(|(row, depth)| *row < 0 || *row >= grid.rows || *depth < 0 || *depth >= grid.depths)
+    {
+        return Err(BattleError::InvalidScenario(
+            "blocked grid cell is outside the grid".into(),
+        ));
+    }
+    let usable_cells = usize::from(grid.rows as u8)
+        .saturating_mul(usize::from(grid.depths as u8))
+        .saturating_sub(grid.blocked.len());
+    if grid.deployment_limit == 0 || grid.deployment_limit > usable_cells {
+        return Err(BattleError::InvalidScenario(
+            "deployment limit must fit within the usable grid".into(),
+        ));
+    }
+    if rules.max_game_turns == 0 {
+        return Err(BattleError::InvalidScenario(
+            "maximum game turns must be positive".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_sp_rules(rules: &crate::ModeRules) -> Result<()> {
+    if rules.sp_cap != crate::SP_CAP {
+        return Err(BattleError::InvalidScenario(format!(
+            "SP cap must be {} for the current ruleset",
+            crate::SP_CAP
+        )));
+    }
+    if rules
+        .initial_sp
+        .iter()
+        .any(|sp| !(0..=rules.sp_cap).contains(sp))
+    {
+        return Err(BattleError::InvalidScenario(format!(
+            "initial SP must be between 0 and {}",
+            rules.sp_cap
+        )));
+    }
+    if rules
+        .recovery_after_team_turn
+        .iter()
+        .any(|recovery| *recovery < 0)
+    {
+        return Err(BattleError::InvalidScenario(
+            "turn SP recovery cannot be negative".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_sp_state(state: &BattleState) -> Result<()> {
+    validate_sp_rules(&state.rules)?;
+    if state
+        .monster_chaser
+        .as_ref()
+        .is_some_and(|progress| progress.turn_sp_recovery < 0)
+    {
+        return Err(BattleError::InvalidScenario(
+            "Monster Chaser SP recovery cannot be negative".into(),
+        ));
+    }
+    for team in &state.teams {
+        if !(0..=state.rules.sp_cap).contains(&team.sp) {
+            return Err(BattleError::InvalidScenario(format!(
+                "{:?} SP {} is outside 0..={}",
+                team.side, team.sp, state.rules.sp_cap
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Validate every invariant required to safely continue a serialized battle.
+///
+/// Restored state is an untrusted boundary. A missing catalog link or an
+/// impossible board/turn relation must never be converted into a playable
+/// approximation because that silently changes the simulated rules.
+fn validate_state(catalog: &Catalog, state: &BattleState) -> Result<()> {
+    if state.ruleset_id != catalog.ruleset_id {
+        return Err(BattleError::InvalidScenario(format!(
+            "state ruleset '{}' does not match catalog '{}'",
+            state.ruleset_id, catalog.ruleset_id
+        )));
+    }
+    if state.scenario_id.trim().is_empty() {
+        return Err(BattleError::InvalidScenario(
+            "state scenario id cannot be empty".into(),
+        ));
+    }
+    validate_rule_structure(&state.rules)?;
+    validate_sp_state(state)?;
+    if state.game_turn == 0 || state.round_no == 0 {
+        return Err(BattleError::InvalidScenario(
+            "battle turn and round counters must be one-based".into(),
+        ));
+    }
+    if state.teams[0].side != Side::Player || state.teams[1].side != Side::Enemy {
+        return Err(BattleError::InvalidScenario(
+            "team slots must be ordered PLAYER, ENEMY".into(),
+        ));
+    }
+
+    let mut occupied = BTreeSet::new();
+    let mut effect_instances = BTreeSet::new();
+    let mut maximum_effect_instance = 0_u64;
+    for (unit_id, unit) in &state.units {
+        if *unit_id != unit.id {
+            return Err(BattleError::InvalidScenario(format!(
+                "unit map key {unit_id} does not match embedded id {}",
+                unit.id
+            )));
+        }
+        let character = catalog.characters.get(&unit.character_id).ok_or_else(|| {
+            BattleError::MissingCatalogEntry {
+                kind: "character",
+                id: unit.character_id.clone(),
+            }
+        })?;
+        if !unit.base_stats.validate() {
+            return Err(BattleError::InvalidScenario(format!(
+                "unit {unit_id} has invalid base stats"
+            )));
+        }
+        if unit.hp < 0 || (unit.alive && unit.hp == 0) {
+            return Err(BattleError::InvalidScenario(format!(
+                "unit {unit_id} has inconsistent HP/alive state"
+            )));
+        }
+        if unit.external_energy_guard < 0 {
+            return Err(BattleError::InvalidScenario(format!(
+                "unit {unit_id} has negative energy guard"
+            )));
+        }
+        if unit.party_no == 0 {
+            return Err(BattleError::InvalidScenario(format!(
+                "unit {unit_id} has invalid party number zero"
+            )));
+        }
+        if !state.rules.grid.contains(unit.position) {
+            return Err(BattleError::InvalidScenario(format!(
+                "unit {unit_id} is outside the battle grid"
+            )));
+        }
+        if unit.alive && !occupied.insert((unit.side, unit.position.row, unit.position.depth)) {
+            return Err(BattleError::InvalidScenario(format!(
+                "multiple active {:?} units occupy row {}, depth {}",
+                unit.side, unit.position.row, unit.position.depth
+            )));
+        }
+        if unit.is_summon != unit.summoned_by.is_some() {
+            return Err(BattleError::InvalidScenario(format!(
+                "unit {unit_id} has inconsistent summon metadata"
+            )));
+        }
+        if let Some(summoner_id) = unit.summoned_by {
+            let summoner = state.units.get(&summoner_id).ok_or_else(|| {
+                BattleError::InvalidScenario(format!(
+                    "summoned unit {unit_id} references missing summoner {summoner_id}"
+                ))
+            })?;
+            if summoner.side != unit.side {
+                return Err(BattleError::InvalidScenario(format!(
+                    "summoned unit {unit_id} and summoner {summoner_id} are on different sides"
+                )));
+            }
+        }
+
+        let mut loadout_ids = BTreeSet::new();
+        for loadout in &unit.costume_loadout {
+            if !loadout_ids.insert(loadout.costume_id.as_str()) {
+                return Err(BattleError::InvalidScenario(format!(
+                    "unit {unit_id} equips costume '{}' more than once",
+                    loadout.costume_id
+                )));
+            }
+            let costume = catalog.costumes.get(&loadout.costume_id).ok_or_else(|| {
+                BattleError::MissingCatalogEntry {
+                    kind: "costume",
+                    id: loadout.costume_id.clone(),
+                }
+            })?;
+            if costume.character_id != character.id {
+                return Err(BattleError::InvalidScenario(format!(
+                    "costume '{}' does not belong to state unit {unit_id}",
+                    loadout.costume_id
+                )));
+            }
+            if loadout.potential_mask > 0b111 {
+                return Err(BattleError::InvalidScenario(format!(
+                    "costume '{}' has an invalid potential mask",
+                    loadout.costume_id
+                )));
+            }
+            for burst_level in 0..=loadout.burst_level {
+                if select_variant(
+                    costume,
+                    loadout.enhancement,
+                    burst_level,
+                    loadout.potential_mask,
+                )
+                .is_none()
+                {
+                    return Err(BattleError::MissingCatalogEntry {
+                        kind: "skill variant",
+                        id: format!(
+                            "{}/+{}/b{burst_level}/p{}",
+                            loadout.costume_id, loadout.enhancement, loadout.potential_mask
+                        ),
+                    });
+                }
+            }
+        }
+        let cooldown_ids: BTreeSet<_> = unit.cooldowns.keys().map(String::as_str).collect();
+        if cooldown_ids != loadout_ids {
+            return Err(BattleError::InvalidScenario(format!(
+                "unit {unit_id} cooldown keys do not exactly match its costume loadout"
+            )));
+        }
+        let mut priorities = BTreeSet::new();
+        for costume_id in &unit.ai_priority {
+            if !loadout_ids.contains(costume_id.as_str()) || !priorities.insert(costume_id) {
+                return Err(BattleError::InvalidScenario(format!(
+                    "unit {unit_id} has invalid AI priority costume '{costume_id}'"
+                )));
+            }
+        }
+        for costume_id in unit.triggered_skill_uses.keys() {
+            if !loadout_ids.contains(costume_id.as_str()) {
+                return Err(BattleError::InvalidScenario(format!(
+                    "unit {unit_id} tracks a trigger for unequipped costume '{costume_id}'"
+                )));
+            }
+        }
+        for effect in &unit.effects {
+            if !state.units.contains_key(&effect.source_unit_id) {
+                return Err(BattleError::InvalidScenario(format!(
+                    "effect {} on unit {unit_id} has missing source {}",
+                    effect.instance_id, effect.source_unit_id
+                )));
+            }
+            if effect.spec.effect_id.trim().is_empty()
+                || effect.remaining == 0
+                || effect.barrier_remaining < 0
+                || effect.charges_remaining == Some(0)
+            {
+                return Err(BattleError::InvalidScenario(format!(
+                    "effect {} on unit {unit_id} has invalid runtime counters",
+                    effect.instance_id
+                )));
+            }
+            if effect.charges_remaining.is_some() != effect.spec.charges.is_some()
+                || effect
+                    .charges_remaining
+                    .zip(effect.spec.charges)
+                    .is_some_and(|(remaining, initial)| remaining > initial)
+            {
+                return Err(BattleError::InvalidScenario(format!(
+                    "effect {} on unit {unit_id} has inconsistent charge state",
+                    effect.instance_id
+                )));
+            }
+            validate_effect(catalog, &effect.spec, "restored active effect")?;
+            if !effect_instances.insert(effect.instance_id) {
+                return Err(BattleError::InvalidScenario(format!(
+                    "effect instance {} is duplicated",
+                    effect.instance_id
+                )));
+            }
+            maximum_effect_instance = maximum_effect_instance.max(effect.instance_id);
+        }
+    }
+    if state.next_effect_instance_id <= maximum_effect_instance {
+        return Err(BattleError::InvalidScenario(
+            "next effect instance id is not greater than all active effect ids".into(),
+        ));
+    }
+
+    for side in [Side::Player, Side::Enemy] {
+        let team = &state.teams[side.index()];
+        let actual: BTreeSet<_> = team.action_order.iter().copied().collect();
+        if actual.len() != team.action_order.len() {
+            return Err(BattleError::InvalidScenario(format!(
+                "{side:?} action order contains duplicate unit ids"
+            )));
+        }
+        let current_party = state
+            .monster_chaser
+            .as_ref()
+            .map(|progress| progress.current_party);
+        let expected: BTreeSet<_> = state
+            .units
+            .values()
+            .filter(|unit| {
+                unit.side == side
+                    && unit.can_act
+                    && (state.rules.mode != BattleMode::MonsterChaser
+                        || side != Side::Player
+                        || Some(unit.party_no) == current_party)
+            })
+            .map(|unit| unit.id)
+            .collect();
+        if actual != expected {
+            return Err(BattleError::InvalidScenario(format!(
+                "{side:?} action order does not match the current actionable party"
+            )));
+        }
+        for (target_id, chain) in &team.chain_by_target {
+            if *chain == 0 {
+                return Err(BattleError::InvalidScenario(format!(
+                    "{side:?} chain state contains a zero chain for target {target_id}"
+                )));
+            }
+            let target = state.units.get(target_id).ok_or_else(|| {
+                BattleError::InvalidScenario(format!(
+                    "{side:?} chain state references missing target {target_id}"
+                ))
+            })?;
+            if target.side == side {
+                return Err(BattleError::InvalidScenario(format!(
+                    "{side:?} chain state references allied target {target_id}"
+                )));
+            }
+        }
+    }
+    for source_id in state.damage_by_source.keys() {
+        if !state.units.contains_key(source_id) {
+            return Err(BattleError::InvalidScenario(format!(
+                "damage ledger references missing unit {source_id}"
+            )));
+        }
+    }
+
+    match (state.rules.mode, &state.monster_chaser) {
+        (BattleMode::MonsterChaser, Some(progress)) => {
+            validate_monster_chaser_state(catalog, state, progress)?;
+        }
+        (BattleMode::MonsterChaser, None) => {
+            return Err(BattleError::InvalidScenario(
+                "Monster Chaser state is required in Monster Chaser mode".into(),
+            ));
+        }
+        (_, Some(_)) => {
+            return Err(BattleError::InvalidScenario(
+                "Monster Chaser state is forbidden outside Monster Chaser mode".into(),
+            ));
+        }
+        (_, None) => {
+            if state
+                .units
+                .values()
+                .any(|unit| unit.party_no != 1 || unit.hp_owner.is_some())
+            {
+                return Err(BattleError::InvalidScenario(
+                    "party switching and shared HP are only valid in Monster Chaser mode".into(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_monster_chaser_state(
+    catalog: &Catalog,
+    state: &BattleState,
+    progress: &crate::MonsterChaserState,
+) -> Result<()> {
+    let monster = catalog.monsters.get(&progress.monster_id).ok_or_else(|| {
+        BattleError::MissingCatalogEntry {
+            kind: "monster",
+            id: progress.monster_id.clone(),
+        }
+    })?;
+    if progress.selected_level == 0
+        || progress.current_level == 0
+        || progress.current_level > progress.selected_level
+        || progress.party_limit == 0
+        || progress.current_party == 0
+        || progress.current_party > progress.party_limit
+        || progress.turn_sp_recovery < 0
+        || progress.cumulative_damage < 0
+    {
+        return Err(BattleError::InvalidScenario(
+            "Monster Chaser progress counters are outside their valid ranges".into(),
+        ));
+    }
+    let expected_segments: Vec<_> = monster
+        .stats_by_level
+        .iter()
+        .take(usize::from(progress.selected_level))
+        .scan(0_i64, |previous, (_, stats)| {
+            let segment = stats.max_hp.saturating_sub(*previous);
+            *previous = stats.max_hp;
+            Some(segment)
+        })
+        .collect();
+    if expected_segments.len() != usize::from(progress.selected_level)
+        || progress.level_hp_segments != expected_segments
+        || expected_segments.iter().any(|segment| *segment <= 0)
+    {
+        return Err(BattleError::InvalidScenario(
+            "Monster Chaser HP segments do not exactly match the catalog".into(),
+        ));
+    }
+    let total_hp: i64 = expected_segments.iter().sum();
+    if !(0..=total_hp).contains(&progress.battle_hp_remaining) {
+        return Err(BattleError::InvalidScenario(
+            "Monster Chaser battle HP is outside the selected-level range".into(),
+        ));
+    }
+    let consumed_hp = total_hp - progress.battle_hp_remaining;
+    if progress.cumulative_damage < consumed_hp {
+        return Err(BattleError::InvalidScenario(
+            "Monster Chaser cumulative damage is below consumed boss HP".into(),
+        ));
+    }
+    let (expected_level, expected_segment_remaining) =
+        expected_monster_segment(&expected_segments, consumed_hp);
+    if progress.current_level != expected_level
+        || progress.segment_hp_remaining != expected_segment_remaining
+    {
+        return Err(BattleError::InvalidScenario(
+            "Monster Chaser current HP segment is inconsistent with battle HP".into(),
+        ));
+    }
+    if state
+        .units
+        .values()
+        .any(|unit| unit.side == Side::Player && unit.party_no > progress.party_limit)
+    {
+        return Err(BattleError::InvalidScenario(
+            "state contains a player party above the Monster Chaser limit".into(),
+        ));
+    }
+    for unit in state.units.values().filter(|unit| unit.side == Side::Enemy) {
+        if unit.hp != progress.battle_hp_remaining {
+            return Err(BattleError::InvalidScenario(format!(
+                "Monster Chaser enemy unit {} is not synchronized to boss HP",
+                unit.id
+            )));
+        }
+        if let Some(owner_id) = unit.hp_owner {
+            let owner = state.units.get(&owner_id).ok_or_else(|| {
+                BattleError::InvalidScenario(format!(
+                    "boss part {} references missing HP owner {owner_id}",
+                    unit.id
+                ))
+            })?;
+            if owner.side != Side::Enemy || owner.hp_owner.is_some() {
+                return Err(BattleError::InvalidScenario(format!(
+                    "boss part {} has an invalid HP owner",
+                    unit.id
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn expected_monster_segment(segments: &[i64], mut consumed: i64) -> (u8, i64) {
+    for (index, segment) in segments.iter().enumerate() {
+        if consumed < *segment {
+            return ((index + 1) as u8, segment - consumed);
+        }
+        consumed -= *segment;
+    }
+    (segments.len() as u8, 0)
 }
 
 /// Resolve a typed five-slot equipment loadout against the immutable catalog.
@@ -3453,21 +4583,11 @@ fn select_variant(
     burst: u8,
     potential_mask: u8,
 ) -> Option<&SkillVariant> {
-    costume
-        .variants
-        .iter()
-        .filter(|variant| {
-            variant.enhancement <= enhancement
-                && variant.burst_level <= burst
-                && (variant.potential_mask == potential_mask || variant.potential_mask == 0)
-        })
-        .max_by_key(|variant| {
-            (
-                variant.potential_mask == potential_mask,
-                variant.enhancement,
-                variant.burst_level,
-            )
-        })
+    costume.variants.iter().find(|variant| {
+        variant.enhancement == enhancement
+            && variant.burst_level == burst
+            && variant.potential_mask == potential_mask
+    })
 }
 
 fn adjusted_sp_cost(base: i32, modifiers: &StatModifiers) -> i32 {
@@ -3787,16 +4907,20 @@ mod tests {
                 tier: "UR4".into(),
                 slot: EquipmentSlot::Weapon,
                 owner_character_id: None,
-                modifiers_by_refinement_score: BTreeMap::from([(
-                    18,
-                    StatModifiers {
-                        max_hp_flat: 10,
-                        max_hp_bp: 100,
-                        attack_flat: 1,
-                        attack_bp: 100,
-                        ..StatModifiers::default()
-                    },
-                )]),
+                modifiers_by_refinement_score: (18..=24)
+                    .map(|score| {
+                        (
+                            score,
+                            StatModifiers {
+                                max_hp_flat: 10,
+                                max_hp_bp: 100,
+                                attack_flat: 1,
+                                attack_bp: 100,
+                                ..StatModifiers::default()
+                            },
+                        )
+                    })
+                    .collect(),
                 primary_stat_options: vec![],
                 secondary_stat_options: vec![],
                 primary_modifiers_by_refinement_score: BTreeMap::new(),
@@ -3956,6 +5080,231 @@ mod tests {
     }
 
     #[test]
+    fn normal_turn_and_skill_sp_gains_saturate_at_the_current_twenty_point_cap() {
+        let mut battle = setup(BattleMode::MirrorWar);
+        battle.rules.initial_sp = [crate::SP_CAP, crate::SP_CAP];
+        let mut engine = BattleEngine::new(catalog(), battle, 1).unwrap();
+
+        engine
+            .step(TeamTurnPlan {
+                side: Side::Player,
+                order: vec![1],
+                commands: BTreeMap::from([(1, UnitCommand::NormalAttack)]),
+                formation: BTreeMap::new(),
+            })
+            .unwrap();
+
+        assert_eq!(engine.state.teams[Side::Player.index()].sp, crate::SP_CAP);
+        assert_eq!(engine.state.teams[Side::Enemy.index()].sp, crate::SP_CAP);
+        assert!(engine.state.event_log.iter().any(|event| matches!(
+            &event.kind,
+            BattleEventKind::SpChanged { before, after, reason, .. }
+                if *before == crate::SP_CAP && *after == crate::SP_CAP && reason == "TURN_RECOVERY"
+        )));
+
+        engine.state.teams[Side::Player.index()].sp = crate::SP_CAP - 1;
+        engine
+            .execute_operation(
+                1,
+                2,
+                &[2],
+                SkillOperation::ChangeSp {
+                    amount: 100,
+                    side: EffectRecipient::ActorSide,
+                },
+            )
+            .unwrap();
+        assert_eq!(engine.state.teams[Side::Player.index()].sp, crate::SP_CAP);
+
+        engine.state.teams[Side::Player.index()].sp = crate::SP_CAP - 1;
+        engine.current_skill_successful_hits = 10;
+        engine
+            .execute_operation(
+                1,
+                2,
+                &[2],
+                SkillOperation::ChangeSpPerSuccessfulHit {
+                    amount: 100,
+                    side: EffectRecipient::ActorSide,
+                },
+            )
+            .unwrap();
+        assert_eq!(engine.state.teams[Side::Player.index()].sp, crate::SP_CAP);
+
+        engine.change_sp(Side::Player, i32::MAX, "OVERFLOW_REGRESSION");
+        assert_eq!(engine.state.teams[Side::Player.index()].sp, crate::SP_CAP);
+        engine.change_sp(Side::Player, i32::MIN, "UNDERFLOW_REGRESSION");
+        assert_eq!(engine.state.teams[Side::Player.index()].sp, 0);
+
+        for before in 0..=crate::SP_CAP {
+            for delta in [i32::MIN, -100, -1, 0, 1, 100, i32::MAX] {
+                engine.state.teams[Side::Player.index()].sp = before;
+                engine.change_sp(Side::Player, delta, "SP_BOUNDARY_MATRIX");
+                assert!(
+                    (0..=crate::SP_CAP).contains(&engine.state.teams[Side::Player.index()].sp),
+                    "SP escaped its valid range from {before} with delta {delta}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn setup_and_restored_state_reject_sp_outside_the_current_ruleset() {
+        let mut invalid_cap = setup(BattleMode::Normal);
+        invalid_cap.rules.sp_cap = crate::SP_CAP + 1;
+        assert!(matches!(
+            BattleEngine::new(catalog(), invalid_cap, 1),
+            Err(BattleError::InvalidScenario(message)) if message.contains("SP cap")
+        ));
+
+        let mut invalid_initial = setup(BattleMode::Normal);
+        invalid_initial.rules.initial_sp[0] = crate::SP_CAP + 1;
+        assert!(matches!(
+            BattleEngine::new(catalog(), invalid_initial, 1),
+            Err(BattleError::InvalidScenario(message)) if message.contains("initial SP")
+        ));
+
+        let mut null_cap = serde_json::to_value(setup(BattleMode::Normal)).unwrap();
+        null_cap["rules"]["sp_cap"] = serde_json::Value::Null;
+        assert!(
+            serde_json::from_value::<BattleSetup>(null_cap).is_err(),
+            "a missing SP invariant must not deserialize as an unbounded battle"
+        );
+
+        let mut engine = BattleEngine::new(catalog(), setup(BattleMode::Normal), 1).unwrap();
+        let original = engine.snapshot();
+        let mut invalid_state = original.clone();
+        invalid_state.teams[Side::Player.index()].sp = crate::SP_CAP + 1;
+        let invalid_json = serde_json::to_string(&invalid_state).unwrap();
+        assert!(matches!(
+            engine.restore_json(&invalid_json),
+            Err(BattleError::InvalidScenario(message)) if message.contains("outside")
+        ));
+        assert_eq!(
+            engine.snapshot(),
+            original,
+            "failed restore must remain atomic"
+        );
+        assert!(BattleEngine::from_state(catalog(), invalid_state).is_err());
+    }
+
+    #[test]
+    fn setup_requires_the_exact_configured_skill_variant() {
+        for mutate in [
+            |loadout: &mut CostumeLoadout| loadout.enhancement = 6,
+            |loadout: &mut CostumeLoadout| loadout.burst_level = 1,
+            |loadout: &mut CostumeLoadout| loadout.potential_mask = 1,
+        ] {
+            let mut invalid = setup(BattleMode::Normal);
+            mutate(&mut invalid.units[0].costume_loadout[0]);
+            assert!(matches!(
+                BattleEngine::new(catalog(), invalid, 1),
+                Err(BattleError::MissingCatalogEntry {
+                    kind: "skill variant",
+                    ..
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn restore_rejects_non_sp_state_corruption_atomically() {
+        let mutations: Vec<fn(&mut BattleState)> = vec![
+            |state| state.scenario_id.clear(),
+            |state| state.game_turn = 0,
+            |state| state.teams.swap(0, 1),
+            |state| state.teams[0].action_order.clear(),
+            |state| state.units.get_mut(&1).unwrap().character_id = "missing".into(),
+            |state| state.units.get_mut(&1).unwrap().hp = -1,
+            |state| state.units.get_mut(&1).unwrap().party_no = 2,
+            |state| {
+                state.units.get_mut(&1).unwrap().cooldowns.clear();
+            },
+            |state| {
+                state.units.get_mut(&1).unwrap().id = 999;
+            },
+            |state| {
+                state.rules.grid.blocked.insert((99, 99));
+            },
+            |state| {
+                state.teams[Side::Player.index()]
+                    .chain_by_target
+                    .insert(2, 0);
+            },
+            |state| {
+                state.teams[Side::Enemy.index()]
+                    .chain_by_target
+                    .insert(2, 1);
+            },
+        ];
+        let mut engine = BattleEngine::new(catalog(), setup(BattleMode::Normal), 1).unwrap();
+        let original = engine.snapshot();
+        for mutate in mutations {
+            let mut invalid = original.clone();
+            mutate(&mut invalid);
+            let json = serde_json::to_string(&invalid).unwrap();
+            assert!(engine.restore_json(&json).is_err());
+            assert_eq!(engine.snapshot(), original, "failed restore must be atomic");
+            assert!(BattleEngine::from_state(catalog(), invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn required_battle_metadata_cannot_be_omitted_or_invented() {
+        assert!(serde_json::from_value::<Element>(serde_json::json!("NONE")).is_err());
+        assert!(
+            serde_json::from_value::<SkillOperation>(serde_json::json!({
+                "op": "DEAL_DAMAGE",
+                "kind": "PHYSICAL",
+                "coefficient_bp": 10000,
+                "scaling": null,
+                "hits": 1,
+                "can_crit": true,
+                "can_evade": true,
+                "chain_per_hit": 1,
+                "main_target_bonus_bp": 0
+            }))
+            .is_err()
+        );
+        let mut rules = serde_json::to_value(crate::ModeRules::normal()).unwrap();
+        rules["prototype_unlimited_sp"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<crate::ModeRules>(rules).is_err());
+    }
+
+    #[test]
+    fn catalog_validation_rejects_structural_ambiguity() {
+        validate_catalog(&catalog()).unwrap();
+
+        let mut duplicate_variant = (*catalog()).clone();
+        let variant = duplicate_variant.costumes["hero_skill"].variants[0].clone();
+        duplicate_variant
+            .costumes
+            .get_mut("hero_skill")
+            .unwrap()
+            .variants
+            .push(variant);
+        assert!(matches!(
+            validate_catalog(&duplicate_variant),
+            Err(BattleError::InvalidScenario(message)) if message.contains("duplicates variant")
+        ));
+
+        let mut broken_owner = (*catalog()).clone();
+        broken_owner
+            .costumes
+            .get_mut("hero_skill")
+            .unwrap()
+            .character_id = "missing".into();
+        assert!(validate_catalog(&broken_owner).is_err());
+
+        let mut legacy_program = (*catalog()).clone();
+        legacy_program.skills.insert(
+            "legacy".into(),
+            legacy_program.costumes["hero_skill"].clone(),
+        );
+        assert!(validate_catalog(&legacy_program).is_err());
+    }
+
+    #[test]
     fn duplicate_cells_are_rejected() {
         let mut bad = setup(BattleMode::Normal);
         bad.units.push(UnitSetup {
@@ -4004,14 +5353,25 @@ mod tests {
         let mut engine = BattleEngine::new(catalog(), battle_setup, 1).unwrap();
 
         engine
-            .knockback(2, crate::KnockbackDirection::Back, 3, 5_000)
+            .knockback(1, 2, crate::KnockbackDirection::Back, 3, 5_000)
             .unwrap();
 
         assert_eq!(engine.state.units[&2].position, Cell { row: 0, depth: 1 });
         assert_eq!(engine.state.units[&3].hp, 500);
+        assert_eq!(engine.state.damage_by_source.get(&1), Some(&500));
+        assert!(
+            engine
+                .state
+                .teams
+                .iter()
+                .all(|team| team.chain_by_target.is_empty())
+        );
+        let snapshot = engine.state_json().unwrap();
+        engine.restore_json(&snapshot).unwrap();
         assert!(engine.state.event_log.iter().any(|event| matches!(
             event.kind,
             BattleEventKind::CollisionDamage {
+                source_id: 1,
                 moving_id: 2,
                 occupant_id: 3,
                 amount: 500
@@ -4237,6 +5597,31 @@ mod tests {
             formation: BTreeMap::from([(1, Cell { row: 2, depth: 3 })]),
         };
         assert!(engine.step(invalid_order).is_err());
+        assert_eq!(engine.state, before);
+
+        let missing_command = TeamTurnPlan {
+            side: Side::Player,
+            order: vec![1],
+            commands: BTreeMap::new(),
+            formation: BTreeMap::new(),
+        };
+        assert!(engine.step(missing_command).is_err());
+        assert_eq!(engine.state, before);
+
+        let invalid_command = TeamTurnPlan {
+            side: Side::Player,
+            order: vec![1],
+            commands: BTreeMap::from([(
+                1,
+                UnitCommand::UseCostume {
+                    costume_id: "not-equipped".into(),
+                    burst_level: 0,
+                    explicit_target: None,
+                },
+            )]),
+            formation: BTreeMap::new(),
+        };
+        assert!(engine.step(invalid_command).is_err());
         assert_eq!(engine.state, before);
 
         engine.state.units.get_mut(&1).unwrap().alive = false;

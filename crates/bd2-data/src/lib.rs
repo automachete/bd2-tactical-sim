@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, path::Path};
 
-use bd2_core::{BattleSetup, Catalog, CostumeDefinition};
+use bd2_core::{BattleSetup, Catalog, CostumeDefinition, validate_catalog};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use thiserror::Error;
 
@@ -14,6 +14,8 @@ pub enum DataError {
     MissingCatalog(String),
     #[error("scenario '{0}' does not exist")]
     MissingScenario(String),
+    #[error("invalid battle catalog: {0}")]
+    InvalidCatalog(#[from] bd2_core::BattleError),
 }
 
 pub type Result<T> = std::result::Result<T, DataError>;
@@ -47,6 +49,7 @@ impl Database {
 
     /// Atomically replaces one current catalog snapshot.
     pub fn replace_catalog(&mut self, catalog: &Catalog, activate: bool) -> Result<()> {
+        validate_catalog(catalog)?;
         let transaction = self.connection.transaction()?;
         transaction.execute(
             "DELETE FROM catalog_versions WHERE ruleset_id = ?1",
@@ -149,14 +152,16 @@ impl Database {
         }
         let monsters = load_json_map(&self.connection, "monsters", "monster_id", ruleset_id)?;
         let equipment = load_json_map(&self.connection, "equipment", "equipment_id", ruleset_id)?;
-        Ok(Catalog {
+        let catalog = Catalog {
             ruleset_id: ruleset_id.into(),
             characters,
             costumes,
             monsters,
             equipment,
             skills: BTreeMap::new(),
-        })
+        };
+        validate_catalog(&catalog)?;
+        Ok(catalog)
     }
 
     pub fn put_scenario(&self, ruleset_id: &str, setup: &BattleSetup) -> Result<()> {
@@ -248,8 +253,9 @@ fn count(connection: &Connection, table: &str, ruleset_id: &str) -> Result<u64> 
 mod tests {
     use super::*;
     use bd2_core::{
-        AttackType, CharacterDefinition, CostumeDefinition, Element, KnockbackDirection, Offset,
-        SkillVariant, SourceRecord, StatModifiers, Stats, TargetSelector,
+        AttackType, CharacterDefinition, CostumeDefinition, DamageKind, Element,
+        KnockbackDirection, Offset, SkillOperation, SkillVariant, SourceRecord, StatModifiers,
+        Stats, TargetSelector,
     };
     use std::collections::BTreeMap;
 
@@ -290,7 +296,17 @@ mod tests {
             fixed_target_cell: None,
             target_all: false,
             range_override: None,
-            operations: vec![],
+            operations: vec![SkillOperation::DealDamage {
+                kind: DamageKind::Physical,
+                coefficient_bp: 10_000,
+                reference: None,
+                scaling: None,
+                hits: 1,
+                can_crit: true,
+                can_evade: true,
+                chain_per_hit: 1,
+                main_target_bonus_bp: 0,
+            }],
             consume_remaining_sp: false,
             executable: true,
             compile_diagnostics: vec![],

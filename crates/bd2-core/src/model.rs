@@ -1,6 +1,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Deserialize an explicitly present nullable field. Serde normally treats a
+/// missing `Option<T>` exactly like JSON `null`; battle data must distinguish
+/// the verified absence of a mechanic from an omitted/unknown field.
+fn required_option<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
 
 pub type UnitId = u32;
 pub type BasisPoints = i32;
@@ -28,7 +39,7 @@ impl Side {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Element {
     Fire,
@@ -36,8 +47,6 @@ pub enum Element {
     Wind,
     Light,
     Dark,
-    #[default]
-    None,
 }
 
 impl Element {
@@ -101,11 +110,11 @@ pub struct Offset {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GridDefinition {
     pub rows: i8,
     pub depths: i8,
     pub deployment_limit: usize,
-    #[serde(default)]
     pub blocked: BTreeSet<(i8, i8)>,
 }
 
@@ -129,6 +138,7 @@ impl GridDefinition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Stats {
     pub max_hp: i64,
     pub attack: i64,
@@ -137,13 +147,9 @@ pub struct Stats {
     pub crit_damage_bp: BasisPoints,
     pub defense_bp: BasisPoints,
     pub magic_resist_bp: BasisPoints,
-    #[serde(default)]
     pub property_damage_bp: BasisPoints,
-    #[serde(default)]
     pub outgoing_damage_bp: BasisPoints,
-    #[serde(default)]
     pub incoming_damage_bp: BasisPoints,
-    #[serde(default)]
     pub amplification_bp: BasisPoints,
 }
 
@@ -154,6 +160,7 @@ impl Stats {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CharacterDefinition {
     pub id: String,
     pub names: BTreeMap<String, String>,
@@ -170,111 +177,92 @@ pub struct CharacterDefinition {
     pub engraving_modifiers: StatModifiers,
     pub awakening_modifiers: StatModifiers,
     pub costume_ids: Vec<String>,
-    #[serde(default)]
     pub source: SourceRecord,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CostumeDefinition {
     pub id: String,
     pub character_id: String,
     pub names: BTreeMap<String, String>,
     /// Localized in-game skill names. Costume names remain in `names` because
     /// both are independently displayed by the official UI.
-    #[serde(default)]
     pub skill_names: BTreeMap<String, String>,
     pub range: Vec<Offset>,
     pub variants: Vec<SkillVariant>,
     /// Permanent stat nodes unlocked in this costume's potential tree.
-    #[serde(default)]
     pub permanent_potential_modifiers: StatModifiers,
     /// Stats granted when this costume is selected as the character's bond.
-    #[serde(default)]
     pub bonding_modifiers: StatModifiers,
     /// False means that the source record is preserved but its prose has not
     /// yet been compiled into lossless executable operations. Such a costume
     /// is never exposed as a legal action.
-    #[serde(default)]
     pub executable: bool,
-    #[serde(default)]
     pub compile_diagnostics: Vec<String>,
-    #[serde(default)]
     pub source: SourceRecord,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SkillVariant {
     pub enhancement: u8,
     pub burst_level: u8,
-    #[serde(default)]
     pub potential_mask: u8,
     pub sp_cost: i32,
     pub cooldown: u16,
     pub selector: TargetSelector,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub fixed_target_cell: Option<Cell>,
-    #[serde(default)]
     pub target_all: bool,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub range_override: Option<Vec<Offset>>,
     pub operations: Vec<SkillOperation>,
-    #[serde(default)]
     pub consume_remaining_sp: bool,
-    #[serde(default = "default_true")]
     pub executable: bool,
-    #[serde(default)]
     pub compile_diagnostics: Vec<String>,
-    #[serde(default)]
     pub preemptive: bool,
     /// Optional encounter-AI trigger. Triggered skills are resolved immediately
     /// after the opposing action that makes this condition true.
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub activation_condition: Option<SkillCondition>,
     /// Per Monster Chaser party activation cap for a triggered skill.
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub max_uses_per_party: Option<u16>,
     /// One-based position in an encounter-controlled boss action cycle.
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub ai_sequence_index: Option<u16>,
     /// Official Japanese in-game skill text with the selected enhancement,
     /// burst and potential values materialized. This is presentation data;
     /// executable behaviour remains defined exclusively by `operations`.
-    #[serde(default)]
     pub description_ja: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "SCREAMING_SNAKE_CASE")]
+#[serde(tag = "op", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
 pub enum SkillOperation {
     DealDamage {
         kind: DamageKind,
         coefficient_bp: BasisPoints,
-        #[serde(default)]
+        #[serde(deserialize_with = "required_option")]
         reference: Option<StatReference>,
-        #[serde(default)]
+        #[serde(deserialize_with = "required_option")]
         scaling: Option<DamageScaling>,
         hits: u16,
-        #[serde(default = "default_true")]
         can_crit: bool,
-        #[serde(default = "default_true")]
         can_evade: bool,
-        #[serde(default = "default_chain")]
         chain_per_hit: u16,
-        #[serde(default)]
         main_target_bonus_bp: BasisPoints,
     },
     Heal {
         coefficient_bp: BasisPoints,
         reference: StatReference,
-        #[serde(default)]
         can_crit: bool,
-        #[serde(default = "default_target_recipient")]
         recipient: EffectRecipient,
     },
     ConsumeHp {
         coefficient_bp: BasisPoints,
         reference: StatReference,
-        #[serde(default)]
         can_kill: bool,
     },
     ApplyEffect {
@@ -282,7 +270,6 @@ pub enum SkillOperation {
     },
     RemoveEffects {
         polarity: EffectPolarity,
-        #[serde(default = "default_one")]
         count: u16,
     },
     RemoveEffectsByTag {
@@ -325,7 +312,6 @@ pub enum SkillOperation {
         operations: Vec<SkillOperation>,
     },
     InstantDeath {
-        #[serde(default)]
         remove_beneficial_effects: bool,
     },
     Summon {
@@ -345,13 +331,14 @@ pub enum SkillOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DamageScaling {
     pub source: DamageScalingSource,
     pub coefficient_bp_per_unit: BasisPoints,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
+#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
 pub enum DamageScalingSource {
     TargetCount,
     TargetCountMinusOne,
@@ -365,16 +352,6 @@ pub enum DamageScalingSource {
 const fn default_true() -> bool {
     true
 }
-const fn default_chain() -> u16 {
-    1
-}
-const fn default_one() -> u16 {
-    1
-}
-const fn default_target_recipient() -> EffectRecipient {
-    EffectRecipient::TargetSide
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum StatReference {
@@ -401,7 +378,7 @@ pub enum EffectRecipient {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
+#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
 pub enum SkillCondition {
     Any {
         conditions: Vec<SkillCondition>,
@@ -501,6 +478,7 @@ pub enum DurationClock {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EffectSpec {
     pub effect_id: String,
     pub polarity: EffectPolarity,
@@ -508,73 +486,71 @@ pub struct EffectSpec {
     pub duration: u16,
     pub duration_clock: DurationClock,
     pub modifiers: StatModifiers,
-    #[serde(default)]
     pub tags: BTreeSet<String>,
-    #[serde(default)]
     pub stack_rule: StackRule,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub barrier: Option<BarrierSpec>,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub periodic: Option<PeriodicSpec>,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub charges: Option<u16>,
     /// Reduction applied to this effect's evasion probability after each
     /// successful evade. Some of Rou's evasion skills use this mechanic.
     pub evasion_decay_bp: BasisPoints,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub counter: Option<CounterSpec>,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub revive_hp_bp: Option<BasisPoints>,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub max_stacks: Option<u16>,
-    #[serde(default)]
     pub conditional_outgoing: Vec<ConditionalDamageModifier>,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub on_hit_received_allies: Option<Box<EffectSpec>>,
     /// Typed operations resolved with the defender as actor and attacker as target.
-    #[serde(default)]
     pub on_hit_received_operations: Vec<SkillOperation>,
-    #[serde(default)]
     pub on_turn_end_operations: Vec<SkillOperation>,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub aura_allies: Option<Box<EffectSpec>>,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub aura_opponents: Option<Box<EffectSpec>>,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub on_chain_dealt: Option<Box<ChainTriggerSpec>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BarrierSpec {
     pub coefficient_bp: BasisPoints,
     pub reference: StatReference,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PeriodicSpec {
     pub kind: DamageKind,
     pub coefficient_bp: BasisPoints,
     pub reference: StatReference,
-    #[serde(default = "default_one")]
     pub stacks: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CounterSpec {
     pub kind: DamageKind,
     pub coefficient_bp: BasisPoints,
     pub reference: StatReference,
-    #[serde(default)]
     pub target_all: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConditionalDamageModifier {
     pub condition: SkillCondition,
     pub amount_bp: BasisPoints,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ChainTriggerSpec {
     pub stack_effect: Box<EffectSpec>,
     pub threshold: u16,
@@ -582,7 +558,7 @@ pub struct ChainTriggerSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct StatModifiers {
     pub max_hp_flat: i64,
     pub max_hp_bp: BasisPoints,
@@ -633,16 +609,17 @@ pub enum StackRule {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct SourceRecord {
     pub source_id: String,
     pub source_url: String,
     pub observed_at: String,
     pub source_digest: String,
-    #[serde(default)]
     pub raw_payload: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MonsterDefinition {
     pub id: String,
     pub names: BTreeMap<String, String>,
@@ -650,13 +627,12 @@ pub struct MonsterDefinition {
     pub stats_by_level: BTreeMap<u8, Stats>,
     pub parts: Vec<MonsterPartDefinition>,
     pub skill_ids: Vec<String>,
-    #[serde(default)]
     pub immunities: BTreeSet<String>,
-    #[serde(default)]
     pub source: SourceRecord,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MonsterPartDefinition {
     pub id: String,
     pub position: Cell,
@@ -697,6 +673,7 @@ pub enum EquipmentStat {
 /// modifier record at import time, so the battle core never guesses a live
 /// game formula.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EquipmentDefinition {
     pub id: String,
     pub names: BTreeMap<String, String>,
@@ -706,6 +683,7 @@ pub struct EquipmentDefinition {
     pub slot: EquipmentSlot,
     /// Character restriction for exclusive gear. Crafted Legendary gear uses
     /// `None`.
+    #[serde(deserialize_with = "required_option")]
     pub owner_character_id: Option<String>,
     /// Fixed abilities, including the star-scaled exclusive ability, already
     /// materialized for every supported refinement score.
@@ -720,15 +698,17 @@ pub struct EquipmentDefinition {
         BTreeMap<u8, BTreeMap<EquipmentStat, StatModifiers>>,
     pub allowed_substats: Vec<EquipmentStat>,
     pub substat_modifiers: BTreeMap<EquipmentStat, StatModifiers>,
-    #[serde(default)]
     pub source: SourceRecord,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EquipmentLoadout {
     pub equipment_id: String,
     pub refinement_score: u8,
+    #[serde(deserialize_with = "required_option")]
     pub primary_stat: Option<EquipmentStat>,
+    #[serde(deserialize_with = "required_option")]
     pub secondary_stat: Option<EquipmentStat>,
     /// BrownDust2 UR equipment has exactly three independently rerollable
     /// secondary-stat slots. Duplicate stat kinds are legal.
@@ -764,6 +744,7 @@ pub enum CalculatorDefenseType {
 /// Account-wide collection bonuses used by all three current BD2DB
 /// calculators. Values are basis points.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CollectionBonus {
     pub max_hp_bp: BasisPoints,
     pub attack_bp: BasisPoints,
@@ -785,6 +766,7 @@ impl Default for CollectionBonus {
 /// Numeric result of BD2DB's external-buff picker. Keeping the normalized
 /// values makes builds portable without depending on a user's BD2DB account.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ExternalBuffSettings {
     pub attack_bonus_bp: BasisPoints,
     pub crit_rate_bp: BasisPoints,
@@ -795,6 +777,7 @@ pub struct ExternalBuffSettings {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct CalculatorTargetCondition {
     pub min_hp: i64,
     pub min_defense_bp: BasisPoints,
@@ -802,6 +785,7 @@ pub struct CalculatorTargetCondition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CalculatorGearFilters {
     pub exclusive: bool,
     pub ur4: bool,
@@ -824,6 +808,7 @@ impl Default for CalculatorGearFilters {
 /// calculators. They do not override the actual skill, target, or elemental
 /// rules executed by the battle simulator.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EquipmentCalculatorSettings {
     pub damage_type: CalculatorDamageType,
     pub elemental_advantage: bool,
@@ -850,6 +835,7 @@ impl Default for EquipmentCalculatorSettings {
 
 /// Every non-equipment input that BD2DB applies to a character build.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UnitBuildSettings {
     pub engraving_enabled: bool,
     pub awakening_enabled: bool,
@@ -889,17 +875,17 @@ impl UnitBuildSettings {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct Catalog {
     pub ruleset_id: String,
     pub characters: BTreeMap<String, CharacterDefinition>,
     pub costumes: BTreeMap<String, CostumeDefinition>,
     pub monsters: BTreeMap<String, MonsterDefinition>,
-    #[serde(default)]
     pub equipment: BTreeMap<String, EquipmentDefinition>,
     pub skills: BTreeMap<String, CostumeDefinition>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum BattleMode {
     Normal,
@@ -907,12 +893,16 @@ pub enum BattleMode {
     MonsterChaser,
 }
 
+/// Current maximum shared skill points for every implemented BD2 battle mode.
+pub const SP_CAP: i32 = 20;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ModeRules {
     pub mode: BattleMode,
     pub grid: GridDefinition,
     pub initial_sp: [i32; 2],
-    pub sp_cap: Option<i32>,
+    pub sp_cap: i32,
     pub recovery_after_team_turn: [i32; 2],
     pub first_side: Side,
     pub max_game_turns: u32,
@@ -927,7 +917,7 @@ impl ModeRules {
             mode: BattleMode::Normal,
             grid: GridDefinition::standard(),
             initial_sp: [15, 0],
-            sp_cap: None,
+            sp_cap: SP_CAP,
             recovery_after_team_turn: [0, 0],
             first_side: Side::Player,
             max_game_turns: 50,
@@ -942,7 +932,7 @@ impl ModeRules {
             mode: BattleMode::MirrorWar,
             grid: GridDefinition::standard(),
             initial_sp: [5, 6],
-            sp_cap: None,
+            sp_cap: SP_CAP,
             recovery_after_team_turn: [6, 6],
             first_side: Side::Player,
             max_game_turns: 50,
@@ -961,6 +951,7 @@ impl ModeRules {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UnitSetup {
     pub unit_id: UnitId,
     pub character_id: String,
@@ -990,6 +981,7 @@ pub struct UnitSetup {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CostumeLoadout {
     pub costume_id: String,
     pub enhancement: u8,
@@ -1005,6 +997,7 @@ pub struct CostumeLoadout {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BattleSetup {
     pub scenario_id: String,
     pub rules: ModeRules,
@@ -1014,6 +1007,7 @@ pub struct BattleSetup {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MonsterChaserSetup {
     pub monster_id: String,
     /// Cumulative damage thresholds displayed as each selectable boss level's HP.
@@ -1024,18 +1018,19 @@ pub struct MonsterChaserSetup {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ActiveEffect {
     pub instance_id: u64,
     pub source_unit_id: UnitId,
     pub spec: EffectSpec,
     pub remaining: u16,
-    #[serde(default)]
     pub barrier_remaining: i64,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub charges_remaining: Option<u16>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UnitState {
     pub id: UnitId,
     pub character_id: String,
@@ -1050,7 +1045,6 @@ pub struct UnitState {
     /// applied once while the unit is created.  Runtime-only modifiers such as
     /// damage reduction, evasion, SP/CT adjustment and chain rules must remain
     /// available to the battle resolver for the whole encounter.
-    #[serde(default)]
     pub passive_modifiers: StatModifiers,
     pub costume_loadout: Vec<CostumeLoadout>,
     pub cooldowns: BTreeMap<String, u16>,
@@ -1058,22 +1052,16 @@ pub struct UnitState {
     /// Remaining external energy guard configured through BD2DB's shield
     /// inputs. It is kept separate from skill effects so the exact normalized
     /// flat/percent source values remain a build input rather than a fake skill.
-    #[serde(default)]
     pub external_energy_guard: i64,
     pub ai_priority: Vec<String>,
-    #[serde(default = "default_party_no")]
     pub party_no: u8,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub hp_owner: Option<UnitId>,
-    #[serde(default)]
     pub weak_point_bonus_bp: BasisPoints,
-    #[serde(default)]
     pub is_summon: bool,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_option")]
     pub summoned_by: Option<UnitId>,
-    #[serde(default)]
     pub triggered_skill_uses: BTreeMap<String, u16>,
-    #[serde(default = "default_true")]
     pub can_act: bool,
 }
 
@@ -1085,6 +1073,7 @@ const fn default_potential_mask() -> u8 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TeamState {
     pub side: Side,
     pub sp: i32,
@@ -1093,6 +1082,7 @@ pub struct TeamState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MonsterChaserState {
     pub monster_id: String,
     pub selected_level: u8,
@@ -1107,6 +1097,7 @@ pub struct MonsterChaserState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BattleState {
     pub ruleset_id: String,
     pub scenario_id: String,
@@ -1122,12 +1113,15 @@ pub struct BattleState {
     pub event_log: Vec<BattleEvent>,
     pub damage_by_source: BTreeMap<UnitId, i64>,
     pub rng: crate::DeterministicRng,
+    #[serde(deserialize_with = "required_option")]
     pub terminal: Option<TerminalResult>,
+    #[serde(deserialize_with = "required_option")]
     pub monster_chaser: Option<MonsterChaserState>,
     pub next_effect_instance_id: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TeamTurnPlan {
     pub side: Side,
     pub order: Vec<UnitId>,
@@ -1137,7 +1131,7 @@ pub struct TeamTurnPlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
+#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
 pub enum UnitCommand {
     NormalAttack,
     Knockback,
@@ -1263,6 +1257,7 @@ pub enum BattleEventKind {
         to: Cell,
     },
     CollisionDamage {
+        source_id: UnitId,
         moving_id: UnitId,
         occupant_id: UnitId,
         amount: i64,
@@ -1317,6 +1312,7 @@ pub struct TerminalResult {
     pub reason: String,
     pub turns: u32,
     pub damage_by_source: BTreeMap<String, i64>,
+    #[serde(deserialize_with = "required_option")]
     pub defeated_boss_level: Option<u8>,
     pub carry_damage: i64,
     pub mode_score: i64,

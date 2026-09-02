@@ -122,7 +122,7 @@ function buildMonsterChaser(monsterId, startingLevel) {
       mode: "MONSTER_CHASER",
       grid: { rows: 3, depths: 4, deployment_limit: 5, blocked: [] },
       initial_sp: [raw.environment.spSetting.start, 0],
-      sp_cap: null,
+      sp_cap: 20,
       recovery_after_team_turn: [0, 0],
       first_side: "PLAYER",
       max_game_turns: 20,

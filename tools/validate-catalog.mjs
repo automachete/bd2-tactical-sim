@@ -84,23 +84,35 @@ function tagged(evidence, tag) {
   return evidence.tags.has(tag);
 }
 
-function rawPercent(value) {
-  return Math.round(Number(String(value ?? "0").replace(/[％%]/g, "")) * 100);
+function rawNumber(value, label) {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    throw new Error(`missing ${label}`);
+  }
+  const parsed = Number(String(value).replace(/[％%,]/g, ""));
+  if (!Number.isFinite(parsed)) throw new Error(`invalid ${label}: ${String(value)}`);
+  return parsed;
 }
 
-function rawInteger(value) {
-  const parsed = Number.parseInt(String(value ?? "0").replaceAll(",", ""), 10);
-  return Number.isFinite(parsed) ? parsed : 0;
+function rawPercent(value, label = "percentage") {
+  return Math.round(rawNumber(value, label) * 100);
+}
+
+function rawInteger(value, label = "integer") {
+  const parsed = rawNumber(value, label);
+  if (!Number.isInteger(parsed)) throw new Error(`non-integer ${label}: ${String(value)}`);
+  return parsed;
 }
 
 function rawElement(value) {
   const values = { "火": "FIRE", "水": "WATER", "風": "WIND", "光": "LIGHT", "闇": "DARK", "暗": "DARK" };
-  return Object.hasOwn(values, value) ? values[value] : undefined;
+  if (!Object.hasOwn(values, value)) throw new Error(`unknown element: ${String(value)}`);
+  return values[value];
 }
 
 function rawAttackType(value) {
   const values = { "物": "PHYSICAL", "魔": "MAGICAL" };
-  return Object.hasOwn(values, value) ? values[value] : undefined;
+  if (!Object.hasOwn(values, value)) throw new Error(`unknown attack type: ${String(value)}`);
+  return values[value];
 }
 
 function rawSelector(value) {
@@ -116,15 +128,19 @@ function rawSelector(value) {
     "直擊": "FRONT",
   };
   const label = String(value ?? "").trim();
-  return Object.hasOwn(values, label) ? values[label] : undefined;
+  if (!Object.hasOwn(values, label)) throw new Error(`unknown target selector: ${label}`);
+  return values[label];
 }
 
 function rawRangeCode(value) {
-  return String(value ?? "").match(/(?:^|_)(all|\d{3})$/)?.[1];
+  const match = String(value ?? "").match(/(?:^|_)(all|\d{3})$/);
+  if (!match) throw new Error(`unknown range code: ${String(value)}`);
+  return match[1];
 }
 
 function resolvedSourceVariant(raw, enhancement, burstLevel, potentialMask) {
-  const level = { ...(raw.level?.[enhancement] ?? {}) };
+  if (!raw.level?.[enhancement]) throw new Error(`missing source enhancement ${enhancement}`);
+  const level = { ...raw.level[enhancement] };
   let spCost = rawInteger(level.SP);
   let cooldown = rawInteger(level.CD);
   let range = rawRangeCode(raw.range);
@@ -132,19 +148,35 @@ function resolvedSourceVariant(raw, enhancement, burstLevel, potentialMask) {
   for (const stage of (raw.burst ?? []).filter((entry) => Number(entry.level) <= burstLevel)) {
     spCost += rawInteger(stage.spCost);
     for (const item of [...(stage.switches ?? []), ...(stage.extraEffects ?? []).flatMap((extra) => extra.switches ?? [])]) {
-      level[item.target] = Number(level[item.target] ?? 0) + Number(item.value ?? 0);
+      if (item.target === "CD") continue;
+      if (!Object.hasOwn(level, item.target)) throw new Error(`missing switched scalar ${item.target}`);
+      level[item.target] = rawNumber(level[item.target], `scalar ${item.target}`)
+        + rawNumber(item.value, `switch ${item.target}`);
     }
     if (stage.type === "Plus" && stage.value) activeText.push(stage.value);
     for (const extra of stage.extraEffects ?? []) {
       if (extra.type === "Plus" && extra.value) activeText.push(extra.value);
       if (extra.type === "Range") range = rawRangeCode(extra.value);
-      if (extra.type === "Cooldown") cooldown = Math.max(0, cooldown - rawInteger(extra.value));
+      if (extra.type === "Cooldown") {
+        const reductions = (extra.switches ?? [])
+          .filter((item) => item.target === "CD")
+          .map((item) => rawInteger(item.value, "burst cooldown switch"));
+        const reduction = reductions.length > 0
+          ? reductions.reduce((sum, value) => sum + value, 0)
+          : rawInteger(extra.value, "burst cooldown");
+        cooldown = Math.max(0, cooldown - reduction);
+      }
     }
     if (stage.type === "Cooldown") cooldown = Math.max(0, cooldown - rawInteger(String(stage.value ?? "").match(/減少\s*(\d+)/)?.[1]));
   }
   for (const [index, potential] of (raw.skillPotential ?? []).entries()) {
     if ((potentialMask & (1 << index)) === 0) continue;
-    for (const item of potential.switches ?? []) level[item.target] = Number(level[item.target] ?? 0) + Number(item.value ?? 0);
+    for (const item of potential.switches ?? []) {
+      if (item.target === "CD") continue;
+      if (!Object.hasOwn(level, item.target)) throw new Error(`missing switched scalar ${item.target}`);
+      level[item.target] = rawNumber(level[item.target], `scalar ${item.target}`)
+        + rawNumber(item.value, `switch ${item.target}`);
+    }
     if (potential.type === "Plus" && potential.value) activeText.push(potential.value);
     if (potential.type === "Range") range = rawRangeCode(potential.value);
     if (potential.type === "Rhombus") spCost -= rawInteger(String(potential.value ?? "").match(/減少\s*(\d+)/)?.[1]);
@@ -165,7 +197,8 @@ function rawKnockbackDirection(value) {
     "左前": "DOWN_FRONT",
   };
   const label = String(value ?? "").trim();
-  return Object.hasOwn(values, label) ? values[label] : undefined;
+  if (!Object.hasOwn(values, label)) throw new Error(`unknown knockback direction: ${label}`);
+  return values[label];
 }
 
 function rawStatModifiers(entries) {

@@ -402,14 +402,51 @@ function transformEquipment(rawEquipment, equipmentI18n, tables, source, fiveSta
   return { definitions, oracleCases };
 }
 
-function percent(value) {
-  if (value === undefined || value === null || value === "") return 0;
-  return Math.round(Number(String(value).replace(/[％%]/g, "")) * 100);
+function finiteNumber(value, label) {
+  if (value === undefined || value === null || value === "") {
+    throw new Error(`missing ${label}`);
+  }
+  const parsed = Number(String(value).replace(/[％%,]/g, ""));
+  if (!Number.isFinite(parsed)) throw new Error(`invalid ${label}: ${value}`);
+  return parsed;
 }
 
-function integer(value) {
-  const parsed = Number.parseInt(String(value ?? "0").replaceAll(",", ""), 10);
-  return Number.isFinite(parsed) ? parsed : 0;
+function percent(value, label = "percentage") {
+  return Math.round(finiteNumber(value, label) * 100);
+}
+
+function integer(value, label = "integer") {
+  const parsed = finiteNumber(value, label);
+  if (!Number.isInteger(parsed)) throw new Error(`non-integer ${label}: ${value}`);
+  return parsed;
+}
+
+function requiredText(value, label) {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`missing or invalid ${label}`);
+  }
+  return value;
+}
+
+function optionalLocalizedText(locale, value, label) {
+  if (value === undefined || value === null || value === "") return {};
+  return { [locale]: requiredText(value, label) };
+}
+
+function assertSerializableData(value, path = "$") {
+  if (value === undefined) throw new Error(`${path} is undefined`);
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    throw new Error(`${path} is not a finite number`);
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertSerializableData(item, `${path}[${index}]`));
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      assertSerializableData(item, `${path}.${key}`);
+    }
+  }
 }
 
 function element(value) {
@@ -523,7 +560,26 @@ function rangeOffsets(ranges, code) {
 
 function scalar(level, token) {
   const key = String(token ?? "").replace(/[{}]/g, "");
-  return level[key] === undefined ? Number(key) : Number(level[key]);
+  if (/^[A-Z]+\d+$/.test(key)) {
+    if (!Object.hasOwn(level, key)) throw new Error(`missing skill scalar: ${key}`);
+    return finiteNumber(level[key], `skill scalar ${key}`);
+  }
+  return finiteNumber(key, "literal skill scalar");
+}
+
+function applyScalarSwitches(level, switches, label) {
+  if (!Array.isArray(switches)) throw new Error(`${label} switches must be an array`);
+  for (const item of switches) {
+    const target = String(item?.target ?? "");
+    if (!target) throw new Error(`${label} contains a switch without a target`);
+    // CD switches encode a cooldown reduction, not an additive skill scalar.
+    if (target === "CD") continue;
+    if (!Object.hasOwn(level, target)) {
+      throw new Error(`${label} references missing skill scalar ${target}`);
+    }
+    level[target] = finiteNumber(level[target], `${label} ${target}`)
+      + finiteNumber(item.value, `${label} ${target} delta`);
+  }
 }
 
 function effect(effectId, polarity, recipient, duration, modifiers = {}, tags = [], extra = {}) {
@@ -1333,12 +1389,25 @@ function transformCharacters(rawCharacters, costumeI18n, ranges, source) {
           for (const stage of burstStages.filter((stage) => stage.level <= burstLevel)) {
             appliedStages.push(stage);
             extraSp += integer(stage.spCost);
-            for (const item of [...(stage.switches ?? []), ...(stage.extraEffects ?? []).flatMap((extra) => extra.switches ?? [])]) {
-              burstResolvedLevel[item.target] = Number(burstResolvedLevel[item.target] ?? 0) + Number(item.value ?? 0);
-            }
+            applyScalarSwitches(
+              burstResolvedLevel,
+              [...(stage.switches ?? []), ...(stage.extraEffects ?? []).flatMap((extra) => extra.switches ?? [])],
+              `${costume.costumeId} burst ${stage.level}`,
+            );
             for (const extra of stage.extraEffects ?? []) {
               if (extra.type === "Range" && extra.value) burstRange = rangeCode(extra.value);
-              if (extra.type === "Cooldown") burstCooldown = Math.max(0, burstCooldown - integer(extra.value));
+              if (extra.type === "Cooldown") {
+                const switchReductions = (extra.switches ?? [])
+                  .filter((item) => item.target === "CD")
+                  .map((item) => integer(item.value, `${costume.costumeId} burst cooldown switch`));
+                const reduction = switchReductions.length > 0
+                  ? switchReductions.reduce((sum, value) => sum + value, 0)
+                  : integer(extra.value, `${costume.costumeId} burst cooldown`);
+                burstCooldown = Math.max(
+                  0,
+                  burstCooldown - reduction,
+                );
+              }
             }
             if (stage.type === "Cooldown") {
               const reduction = String(stage.value ?? "").match(/減少\s*(\d+)/);
@@ -1353,7 +1422,11 @@ function transformCharacters(rawCharacters, costumeI18n, ranges, source) {
             const selectedPotentialExtras = [];
             for (const [potentialIndex, potential] of (costume.skillPotential ?? []).entries()) {
               if ((potentialMask & (1 << potentialIndex)) === 0) continue;
-              for (const item of potential.switches ?? []) resolvedLevel[item.target] = Number(resolvedLevel[item.target] ?? 0) + Number(item.value ?? 0);
+              applyScalarSwitches(
+                resolvedLevel,
+                potential.switches ?? [],
+                `${costume.costumeId} potential ${potentialIndex}`,
+              );
               if (potential.type === "Range") resolvedRange = rangeCode(potential.value);
               if (potential.type === "Rhombus") potentialSpDelta -= integer(String(potential.value ?? "").match(/減少\s*(\d+)/)?.[1]);
               if (potential.type === "Cooldown") cooldown = Math.max(0, cooldown - integer(String(potential.value ?? "").match(/減少\s*(\d+)/)?.[1]));
@@ -1377,6 +1450,9 @@ function transformCharacters(rawCharacters, costumeI18n, ranges, source) {
               executable: variantDiagnostics.length === 0 && compiled.operations.length > 0,
               compile_diagnostics: variantDiagnostics,
               preemptive: String(costume.tags ?? "").split(",").includes("先發制人"),
+              activation_condition: null,
+              max_uses_per_party: null,
+              ai_sequence_index: null,
               description_ja: resolvedJapaneseDescription(localized, resolvedLevel, burstLevel, potentialMask),
             });
           }
@@ -1485,6 +1561,8 @@ function transformFiend(raw, source) {
           op: "DEAL_DAMAGE",
           kind: damageKind,
           coefficient_bp: percent(coefficients[0]),
+          reference: damageKind === "MAGICAL" ? "MAGIC" : "ATTACK",
+          scaling: null,
           hits: hitDamage.length,
           can_crit: false,
           can_evade: true,
@@ -1493,7 +1571,7 @@ function transformFiend(raw, source) {
         }, group.groupId);
       } else {
         for (const hit of hitDamage) {
-          schedule({ op: "DEAL_DAMAGE", kind: damageKind, coefficient_bp: percent(hit.damage), hits: 1, can_crit: false, can_evade: true, chain_per_hit: 1, main_target_bonus_bp: 0 }, group.groupId);
+          schedule({ op: "DEAL_DAMAGE", kind: damageKind, coefficient_bp: percent(hit.damage), reference: damageKind === "MAGICAL" ? "MAGIC" : "ATTACK", scaling: null, hits: 1, can_crit: false, can_evade: true, chain_per_hit: 1, main_target_bonus_bp: 0 }, group.groupId);
         }
       }
     }
@@ -1570,6 +1648,8 @@ function transformFiend(raw, source) {
         ai_sequence_index: skill.kind === "normal" ? integer(skill.sourceOrder) : null,
         description_ja: String(skill.localizedDescription?.ja ?? skill.localizedDescription?.["ja-JP"] ?? ""),
       }],
+      permanent_potential_modifiers: {},
+      bonding_modifiers: {},
       executable: diagnostics.length === 0,
       compile_diagnostics: diagnostics,
       source: { ...source, raw_payload: skill },
@@ -1641,14 +1721,43 @@ function transformSummons(rawSummons, ranges, source) {
         for (const operation of compiled.operations) if (operation.op === "DEAL_DAMAGE") operation.can_evade = false;
         compiled.operations.push({ op: "SELF_DESTRUCT" });
       }
-      variants.push({ enhancement, burst_level: 0, potential_mask: 0, sp_cost: integer(level.SP), cooldown: integer(level.CD), selector: selector(raw.target), fixed_target_cell: null, target_all: false, range_override: null, operations: compiled.operations, consume_remaining_sp: false, executable: compiled.diagnostics.length === 0 && compiled.operations.length > 0, compile_diagnostics: compiled.diagnostics, preemptive: false, description_ja: "" });
+      variants.push({
+        enhancement,
+        burst_level: 0,
+        potential_mask: 0,
+        // Summon skills are triggered operations and never consume the team's
+        // command SP or enter the costume cooldown cycle.
+        sp_cost: 0,
+        cooldown: 0,
+        selector: selector(raw.target),
+        fixed_target_cell: null,
+        target_all: false,
+        range_override: null,
+        operations: compiled.operations,
+        consume_remaining_sp: false,
+        executable: compiled.diagnostics.length === 0 && compiled.operations.length > 0,
+        compile_diagnostics: compiled.diagnostics,
+        preemptive: false,
+        activation_condition: null,
+        max_uses_per_party: null,
+        ai_sequence_index: null,
+        description_ja: "",
+      });
     }
     const code = rangeCode(raw.range);
     costumes[costumeId] = {
       id: costumeId, character_id: characterId,
-      names: { "zh-TW": raw.skillName ?? costumeId, ja: raw.costumeName_ja },
-      skill_names: { "zh-TW": raw.skillName ?? costumeId, ja: raw.skillName_ja },
+      names: {
+        "zh-TW": requiredText(raw.skillName, `${costumeId} skill name`),
+        ...optionalLocalizedText("ja", raw.costumeName_ja, `${costumeId} Japanese costume name`),
+      },
+      skill_names: {
+        "zh-TW": requiredText(raw.skillName, `${costumeId} skill name`),
+        ...optionalLocalizedText("ja", raw.skillName_ja, `${costumeId} Japanese skill name`),
+      },
       range: rangeOffsets(ranges, code), variants,
+      permanent_potential_modifiers: {},
+      bonding_modifiers: {},
       executable: variants.some((variant) => variant.executable), compile_diagnostics: [...new Set(variants.flatMap((variant) => variant.compile_diagnostics))],
       source: { ...source, raw_payload: raw },
     };
@@ -1734,6 +1843,7 @@ try {
   if (error?.code !== "ENOENT") throw error;
 }
 
+assertSerializableData(catalog);
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, `${JSON.stringify(catalog, null, 2)}\n`, "utf8");
 if (equipmentOraclePath) {
@@ -1787,6 +1897,7 @@ if (equipmentOraclePath) {
     equipment: transformedEquipment.definitions,
     cases: transformedEquipment.oracleCases,
   };
+  assertSerializableData(oracle);
   await mkdir(dirname(equipmentOraclePath), { recursive: true });
   await writeFile(equipmentOraclePath, `${JSON.stringify(oracle, null, 2)}\n`, "utf8");
 }

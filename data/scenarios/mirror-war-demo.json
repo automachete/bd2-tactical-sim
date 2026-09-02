@@ -4,7 +4,7 @@
     "mode": "MIRROR_WAR",
     "grid": { "rows": 3, "depths": 4, "deployment_limit": 5, "blocked": [] },
     "initial_sp": [5, 6],
-    "sp_cap": null,
+    "sp_cap": 20,
     "recovery_after_team_turn": [6, 6],
     "first_side": "PLAYER",
     "max_game_turns": 50,
