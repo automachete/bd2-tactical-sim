@@ -16,9 +16,9 @@
     "allow_manual_commands": [false, false]
   },
   "units": [
-    { "unit_id": 1, "character_id": "Michaela", "side": "PLAYER", "position": { "row": 0, "depth": 1 }, "costume_loadout": [{ "costume_id": "Michaela_2", "enhancement": 5, "burst_level": 0 }], "ai_priority": ["Michaela_2"] },
-    { "unit_id": 2, "character_id": "Wilhelmina", "side": "PLAYER", "position": { "row": 2, "depth": 0 }, "costume_loadout": [{ "costume_id": "Wilhelmina_1", "enhancement": 5, "burst_level": 0 }], "ai_priority": ["Wilhelmina_1"] },
-    { "unit_id": 101, "character_id": "Loen", "side": "ENEMY", "position": { "row": 0, "depth": 0 }, "costume_loadout": [{ "costume_id": "Loen_1", "enhancement": 5, "burst_level": 0 }], "ai_priority": ["Loen_1"] },
-    { "unit_id": 102, "character_id": "Wilhelmina", "side": "ENEMY", "position": { "row": 2, "depth": 0 }, "costume_loadout": [{ "costume_id": "Wilhelmina_1", "enhancement": 5, "burst_level": 0 }], "ai_priority": ["Wilhelmina_1"] }
+    { "unit_id": 1, "character_id": "Michaela", "side": "PLAYER", "position": { "row": 0, "depth": 1 }, "costume_loadout": [{ "costume_id": "Michaela_2", "enhancement": 5, "burst_level": 0, "permanent_potential_enabled": true }], "ai_priority": ["Michaela_2"] },
+    { "unit_id": 2, "character_id": "Wilhelmina", "side": "PLAYER", "position": { "row": 2, "depth": 0 }, "costume_loadout": [{ "costume_id": "Wilhelmina_1", "enhancement": 5, "burst_level": 0, "permanent_potential_enabled": true }], "ai_priority": ["Wilhelmina_1"] },
+    { "unit_id": 101, "character_id": "Loen", "side": "ENEMY", "position": { "row": 0, "depth": 0 }, "costume_loadout": [{ "costume_id": "Loen_1", "enhancement": 5, "burst_level": 0, "permanent_potential_enabled": true }], "ai_priority": ["Loen_1"] },
+    { "unit_id": 102, "character_id": "Wilhelmina", "side": "ENEMY", "position": { "row": 2, "depth": 0 }, "costume_loadout": [{ "costume_id": "Wilhelmina_1", "enhancement": 5, "burst_level": 0, "permanent_potential_enabled": true }], "ai_priority": ["Wilhelmina_1"] }
   ]
 }

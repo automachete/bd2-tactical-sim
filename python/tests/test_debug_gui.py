@@ -578,7 +578,7 @@ def test_builder_rejects_malformed_nested_values_instead_of_coercing_them() -> N
     catalog = DebugSetupCatalog(DATABASE, SCENARIOS)
     preset = catalog.public_payload()["presets"]["NORMAL"]
     preset["player_units"][0]["costumes"][0]["permanent_potential_enabled"] = "false"
-    with pytest.raises(ValueError, match="permanent_potential_enabled must be a boolean"):
+    with pytest.raises(ValueError, match="fixed as unlocked"):
         catalog.build_setup(preset)
 
     preset = catalog.public_payload()["presets"]["NORMAL"]
@@ -666,7 +666,7 @@ def test_gui_payload_preserves_the_exact_editor_setup_and_mcts_configuration() -
             **unit["costumes"][0],
             "enhancement": 0,
             "potential_mask": 0,
-            "permanent_potential_enabled": False,
+            "permanent_potential_enabled": True,
         }
     ]
     unit["build_settings"]["external_buffs"]["crit_damage_bp"] = 1234
@@ -681,9 +681,67 @@ def test_gui_payload_preserves_the_exact_editor_setup_and_mcts_configuration() -
     assert len(restored["costumes"]) == 1
     assert restored["costumes"][0]["enhancement"] == 0
     assert restored["costumes"][0]["potential_mask"] == 0
-    assert restored["costumes"][0]["permanent_potential_enabled"] is False
+    assert restored["costumes"][0]["permanent_potential_enabled"] is True
     assert restored["build_settings"]["external_buffs"]["crit_damage_bp"] == 1234
     assert payload["state"]["units"]["1"]["base_stats"]["crit_damage_bp"] >= 1234
+
+
+def test_gui_saves_and_reloads_strict_training_scenario(tmp_path: Path) -> None:
+    saved_directory = tmp_path / "saved"
+    session = GuiSession(
+        DATABASE,
+        SCENARIOS,
+        71,
+        FAST_MCTS,
+        saved_setup_directory=saved_directory,
+    )
+    request = session.catalog.public_payload()["presets"]["NORMAL"]
+    unit = request["player_units"][0]
+    costume = unit["costumes"][0]
+    costume.update(enhancement=2, burst_level=0, potential_mask=0b101)
+    unit["build_settings"]["awakening_enabled"] = False
+    equipment = next(
+        item
+        for item in session.catalog.equipment.values()
+        if item["kind"] == "CRAFTED_LEGENDARY" and item["allowed_substats"]
+    )
+    unit["equipment"] = {
+        equipment["slot"]: {
+            "equipment_id": equipment["id"],
+            "refinement_score": 21,
+            "primary_stat": None,
+            "secondary_stat": None,
+            "substats": [equipment["allowed_substats"][0]["key"]] * 3,
+        }
+    }
+
+    response = session.save_setup("涙ノード検証", request)
+
+    assert response["saved"] == {
+        "name": "涙ノード検証",
+        "scenario": "涙ノード検証.json",
+    }
+    scenario_path = saved_directory / "涙ノード検証.json"
+    canonical = json.loads(scenario_path.read_text(encoding="utf-8"))
+    saved_unit = canonical["units"][0]
+    assert saved_unit["costume_loadout"][0]["enhancement"] == 2
+    assert saved_unit["costume_loadout"][0]["burst_level"] == 0
+    assert saved_unit["costume_loadout"][0]["potential_mask"] == 0b101
+    assert saved_unit["costume_loadout"][0]["permanent_potential_enabled"] is True
+    assert saved_unit["build_settings"]["awakening_enabled"] is False
+    assert saved_unit["equipment"] == unit["equipment"]
+    Simulator(str(DATABASE), scenario_path.read_text(encoding="utf-8"), 99)
+
+    loaded = session.load_setup("涙ノード検証")
+    restored = loaded["setup"]["player_units"][0]
+    assert loaded["loaded_setup"] == "涙ノード検証"
+    assert restored["costumes"][0]["potential_mask"] == 0b101
+    assert restored["build_settings"]["awakening_enabled"] is False
+    assert restored["equipment"] == unit["equipment"]
+    assert all(item["permanent_potential_enabled"] is True for item in restored["costumes"])
+
+    with pytest.raises(ValueError, match="forbidden path character"):
+        session.save_setup("../outside", request)
 
 
 def test_gui_turn_is_atomic_when_automatic_opponent_fails(monkeypatch: pytest.MonkeyPatch) -> None:

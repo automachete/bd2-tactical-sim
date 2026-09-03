@@ -289,6 +289,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .formation-toolbar .monster-option { grid-column: 3; }
 .formation-toolbar .ruleset { grid-column: 4; }
 .formation-toolbar #restore-preset { grid-column: 5; }
+.saved-setup-toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) auto auto; gap: 10px; align-items: end; margin: -4px 18px 10px; padding: 10px; background: #101a1f; border: 1px solid #ffffff1f; border-radius: 6px; }
+.saved-setup-toolbar label { color: var(--muted); font-size: 8px; }
+.saved-setup-toolbar button { min-height: 32px; }
+.saved-setup-toolbar > small { grid-column: 1 / -1; min-height: 12px; color: #8b9ca3; font-size: 8px; }
 input, select, textarea { width: 100%; margin-top: 4px; padding: 7px; background: #061014; border: 1px solid #ffffff32; color: white; }
 .ruleset { align-self: center; color: #6f7b78; font-size: 8px; text-align: right; }
 .mode-help { margin: 0 18px 10px; padding: 7px 10px; background: #071115; color: var(--muted); font-size: 9px; }
@@ -332,11 +336,14 @@ input, select, textarea { width: 100%; margin-top: 4px; padding: 7px; background
 .start-button span { margin-left: 18px; color: #8c6912; font-size: 18px; }
 .advanced-popover { position: fixed; inset: 50% auto auto 50%; z-index: 120; width: min(590px, 88vw); max-height: 76vh; overflow: auto; padding: 14px; transform: translate(-50%, -50%); background: #101b20; border: 1px solid var(--accent); box-shadow: 0 22px 70px #000; }
 .advanced-top { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
-.costume-line { display: grid; grid-template-columns: 22px minmax(150px, 1fr) 54px 54px 54px 22px; gap: 5px; align-items: center; padding: 4px 0; font-size: 8px; }
+.costume-line { display: grid; grid-template-columns: 22px minmax(150px, 1fr) 54px 54px 96px; gap: 5px; align-items: center; padding: 4px 0; font-size: 8px; }
 .costume-line-heading { color: var(--muted); font-size: 9px; }
 .costume-line-heading span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
 .costume-line-heading span:nth-child(2) { text-align: left; }
 .costume-line input, .costume-line select { margin: 0; padding: 4px; }
+.goddess-tear-toggles { display: grid; grid-template-columns: repeat(3, 24px); justify-content: center; gap: 5px; }
+.goddess-tear-toggles input { width: 22px; height: 22px; accent-color: #8b7cff; cursor: pointer; }
+.goddess-tear-toggles input:disabled { cursor: not-allowed; opacity: .3; }
 .inline-setting { display: grid; grid-template-columns: 130px 1fr; align-items: center; margin-top: 8px; font-size: 9px; }
 .inline-setting select { margin: 0; }
 .equipment-editor { display: block; margin-top: 9px; color: var(--muted); font-size: 9px; }
@@ -348,7 +355,7 @@ input, select, textarea { width: 100%; margin-top: 4px; padding: 7px; background
 .character-search input { margin: 0; }
 .character-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px; max-height: 60vh; overflow: auto; padding: 0 16px 16px; }
 .character-option { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 8px; align-items: center; min-width: 0; padding: 7px; background: #142227; border: 1px solid #ffffff2d; text-align: left; }
-.character-option:hover { border-color: var(--accent); background: #252a21; }
+.character-option:hover { border-color: var(--element-color); background: #252a21; }
 .character-option b, .character-option small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .character-option b { font-size: 10px; }
 .character-option small { margin-top: 3px; color: var(--muted); font-size: 8px; }
@@ -480,7 +487,7 @@ button { border-radius: 6px; }
 .order-card, .enemy-card, .roster-chip, .character-option, .menu-list button { background: #292929; border-color: #ffffff12; border-radius: 8px; }
 .order-card:hover, .order-card.selected { background: var(--element-surface); border-color: var(--element-color); }
 .command-card:hover, .command-card.selected { background: #333333; border-color: var(--selection-accent); }
-.character-option:hover { background: #333333; border-color: var(--accent); }
+.character-option:hover { background: #333333; border-color: var(--element-color); }
 .order-number { background: var(--accent-strong); color: white; }
 .small-emblem, .command-glyph { background: #3a3a3a; border-color: #ffffff1a; border-radius: 6px; }
 .field-cell, .formation-cell,

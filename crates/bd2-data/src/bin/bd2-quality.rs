@@ -699,7 +699,7 @@ fn execute_variant(
                     enhancement: variant.enhancement,
                     burst_level: variant.burst_level,
                     potential_mask: variant.potential_mask,
-                    permanent_potential_enabled: false,
+                    permanent_potential_enabled: true,
                     costume_link_target: None,
                 }],
             ),

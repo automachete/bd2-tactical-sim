@@ -130,6 +130,13 @@
           <span class="ruleset" id="ruleset">—</span>
           <button class="secondary-button" id="restore-preset" type="button" data-i18n="preparation.restore">初期編成へ戻す</button>
         </div>
+        <div class="saved-setup-toolbar" aria-label="保存済み編成" data-i18n-aria="saved.aria">
+          <label><span data-i18n="saved.name">編成名</span><input id="saved-setup-name" type="text" maxlength="80" autocomplete="off" /></label>
+          <label><span data-i18n="saved.list">保存済み編成</span><select id="saved-setup-list"><option value="" data-i18n="saved.none">未選択</option></select></label>
+          <button class="secondary-button" id="save-setup" type="button" data-testid="save-setup" data-i18n="saved.save">編成を保存</button>
+          <button class="secondary-button" id="load-setup" type="button" data-testid="load-setup" data-i18n="saved.load">編成を読込</button>
+          <small id="saved-setup-path" aria-live="polite"></small>
+        </div>
         <p class="mode-help" id="mode-help"></p>
         <section class="golden-settings hidden" id="golden-settings" data-testid="golden-settings">
           <header><div><small data-i18n="golden.caption">シーズンルール</small><b id="golden-season">—</b></div><span id="golden-rule-summary">—</span></header>

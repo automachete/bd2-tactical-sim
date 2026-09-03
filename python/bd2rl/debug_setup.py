@@ -234,6 +234,14 @@ class DebugSetupCatalog:
                 "max_enhancement": int(maximum["enhancement"]),
                 "max_burst_level": int(maximum["burst_level"]),
                 "max_potential_mask": int(maximum["potential_mask"]),
+                "goddess_tear_nodes": [
+                    {
+                        "index": index + 1,
+                        "bit": 1 << index,
+                        "available": bool(int(maximum["potential_mask"]) & (1 << index)),
+                    }
+                    for index in range(3)
+                ],
                 "sp_cost": int(maximum["sp_cost"]),
                 "cooldown": int(maximum["cooldown"]),
                 "selector": str(maximum["selector"]),
@@ -570,9 +578,9 @@ class DebugSetupCatalog:
                             if loadout
                             else costume["max_potential_mask"]
                         ),
-                        "permanent_potential_enabled": (
-                            loadout.get("permanent_potential_enabled", True) if loadout else True
-                        ),
+                        # Non-skill potential nodes do not consume Goddess Tears and
+                        # are always considered unlocked by the simulator build.
+                        "permanent_potential_enabled": True,
                         "enabled": loadout is not None,
                     }
                 )
@@ -594,7 +602,7 @@ class DebugSetupCatalog:
                     "enhancement": loadout["enhancement"],
                     "burst_level": loadout["burst_level"],
                     "potential_mask": loadout.get("potential_mask", 7),
-                    "permanent_potential_enabled": loadout.get("permanent_potential_enabled", True),
+                    "permanent_potential_enabled": True,
                 }
                 for loadout in unit["costume_loadout"]
             ]
@@ -789,16 +797,20 @@ class DebugSetupCatalog:
                 raise ValueError(f"invalid burst level for {costume_id}")
             if not 0 <= potential <= 7:
                 raise ValueError(f"invalid potential mask for {costume_id}")
+            if value.get("permanent_potential_enabled", True) is not True:
+                raise ValueError(
+                    "non-Tear potential stats are fixed as unlocked; "
+                    "permanent_potential_enabled must be true"
+                )
             result.append(
                 {
                     "costume_id": costume_id,
                     "enhancement": enhancement,
                     "burst_level": burst,
                     "potential_mask": potential,
-                    "permanent_potential_enabled": _strict_bool(
-                        value.get("permanent_potential_enabled", True),
-                        "permanent_potential_enabled",
-                    ),
+                    # Only the three skill nodes represented by potential_mask are
+                    # configurable. All non-Tear stat nodes are fixed as unlocked.
+                    "permanent_potential_enabled": True,
                     "costume_link_target": None,
                 }
             )

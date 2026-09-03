@@ -1,7 +1,12 @@
 import { createRequire } from "node:module";
+import { rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const toolsRequire = createRequire(new URL("../../../tools/package.json", import.meta.url));
 const { expect, test } = toolsRequire("@playwright/test");
+const savedE2eSetup = fileURLToPath(new URL("../../../data/scenarios/saved/e2e-tear-settings.json", import.meta.url));
+
+test.afterEach(() => rmSync(savedE2eSetup, { force: true }));
 
 const startMode = async (request, mode = "NORMAL") => {
   const catalogResponse = await request.get("/api/catalog");
@@ -80,6 +85,47 @@ test("initialization and a full rerender produce no browser errors", async ({ pa
 test("player reservation exposes no wait action", async ({ page }) => {
   await expect(page.locator("#costume-strip [data-command-type='WAIT']")).toHaveCount(0);
   await expect(page.locator("#costume-strip")).not.toContainText("待機");
+});
+
+test("three Goddess Tear nodes and awakening are independently saved and restored", async ({ page }) => {
+  await page.locator("#open-formation").click();
+  await page.locator("#player-roster .roster-advanced").first().click();
+  const tears = page.locator(".advanced-costumes .goddess-tear-toggles input");
+  await expect(tears).toHaveCount(9);
+  await expect(page.getByTestId("goddess-tear-Loen_1-1")).toBeChecked();
+  await expect(page.getByTestId("goddess-tear-Loen_1-2")).toBeChecked();
+  await expect(page.getByTestId("goddess-tear-Loen_1-3")).toBeChecked();
+  await page.getByTestId("goddess-tear-Loen_1-2").uncheck();
+  await page.getByTestId("costume-enhancement-Loen_1").selectOption("2");
+  await page.locator(".build-settings-editor summary").click();
+  await page.getByTestId("build-awakening").uncheck();
+  await page.getByTestId("equipment-item-WEAPON").selectOption({ index: 1 });
+  const savedEquipment = await page.getByTestId("equipment-item-WEAPON").inputValue();
+  expect(savedEquipment).not.toBe("");
+  await page.locator(".advanced-top .secondary-button").click();
+
+  await page.locator("#saved-setup-name").fill("e2e-tear-settings");
+  await page.getByTestId("save-setup").click();
+  await expect(page.locator("#saved-setup-list")).toHaveValue("e2e-tear-settings");
+
+  await page.locator("#player-roster .roster-advanced").first().click();
+  await page.getByTestId("goddess-tear-Loen_1-2").check();
+  await page.getByTestId("costume-enhancement-Loen_1").selectOption("5");
+  await page.locator(".build-settings-editor summary").click();
+  await page.getByTestId("build-awakening").check();
+  await page.getByTestId("equipment-item-WEAPON").selectOption("");
+  await page.locator(".advanced-top .secondary-button").click();
+  await page.getByTestId("load-setup").click();
+  await expect(page.locator("#saved-setup-path")).toContainText("読み込みました");
+
+  await page.locator("#player-roster .roster-advanced").first().click();
+  await expect(page.getByTestId("goddess-tear-Loen_1-1")).toBeChecked();
+  await expect(page.getByTestId("goddess-tear-Loen_1-2")).not.toBeChecked();
+  await expect(page.getByTestId("goddess-tear-Loen_1-3")).toBeChecked();
+  await expect(page.getByTestId("costume-enhancement-Loen_1")).toHaveValue("2");
+  await page.locator(".build-settings-editor summary").click();
+  await expect(page.getByTestId("build-awakening")).not.toBeChecked();
+  await expect(page.getByTestId("equipment-item-WEAPON")).toHaveValue(savedEquipment);
 });
 
 test("selected costume shows the resolved official Japanese description in the battle header", async ({ page }) => {

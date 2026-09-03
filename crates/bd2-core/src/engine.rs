@@ -297,6 +297,32 @@ impl BattleEngine {
         &self.state
     }
 
+    /// Immutable catalog backing this battle. Observation adapters use this
+    /// to attach exact command semantics to each masked action candidate.
+    pub fn catalog(&self) -> &Catalog {
+        &self.catalog
+    }
+
+    /// Effective combat stats after permanent build inputs and every active
+    /// runtime effect. This is the same calculation used by damage resolution.
+    pub fn effective_stats_for_unit(&self, unit_id: UnitId) -> Result<Stats> {
+        self.state
+            .units
+            .get(&unit_id)
+            .map(effective_stats)
+            .ok_or_else(|| BattleError::InvalidScenario(format!("unknown unit {unit_id}")))
+    }
+
+    /// Full runtime modifiers, including passive build modifiers and active
+    /// effects. Kept public so policy observations cannot drift from combat.
+    pub fn effective_modifiers_for_unit(&self, unit_id: UnitId) -> Result<StatModifiers> {
+        self.state
+            .units
+            .get(&unit_id)
+            .map(effective_modifiers)
+            .ok_or_else(|| BattleError::InvalidScenario(format!("unknown unit {unit_id}")))
+    }
+
     pub fn snapshot(&self) -> BattleState {
         self.state.clone()
     }
@@ -4416,6 +4442,12 @@ fn validate_setup(catalog: &Catalog, setup: &BattleSetup) -> Result<()> {
         resolve_equipment_modifiers(catalog, &unit.character_id, &unit.equipment)?;
         let mut costume_ids = BTreeSet::new();
         for loadout in &unit.costume_loadout {
+            if character.rarity == 5 && !loadout.permanent_potential_enabled {
+                return Err(BattleError::InvalidScenario(format!(
+                    "costume '{}' disables non-Goddess-Tear potential nodes for five-star character '{}'; those nodes are fixed as unlocked",
+                    loadout.costume_id, unit.character_id
+                )));
+            }
             if !costume_ids.insert(loadout.costume_id.as_str()) {
                 return Err(BattleError::InvalidScenario(format!(
                     "unit {} equips costume '{}' more than once",
@@ -6116,7 +6148,7 @@ mod tests {
                         enhancement: 5,
                         burst_level: 0,
                         potential_mask: 0,
-                        permanent_potential_enabled: false,
+                        permanent_potential_enabled: true,
                         costume_link_target: None,
                     }],
                     build_settings: UnitBuildSettings::unmodified(),
@@ -6577,6 +6609,17 @@ mod tests {
                 })
             ));
         }
+    }
+
+    #[test]
+    fn five_star_non_tear_potential_nodes_are_mandatory() {
+        let mut invalid = setup(BattleMode::Normal);
+        invalid.units[0].costume_loadout[0].permanent_potential_enabled = false;
+        assert!(matches!(
+            BattleEngine::new(catalog(), invalid, 1),
+            Err(BattleError::InvalidScenario(message))
+                if message.contains("non-Goddess-Tear potential nodes")
+        ));
     }
 
     #[test]
@@ -7610,7 +7653,7 @@ mod tests {
                 enhancement: 5,
                 burst_level: 0,
                 potential_mask: 0,
-                permanent_potential_enabled: false,
+                permanent_potential_enabled: true,
                 costume_link_target: None,
             }];
             battle.units[1].ai_priority = vec!["enemy_conditional".into()];

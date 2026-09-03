@@ -214,6 +214,12 @@ const numberSelect = (minimum, maximum, selected) => {
   return select;
 };
 
+const renderSavedSetups = (items = [], selected = "") => {
+  const select = $("#saved-setup-list");
+  select.replaceChildren(option("", t("saved.none"), !selected));
+  for (const item of items) select.append(option(item.name, item.name, item.name === selected));
+};
+
 const loadDraft = preset => {
   cancelRangePreview();
   editorDrag = null;
@@ -624,7 +630,7 @@ const renderCostumeEditor = (root, unit) => {
   link.append(option("", t("loadout.linkNone"), !unit.costume_link_target));
   const heading = document.createElement("div");
   heading.className = "costume-line costume-line-heading";
-  for (const label of [t("loadout.equipped"), t("loadout.costume"), t("loadout.enhancement"), t("loadout.burst"), t("loadout.potential"), t("loadout.permanentPotential")]) {
+  for (const label of [t("loadout.equipped"), t("loadout.costume"), t("loadout.enhancement"), t("loadout.burst"), t("loadout.goddessTears")]) {
     const cell = document.createElement("span");
     cell.textContent = label;
     cell.title = label;
@@ -669,19 +675,32 @@ const renderCostumeEditor = (root, unit) => {
     name.textContent = banned ? `${definition.name} · ${t("golden.bannedCostume")}` : definition.name;
     const enhancement = numberSelect(0, definition.max_enhancement, loadout.enhancement);
     enhancement.title = t("loadout.enhancement");
+    enhancement.dataset.testid = `costume-enhancement-${definition.id}`;
     enhancement.onchange = () => { loadout.enhancement = Number(enhancement.value); };
     const burst = numberSelect(0, definition.max_burst_level, loadout.burst_level);
     burst.title = t("loadout.burst");
+    burst.dataset.testid = `costume-burst-${definition.id}`;
     burst.onchange = () => { loadout.burst_level = Number(burst.value); };
-    const potential = numberSelect(0, 7, loadout.potential_mask);
-    potential.title = t("loadout.potential");
-    potential.onchange = () => { loadout.potential_mask = Number(potential.value); };
-    const permanent = document.createElement("input");
-    permanent.type = "checkbox";
-    permanent.checked = loadout.permanent_potential_enabled;
-    permanent.title = t("loadout.permanentPotential");
-    permanent.onchange = () => { loadout.permanent_potential_enabled = permanent.checked; };
-    line.append(enabled, name, enhancement, burst, potential, permanent);
+    const tears = document.createElement("span");
+    tears.className = "goddess-tear-toggles";
+    tears.setAttribute("role", "group");
+    tears.setAttribute("aria-label", t("loadout.goddessTearsFor", { name: definition.name }));
+    for (const node of definition.goddess_tear_nodes) {
+      const toggle = document.createElement("input");
+      toggle.type = "checkbox";
+      toggle.checked = Boolean(Number(loadout.potential_mask) & Number(node.bit));
+      toggle.disabled = !node.available;
+      toggle.dataset.testid = `goddess-tear-${definition.id}-${node.index}`;
+      toggle.setAttribute("aria-label", t("loadout.goddessTearNode", { number: node.index }));
+      toggle.onchange = () => {
+        const bit = Number(node.bit);
+        loadout.potential_mask = toggle.checked
+          ? Number(loadout.potential_mask) | bit
+          : Number(loadout.potential_mask) & ~bit;
+      };
+      tears.append(toggle);
+    }
+    line.append(enabled, name, enhancement, burst, tears);
     root.append(line);
     link.append(linkOption);
   });
@@ -1071,7 +1090,8 @@ const cleanUnit = unit => {
       enhancement: Number(item.enhancement),
       burst_level: Number(item.burst_level),
       potential_mask: Number(item.potential_mask),
-      permanent_potential_enabled: Boolean(item.permanent_potential_enabled),
+      // Non-Tear potential stats are part of the fixed Lv.100 build.
+      permanent_potential_enabled: true,
     })),
     costume_link_target: isGoldenDraft() ? null : unit.costume_link_target || null,
     equipment: isGoldenDraft() ? {} : clone(unit.equipment || {}),
@@ -2466,6 +2486,7 @@ const scheduleAutoTurn = () => {
 
 const renderBattle = data => {
   snapshot = data;
+  renderSavedSetups(data.saved_setups || [], data.loaded_setup || $("#saved-setup-list")?.value || "");
   if (data.state.terminal) {
     autoTurnEnabled = false;
     window.clearTimeout(autoTurnTimer);
@@ -2585,6 +2606,37 @@ $$('[data-add-side]').forEach(button => button.addEventListener("click", () => {
 $("#character-search").addEventListener("input", renderCharacterPicker);
 
 $("#restore-preset").addEventListener("click", () => loadPreset(draft.mode));
+$("#saved-setup-list").addEventListener("change", event => {
+  if (event.target.value) $("#saved-setup-name").value = event.target.value;
+});
+$("#save-setup").addEventListener("click", async () => {
+  try {
+    validateSetupControls();
+    const name = $("#saved-setup-name").value.trim();
+    if (!name) throw new Error(t("saved.nameRequired"));
+    const result = await api("/api/save-setup", { name, setup: startRequest() }, t("status.savingSetup"));
+    renderSavedSetups(result.saved_setups, result.saved.name);
+    $("#saved-setup-path").textContent = t("saved.saved", { name: result.saved.name, path: result.saved.scenario });
+  } catch (error) {
+    showError(error);
+  }
+});
+$("#load-setup").addEventListener("click", async () => {
+  try {
+    const name = $("#saved-setup-list").value || $("#saved-setup-name").value.trim();
+    if (!name) throw new Error(t("saved.nameRequired"));
+    const loaded = await api("/api/load-setup", { name }, t("status.loadingSetup"));
+    document.querySelector(".advanced-popover")?.remove();
+    loadDraft(loaded.setup);
+    $("#setup-seed").value = String(loaded.seed);
+    $("#mcts-simulations").value = String(loaded.mcts.simulations);
+    $("#saved-setup-name").value = name;
+    $("#saved-setup-path").textContent = t("saved.loaded", { name });
+    renderBattle(loaded);
+  } catch (error) {
+    showError(error);
+  }
+});
 $("#start-battle").addEventListener("click", async () => {
   try {
     validateSetupControls();

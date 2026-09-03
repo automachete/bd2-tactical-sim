@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import threading
 import webbrowser
 from http import HTTPStatus
@@ -13,6 +14,60 @@ from typing import Any
 from . import _native
 from .debug_setup import DebugSetupCatalog
 from .mcts import MctsConfig, MctsPlanner, MctsResult
+
+
+def _saved_setup_name(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ValueError("saved setup name must be a string")
+    name = value.strip()
+    if not name or len(name) > 80:
+        raise ValueError("saved setup name must contain 1 to 80 characters")
+    if name in {".", ".."} or any(character in name for character in "/\\:\0"):
+        raise ValueError("saved setup name contains a forbidden path character")
+    if any(ord(character) < 32 for character in name):
+        raise ValueError("saved setup name contains a control character")
+    return name
+
+
+class SavedSetupStore:
+    """Durable, strict BattleSetup files shared by the GUI and training CLI."""
+
+    def __init__(self, directory: Path) -> None:
+        self.directory = directory.resolve()
+        self.directory.mkdir(parents=True, exist_ok=True)
+
+    def list(self) -> list[dict[str, str]]:
+        return [
+            {"name": path.stem, "scenario": path.name}
+            for path in sorted(
+                self.directory.glob("*.json"), key=lambda value: value.name.casefold()
+            )
+            if path.is_file()
+        ]
+
+    def save(self, name: Any, setup: dict[str, Any]) -> dict[str, str]:
+        normalized = _saved_setup_name(name)
+        destination = self._path(normalized)
+        temporary = destination.with_suffix(".json.tmp")
+        body = json.dumps(setup, ensure_ascii=False, indent=2) + "\n"
+        temporary.write_text(body, encoding="utf-8", newline="\n")
+        os.replace(temporary, destination)
+        return {"name": normalized, "scenario": destination.name}
+
+    def load(self, name: Any) -> dict[str, Any]:
+        path = self._path(_saved_setup_name(name))
+        if not path.is_file():
+            raise ValueError(f"saved setup does not exist: {path.stem}")
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("saved setup must be a JSON object")
+        return value
+
+    def _path(self, name: str) -> Path:
+        path = (self.directory / f"{name}.json").resolve()
+        if path.parent != self.directory:
+            raise ValueError("saved setup path escapes its configured directory")
+        return path
 
 
 def _strict_int(value: Any, name: str) -> int:
@@ -128,10 +183,12 @@ class GuiSession:
         scenario_directory: Path,
         seed: int,
         mcts_config: MctsConfig | None = None,
+        saved_setup_directory: Path | None = None,
     ) -> None:
         self.lock = threading.RLock()
         self.database = database.resolve()
         self.catalog = DebugSetupCatalog(self.database, scenario_directory)
+        self.saved_setups = SavedSetupStore(saved_setup_directory or scenario_directory / "saved")
         self.seed = seed
         self.mcts_config = mcts_config or MctsConfig()
         self.setup: dict[str, Any] = {}
@@ -143,6 +200,30 @@ class GuiSession:
         self.last_ai: dict[str, Any] | None = None
         self.history: list[str] = []
         self.start(self.catalog.public_payload()["presets"]["NORMAL"])
+
+    def save_setup(self, name: Any, request: dict[str, Any]) -> dict[str, Any]:
+        """Validate and save a canonical scenario consumable by bd2-train."""
+        with self.lock:
+            setup = self.catalog.build_setup(request)
+            saved = self.saved_setups.save(name, setup)
+            return {"saved": saved, "saved_setups": self.saved_setups.list()}
+
+    def load_setup(self, name: Any) -> dict[str, Any]:
+        """Load a canonical saved scenario back into the editor and simulator."""
+        with self.lock:
+            setup = self.saved_setups.load(name)
+            # Rebuilding through the editor schema validates every character,
+            # costume, build, equipment, mode and content-specific rule again.
+            request = self.catalog.editor_payload_from_setup(setup)
+            request.update(
+                seed=self.seed,
+                mcts_simulations=self.mcts_config.simulations,
+                mcts_rollout_depth=self.mcts_config.rollout_depth,
+                mcts_max_branching=self.mcts_config.max_branching,
+            )
+            result = self.start(request)
+            result["loaded_setup"] = _saved_setup_name(name)
+            return result
 
     def start(self, request: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
@@ -682,6 +763,7 @@ class GuiSession:
             "last_ai": self.last_ai,
             "auto_plan": auto_plan,
             "setup": copy.deepcopy(self.setup_draft),
+            "saved_setups": self.saved_setups.list(),
             "can_rollback": bool(self.history),
         }
 
@@ -750,6 +832,10 @@ def handler_factory(session: GuiSession, ui_root: Path) -> type[BaseHTTPRequestH
                             payload.get("actions"),
                         )
                     )
+                elif self.path == "/api/save-setup":
+                    self._json(session.save_setup(payload["name"], payload["setup"]))
+                elif self.path == "/api/load-setup":
+                    self._json(session.load_setup(payload["name"]))
                 else:
                     self.send_error(HTTPStatus.NOT_FOUND)
             except (KeyError, TypeError, ValueError, RuntimeError) as error:
@@ -790,6 +876,12 @@ def main() -> None:
     parser.add_argument(
         "--scenario-directory", type=Path, default=repository_root / "data/scenarios"
     )
+    parser.add_argument(
+        "--saved-setup-directory",
+        type=Path,
+        default=repository_root / "data/scenarios/saved",
+        help="directory for GUI-authored canonical BattleSetup JSON files",
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--seed", type=int, default=42)
@@ -803,7 +895,13 @@ def main() -> None:
         rollout_depth=args.mcts_rollout_depth,
         max_branching=args.mcts_max_branching,
     )
-    session = GuiSession(args.database, args.scenario_directory, args.seed, config)
+    session = GuiSession(
+        args.database,
+        args.scenario_directory,
+        args.seed,
+        config,
+        args.saved_setup_directory,
+    )
     server = ThreadingHTTPServer(
         (args.host, args.port), handler_factory(session, repository_root / "ui")
     )

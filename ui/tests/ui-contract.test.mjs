@@ -151,6 +151,20 @@ test("burst-capable costume cards expose localized previous and next stage contr
     assert.match(i18n, new RegExp(`"${key}"`));
   }
 });
+test("build editor exposes three independent Goddess Tear nodes and durable setup controls", () => {
+  assert.match(app, /for \(const node of definition\.goddess_tear_nodes\)/);
+  assert.match(app, /loadout\.potential_mask = toggle\.checked/);
+  assert.match(app, /dataset\.testid = `goddess-tear-/);
+  assert.match(app, /dataset\.testid = `costume-enhancement-/);
+  assert.match(app, /dataset\.testid = `costume-burst-/);
+  assert.doesNotMatch(app, /numberSelect\(0, 7, loadout\.potential_mask\)/);
+  assert.doesNotMatch(i18n, /"loadout\.permanentPotential"/);
+  for (const id of ["saved-setup-name", "saved-setup-list", "save-setup", "load-setup"]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(app, /api\("\/api\/save-setup"/);
+  assert.match(app, /api\("\/api\/load-setup"/);
+});
 test("automatic turn start is cancellable", () => assert.match(app, /clearTimeout\(autoTurnTimer\)/));
 test("terminal state disables turn execution", () => assert.match(app, /Boolean\(snapshot\.state\.terminal\)/));
 test("server-side rollback is wired to the pause menu", () => assert.match(app, /api\("\/api\/rollback"/));
