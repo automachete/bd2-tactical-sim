@@ -4,15 +4,18 @@ use std::collections::BTreeMap;
 
 use bd2_core::{BattleEngine, BattleSetup, Side, TeamTurnPlan, TerminalResult};
 use bd2_data::Database;
-use numpy::{IntoPyArray, ndarray::Array1, ndarray::Array2, ndarray::Array3};
+use numpy::{IntoPyArray, ndarray::Array1, ndarray::Array2, ndarray::Array3, ndarray::Array4};
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyDict};
 use rayon::prelude::*;
 use serde::Serialize;
 
-const MAX_UNITS: usize = 32;
-const FEATURES: usize = 56;
-const MAX_TEAM: usize = 11;
-const MAX_ACTIONS: usize = 32;
+mod observation;
+use observation::{
+    ACTION_FEATURES, BLESSING_FEATURES, COSTUME_FEATURES, EFFECT_FEATURES, GLOBAL_FEATURES,
+    GOLDEN_FEATURES, GRID_FEATURES, MAX_ACTIONS, MAX_BLESSINGS, MAX_COSTUMES, MAX_EFFECTS,
+    MAX_GRID, MAX_MONSTER_LEVELS, MAX_TEAM, MAX_UNITS, MONSTER_FEATURES, MONSTER_LEVEL_FEATURES,
+    TrainingFrame, UNIT_FEATURES, training_frame,
+};
 
 type PyBatchStep<'py> = (
     Bound<'py, PyDict>,
@@ -33,15 +36,6 @@ struct BatchSlot {
     engine: BattleEngine,
     episode: u64,
     last_damage: i64,
-}
-
-#[derive(Serialize)]
-struct TrainingFrame {
-    units: Vec<Vec<f32>>,
-    unit_mask: Vec<bool>,
-    global: Vec<f32>,
-    action_mask: Vec<Vec<bool>>,
-    actor_indices: Vec<usize>,
 }
 
 #[derive(Serialize)]
@@ -78,7 +72,8 @@ impl PySimulator {
 
     fn training_frame_json(&self, side: &str) -> PyResult<String> {
         let side = parse_side(side)?;
-        serde_json::to_string(&training_frame(&self.engine, side)).map_err(py_error)
+        serde_json::to_string(&training_frame(&self.engine, side).map_err(py_error)?)
+            .map_err(py_error)
     }
 
     fn state_json(&self) -> PyResult<String> {
@@ -161,7 +156,8 @@ impl PyBatchSimulator {
             .slots
             .iter()
             .map(|slot| training_frame(&slot.engine, Side::Player))
-            .collect();
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(py_error)?;
         serde_json::to_string(&frames).map_err(py_error)
     }
 
@@ -170,7 +166,8 @@ impl PyBatchSimulator {
             .slots
             .iter()
             .map(|slot| training_frame(&slot.engine, Side::Player))
-            .collect();
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(py_error)?;
         frames_to_numpy(py, &frames)
     }
 
@@ -333,7 +330,7 @@ impl PyBatchSimulator {
                     slot.last_damage = 0;
                 }
                 Ok(BatchStepOutput {
-                    observation: training_frame(&slot.engine, Side::Player),
+                    observation: training_frame(&slot.engine, Side::Player)?,
                     reward: terminal_reward + dense,
                     done,
                     terminal,
@@ -347,324 +344,185 @@ fn episode_seed(base: u64, index: usize, episode: u64) -> u64 {
     base ^ (index as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ episode.rotate_left(29)
 }
 
-fn training_frame(engine: &BattleEngine, side: Side) -> TrainingFrame {
-    let state = engine.state();
-    let mut units = vec![vec![0.0_f32; FEATURES]; MAX_UNITS];
-    let mut unit_mask = vec![false; MAX_UNITS];
-    let mut unit_index_by_id = BTreeMap::new();
-    for (index, unit) in state.units.values().take(MAX_UNITS).enumerate() {
-        let stats = &unit.base_stats;
-        let bp = |select: fn(&bd2_core::StatModifiers) -> i32| -> i32 {
-            unit.effects
-                .iter()
-                .map(|effect| select(&effect.spec.modifiers))
-                .sum()
-        };
-        let flat = |select: fn(&bd2_core::StatModifiers) -> i64| -> i64 {
-            unit.effects
-                .iter()
-                .map(|effect| select(&effect.spec.modifiers))
-                .sum()
-        };
-        let apply_bp = |value: i64, basis_points: i32| -> i64 {
-            (i128::from(value) * i128::from(basis_points) / 10_000)
-                .clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
-        };
-        let effective_max_hp = apply_bp(
-            stats.max_hp.saturating_add(flat(|mods| mods.max_hp_flat)),
-            10_000 + bp(|mods| mods.max_hp_bp),
-        )
-        .max(1);
-        let effective_attack = apply_bp(
-            stats.attack.saturating_add(flat(|mods| mods.attack_flat)),
-            10_000 + bp(|mods| mods.attack_bp),
-        )
-        .max(0);
-        let effective_magic = apply_bp(
-            stats.magic.saturating_add(flat(|mods| mods.magic_flat)),
-            10_000 + bp(|mods| mods.magic_bp),
-        )
-        .max(0);
-        let beneficial = unit
-            .effects
-            .iter()
-            .filter(|effect| effect.spec.polarity == bd2_core::EffectPolarity::Beneficial)
-            .count();
-        let harmful = unit.effects.len().saturating_sub(beneficial);
-        let barrier_total: i64 = unit.external_energy_guard.saturating_add(
-            unit.effects
-                .iter()
-                .map(|effect| effect.barrier_remaining)
-                .sum(),
-        );
-        let duration_total: u32 = unit
-            .effects
-            .iter()
-            .map(|effect| u32::from(effect.remaining))
-            .sum();
-        let charge_total: u32 = unit
-            .effects
-            .iter()
-            .filter_map(|effect| effect.charges_remaining)
-            .map(u32::from)
-            .sum();
-        let has_tag = |tag: &str| {
-            if unit
-                .effects
-                .iter()
-                .any(|effect| effect.spec.tags.contains(tag))
-            {
-                1.0
-            } else {
-                0.0
-            }
-        };
-        units[index] = vec![
-            if unit.side == side { 1.0 } else { -1.0 },
-            if unit.alive { 1.0 } else { 0.0 },
-            unit.hp as f32 / effective_max_hp as f32,
-            unit.position.row as f32 / 2.0,
-            unit.position.depth as f32 / 3.0,
-            (effective_max_hp as f32).ln_1p() / 25.0,
-            (effective_attack as f32).ln_1p() / 15.0,
-            (effective_magic as f32).ln_1p() / 15.0,
-            (stats.crit_rate_bp + bp(|mods| mods.crit_rate_bp)) as f32 / 10_000.0,
-            (stats.crit_damage_bp + bp(|mods| mods.crit_damage_bp)) as f32 / 20_000.0,
-            (stats.defense_bp + bp(|mods| mods.defense_bp)) as f32 / 10_000.0,
-            (stats.magic_resist_bp + bp(|mods| mods.magic_resist_bp)) as f32 / 10_000.0,
-            (stats.property_damage_bp + bp(|mods| mods.property_damage_bp)) as f32 / 10_000.0,
-            (stats.outgoing_damage_bp + bp(|mods| mods.outgoing_damage_bp)) as f32 / 10_000.0,
-            (stats.incoming_damage_bp + bp(|mods| mods.incoming_damage_bp)) as f32 / 10_000.0,
-            (stats.amplification_bp + bp(|mods| mods.amplification_bp)) as f32 / 10_000.0,
-            bp(|mods| mods.damage_reduction_bp) as f32 / 10_000.0,
-            bp(|mods| mods.physical_damage_reduction_bp) as f32 / 10_000.0,
-            bp(|mods| mods.magical_damage_reduction_bp) as f32 / 10_000.0,
-            bp(|mods| mods.physical_incoming_damage_bp) as f32 / 10_000.0,
-            bp(|mods| mods.magical_incoming_damage_bp) as f32 / 10_000.0,
-            bp(|mods| mods.dot_incoming_damage_bp) as f32 / 10_000.0,
-            bp(|mods| mods.chain_damage_incoming_bp) as f32 / 10_000.0,
-            bp(|mods| mods.chain_damage_outgoing_bp) as f32 / 10_000.0,
-            bp(|mods| mods.evasion_bp) as f32 / 10_000.0,
-            bp(|mods| mods.sp_cost_delta) as f32 / 10.0,
-            bp(|mods| i32::from(mods.chain_received_delta)) as f32 / 10.0,
-            bp(|mods| i32::from(mods.chain_dealt_delta)) as f32 / 10.0,
-            unit.effects
-                .iter()
-                .map(|effect| effect.spec.modifiers.chain_retention)
-                .max()
-                .unwrap_or(0) as f32
-                / 50.0,
-            barrier_total as f32 / effective_max_hp as f32,
-            unit.effects.len() as f32 / 16.0,
-            beneficial as f32 / 16.0,
-            harmful as f32 / 16.0,
-            unit.cooldowns
-                .values()
-                .map(|value| *value as u32)
-                .sum::<u32>() as f32
-                / 50.0,
-            unit.party_no as f32 / 10.0,
-            unit.weak_point_bonus_bp as f32 / 20_000.0,
-            if unit.is_summon { 1.0 } else { 0.0 },
-            if unit.can_act { 1.0 } else { 0.0 },
-            unit.costume_loadout.len() as f32 / 8.0,
-            unit.id as f32 / 10_000.0,
-            duration_total as f32 / 64.0,
-            charge_total as f32 / 32.0,
-            state.teams[side.index()]
-                .chain_by_target
-                .get(&unit.id)
-                .copied()
-                .unwrap_or(0) as f32
-                / 50.0,
-            state.teams[side.opponent().index()]
-                .chain_by_target
-                .get(&unit.id)
-                .copied()
-                .unwrap_or(0) as f32
-                / 50.0,
-            has_tag("SILENCE"),
-            has_tag("TAUNT"),
-            has_tag("FOCUS"),
-            has_tag("EVASION"),
-            has_tag("MARK"),
-            has_tag("ENERGY_GUARD"),
-            has_tag("BARRIER"),
-            has_tag("TRANSFORMATION"),
-            has_tag("ACCELERATION"),
-            has_tag("COUNTER"),
-            has_tag("REVIVE"),
-            has_tag("DOT"),
-        ];
-        unit_mask[index] = true;
-        unit_index_by_id.insert(unit.id, index);
-    }
-    let mut action_mask = vec![vec![false; MAX_ACTIONS]; MAX_TEAM];
-    if state.rules.action_flow == bd2_core::ActionFlow::AlternatingCostume {
-        // This mask represents the only legal environment decision: advance
-        // the mode's automatic action. It is intentionally not a battle WAIT
-        // command and is consumed by the Python/batch facades before planning.
-        for slot_mask in &mut action_mask {
-            slot_mask[0] = true;
-        }
-    } else {
-        for (slot, unit_id) in state.teams[side.index()]
-            .action_order
-            .iter()
-            .take(MAX_TEAM)
-            .enumerate()
-        {
-            if let Ok(legal) = engine.legal_actions_for_unit(*unit_id) {
-                for action in action_mask[slot]
-                    .iter_mut()
-                    .take(legal.commands.len().min(MAX_ACTIONS))
-                {
-                    *action = true;
-                }
-            }
-        }
-        for slot_mask in action_mask
-            .iter_mut()
-            .skip(state.teams[side.index()].action_order.len().min(MAX_TEAM))
-        {
-            slot_mask[0] = true;
-        }
-    }
-    let mut actor_indices = vec![MAX_UNITS; MAX_TEAM];
-    for (slot, unit_id) in state.teams[side.index()]
-        .action_order
-        .iter()
-        .take(MAX_TEAM)
-        .enumerate()
-    {
-        actor_indices[slot] = unit_index_by_id
-            .get(unit_id)
-            .copied()
-            .expect("validated action-order unit must be present in the observation");
-    }
-    let own_alive = state
-        .units
-        .values()
-        .filter(|unit| unit.side == side && unit.alive)
-        .count();
-    let opponent_alive = state
-        .units
-        .values()
-        .filter(|unit| unit.side == side.opponent() && unit.alive)
-        .count();
-    let monster = state.monster_chaser.as_ref();
-    let monster_total_hp = monster
-        .map(|progress| progress.level_hp_segments.iter().sum::<i64>())
-        .unwrap_or(0);
-    let global = vec![
-        state.game_turn as f32 / state.rules.max_game_turns.max(1) as f32,
-        state.round_no as f32 / 50.0,
-        state.teams[side.index()].sp as f32 / state.rules.sp_cap as f32,
-        state.teams[side.opponent().index()].sp as f32 / state.rules.sp_cap as f32,
-        if state.active_side == side { 1.0 } else { -1.0 },
-        if state.rules.mode == bd2_core::BattleMode::Normal {
-            1.0
-        } else {
-            0.0
-        },
-        if state.rules.mode == bd2_core::BattleMode::MirrorWar {
-            1.0
-        } else {
-            0.0
-        },
-        if state.rules.mode == bd2_core::BattleMode::MonsterChaser {
-            1.0
-        } else {
-            0.0
-        },
-        if state.rules.mode == bd2_core::BattleMode::GoldenColosseum {
-            1.0
-        } else {
-            0.0
-        },
-        own_alive as f32 / MAX_UNITS as f32,
-        opponent_alive as f32 / MAX_UNITS as f32,
-        monster.map(|progress| progress.current_level).unwrap_or(0) as f32 / 25.0,
-        monster.map(|progress| progress.selected_level).unwrap_or(0) as f32 / 25.0,
-        monster
-            .map(|progress| progress.battle_hp_remaining)
-            .unwrap_or(0) as f32
-            / monster_total_hp.max(1) as f32,
-        monster.map(|progress| progress.current_party).unwrap_or(0) as f32
-            / monster
-                .map(|progress| progress.party_limit)
-                .unwrap_or(1)
-                .max(1) as f32,
-        state.teams[side.index()]
-            .chain_by_target
-            .values()
-            .map(|value| u32::from(*value))
-            .sum::<u32>() as f32
-            / 100.0,
-        state.teams[side.opponent().index()]
-            .chain_by_target
-            .values()
-            .map(|value| u32::from(*value))
-            .sum::<u32>() as f32
-            / 100.0,
-    ];
-    TrainingFrame {
-        units,
-        unit_mask,
-        global,
-        action_mask,
-        actor_indices,
-    }
-}
-
 fn frames_to_numpy<'py>(py: Python<'py>, frames: &[TrainingFrame]) -> PyResult<Bound<'py, PyDict>> {
     let batch = frames.len();
-    let units = Array3::from_shape_vec(
-        (batch, MAX_UNITS, FEATURES),
-        frames
-            .iter()
-            .flat_map(|frame| frame.units.iter().flatten().copied())
-            .collect(),
-    )
-    .map_err(py_error)?;
-    let unit_mask = Array2::from_shape_vec(
-        (batch, MAX_UNITS),
-        frames
-            .iter()
-            .flat_map(|frame| frame.unit_mask.iter().copied())
-            .collect(),
-    )
-    .map_err(py_error)?;
-    let global = Array2::from_shape_vec(
-        (batch, 17),
-        frames
-            .iter()
-            .flat_map(|frame| frame.global.iter().copied())
-            .collect(),
-    )
-    .map_err(py_error)?;
-    let action_mask = Array3::from_shape_vec(
-        (batch, MAX_TEAM, MAX_ACTIONS),
-        frames
-            .iter()
-            .flat_map(|frame| frame.action_mask.iter().flatten().copied())
-            .collect(),
-    )
-    .map_err(py_error)?;
-    let actor_indices = Array2::from_shape_vec(
-        (batch, MAX_TEAM),
-        frames
-            .iter()
-            .flat_map(|frame| frame.actor_indices.iter().map(|value| *value as i64))
-            .collect(),
-    )
-    .map_err(py_error)?;
+    let float2 = |name: &str, width: usize, select: fn(&TrainingFrame) -> &Vec<f32>| {
+        Array2::from_shape_vec(
+            (batch, width),
+            frames
+                .iter()
+                .flat_map(|frame| select(frame).iter().copied())
+                .collect(),
+        )
+        .map_err(|error| py_error(format!("{name}: {error}")))
+    };
+    let float3 =
+        |name: &str, outer: usize, width: usize, select: fn(&TrainingFrame) -> &Vec<Vec<f32>>| {
+            Array3::from_shape_vec(
+                (batch, outer, width),
+                frames
+                    .iter()
+                    .flat_map(|frame| select(frame).iter().flatten().copied())
+                    .collect(),
+            )
+            .map_err(|error| py_error(format!("{name}: {error}")))
+        };
+    let float4 = |name: &str,
+                  outer: usize,
+                  inner: usize,
+                  width: usize,
+                  select: fn(&TrainingFrame) -> &Vec<Vec<Vec<f32>>>| {
+        Array4::from_shape_vec(
+            (batch, outer, inner, width),
+            frames
+                .iter()
+                .flat_map(|frame| select(frame).iter().flatten().flatten().copied())
+                .collect(),
+        )
+        .map_err(|error| py_error(format!("{name}: {error}")))
+    };
+    let bool2 = |name: &str, width: usize, select: fn(&TrainingFrame) -> &Vec<bool>| {
+        Array2::from_shape_vec(
+            (batch, width),
+            frames
+                .iter()
+                .flat_map(|frame| select(frame).iter().copied())
+                .collect(),
+        )
+        .map_err(|error| py_error(format!("{name}: {error}")))
+    };
+    let bool3 =
+        |name: &str, outer: usize, width: usize, select: fn(&TrainingFrame) -> &Vec<Vec<bool>>| {
+            Array3::from_shape_vec(
+                (batch, outer, width),
+                frames
+                    .iter()
+                    .flat_map(|frame| select(frame).iter().flatten().copied())
+                    .collect(),
+            )
+            .map_err(|error| py_error(format!("{name}: {error}")))
+        };
+    let index2 = |name: &str, width: usize, select: fn(&TrainingFrame) -> &Vec<usize>| {
+        Array2::from_shape_vec(
+            (batch, width),
+            frames
+                .iter()
+                .flat_map(|frame| select(frame).iter().map(|value| *value as i64))
+                .collect(),
+        )
+        .map_err(|error| py_error(format!("{name}: {error}")))
+    };
+    let index3 =
+        |name: &str, outer: usize, width: usize, select: fn(&TrainingFrame) -> &Vec<Vec<usize>>| {
+            Array3::from_shape_vec(
+                (batch, outer, width),
+                frames
+                    .iter()
+                    .flat_map(|frame| select(frame).iter().flatten().map(|value| *value as i64))
+                    .collect(),
+            )
+            .map_err(|error| py_error(format!("{name}: {error}")))
+        };
+
     let result = PyDict::new(py);
-    result.set_item("units", units.into_pyarray(py))?;
-    result.set_item("unit_mask", unit_mask.into_pyarray(py))?;
-    result.set_item("global", global.into_pyarray(py))?;
-    result.set_item("action_mask", action_mask.into_pyarray(py))?;
-    result.set_item("actor_indices", actor_indices.into_pyarray(py))?;
+    result.set_item(
+        "units",
+        float3("units", MAX_UNITS, UNIT_FEATURES, |f| &f.units)?.into_pyarray(py),
+    )?;
+    result.set_item(
+        "unit_mask",
+        bool2("unit_mask", MAX_UNITS, |f| &f.unit_mask)?.into_pyarray(py),
+    )?;
+    result.set_item(
+        "costumes",
+        float4("costumes", MAX_UNITS, MAX_COSTUMES, COSTUME_FEATURES, |f| {
+            &f.costumes
+        })?
+        .into_pyarray(py),
+    )?;
+    result.set_item(
+        "costume_mask",
+        bool3("costume_mask", MAX_UNITS, MAX_COSTUMES, |f| &f.costume_mask)?.into_pyarray(py),
+    )?;
+    result.set_item(
+        "effects",
+        float3("effects", MAX_EFFECTS, EFFECT_FEATURES, |f| &f.effects)?.into_pyarray(py),
+    )?;
+    result.set_item(
+        "effect_mask",
+        bool2("effect_mask", MAX_EFFECTS, |f| &f.effect_mask)?.into_pyarray(py),
+    )?;
+    result.set_item(
+        "global",
+        float2("global", GLOBAL_FEATURES, |f| &f.global)?.into_pyarray(py),
+    )?;
+    result.set_item(
+        "monster",
+        float2("monster", MONSTER_FEATURES, |f| &f.monster)?.into_pyarray(py),
+    )?;
+    result.set_item(
+        "monster_levels",
+        float3(
+            "monster_levels",
+            MAX_MONSTER_LEVELS,
+            MONSTER_LEVEL_FEATURES,
+            |f| &f.monster_levels,
+        )?
+        .into_pyarray(py),
+    )?;
+    result.set_item(
+        "monster_level_mask",
+        bool2("monster_level_mask", MAX_MONSTER_LEVELS, |f| {
+            &f.monster_level_mask
+        })?
+        .into_pyarray(py),
+    )?;
+    result.set_item(
+        "golden",
+        float2("golden", GOLDEN_FEATURES, |f| &f.golden)?.into_pyarray(py),
+    )?;
+    result.set_item(
+        "blessings",
+        float4("blessings", 2, MAX_BLESSINGS, BLESSING_FEATURES, |f| {
+            &f.blessings
+        })?
+        .into_pyarray(py),
+    )?;
+    result.set_item(
+        "blessing_mask",
+        bool3("blessing_mask", 2, MAX_BLESSINGS, |f| &f.blessing_mask)?.into_pyarray(py),
+    )?;
+    result.set_item(
+        "grid",
+        float4("grid", MAX_GRID, MAX_GRID, GRID_FEATURES, |f| &f.grid)?.into_pyarray(py),
+    )?;
+    result.set_item(
+        "action_features",
+        float4(
+            "action_features",
+            MAX_TEAM,
+            MAX_ACTIONS,
+            ACTION_FEATURES,
+            |f| &f.action_features,
+        )?
+        .into_pyarray(py),
+    )?;
+    result.set_item(
+        "action_mask",
+        bool3("action_mask", MAX_TEAM, MAX_ACTIONS, |f| &f.action_mask)?.into_pyarray(py),
+    )?;
+    result.set_item(
+        "actor_indices",
+        index2("actor_indices", MAX_TEAM, |f| &f.actor_indices)?.into_pyarray(py),
+    )?;
+    result.set_item(
+        "team_order_indices",
+        index3("team_order_indices", 2, MAX_TEAM, |f| &f.team_order_indices)?.into_pyarray(py),
+    )?;
+    result.set_item(
+        "team_order_mask",
+        bool3("team_order_mask", 2, MAX_TEAM, |f| &f.team_order_mask)?.into_pyarray(py),
+    )?;
     Ok(result)
 }
 
@@ -681,5 +539,23 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PySimulator>()?;
     module.add_class::<PyBatchSimulator>()?;
     module.add("CORE_VERSION", env!("CARGO_PKG_VERSION"))?;
+    module.add("MAX_TEAM_UNITS", MAX_TEAM)?;
+    module.add("MAX_TOTAL_UNITS", MAX_UNITS)?;
+    module.add("MAX_ACTIONS_PER_UNIT", MAX_ACTIONS)?;
+    module.add("UNIT_FEATURES", UNIT_FEATURES)?;
+    module.add("ACTION_FEATURES", ACTION_FEATURES)?;
+    module.add("GLOBAL_FEATURES", GLOBAL_FEATURES)?;
+    module.add("MAX_COSTUMES_PER_UNIT", MAX_COSTUMES)?;
+    module.add("COSTUME_FEATURES", COSTUME_FEATURES)?;
+    module.add("MAX_ACTIVE_EFFECTS", MAX_EFFECTS)?;
+    module.add("EFFECT_FEATURES", EFFECT_FEATURES)?;
+    module.add("MONSTER_FEATURES", MONSTER_FEATURES)?;
+    module.add("MAX_MONSTER_LEVELS", MAX_MONSTER_LEVELS)?;
+    module.add("MONSTER_LEVEL_FEATURES", MONSTER_LEVEL_FEATURES)?;
+    module.add("GOLDEN_FEATURES", GOLDEN_FEATURES)?;
+    module.add("MAX_BLESSINGS_PER_SIDE", MAX_BLESSINGS)?;
+    module.add("BLESSING_FEATURES", BLESSING_FEATURES)?;
+    module.add("MAX_GRID_SIZE", MAX_GRID)?;
+    module.add("GRID_FEATURES", GRID_FEATURES)?;
     Ok(())
 }

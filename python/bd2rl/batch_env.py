@@ -5,6 +5,12 @@ from pathlib import Path
 import numpy as np
 
 from . import _native
+from .env import (
+    FLOAT_OBSERVATION_KEYS,
+    INDEX_OBSERVATION_KEYS,
+    MASK_OBSERVATION_KEYS,
+    OBSERVATION_KEYS,
+)
 
 
 class NativeBatchEnv:
@@ -38,20 +44,29 @@ class NativeBatchEnv:
 
     @staticmethod
     def _native_arrays(items: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        if set(items) != set(OBSERVATION_KEYS):
+            missing = sorted(set(OBSERVATION_KEYS) - set(items))
+            extra = sorted(set(items) - set(OBSERVATION_KEYS))
+            raise RuntimeError(f"native batch observation mismatch: {missing=}, {extra=}")
         return {
-            "units": np.asarray(items["units"], dtype=np.float32),
-            "unit_mask": np.asarray(items["unit_mask"], dtype=np.bool_),
-            "global": np.asarray(items["global"], dtype=np.float32),
-            "action_mask": np.asarray(items["action_mask"], dtype=np.bool_),
-            "actor_indices": np.asarray(items["actor_indices"], dtype=np.int64),
+            **{key: np.asarray(items[key], dtype=np.float32) for key in FLOAT_OBSERVATION_KEYS},
+            **{key: np.asarray(items[key], dtype=np.bool_) for key in MASK_OBSERVATION_KEYS},
+            **{key: np.asarray(items[key], dtype=np.int64) for key in INDEX_OBSERVATION_KEYS},
         }
 
     @staticmethod
     def _stack(items: list[dict[str, object]]) -> dict[str, np.ndarray]:
         return {
-            "units": np.asarray([item["units"] for item in items], dtype=np.float32),
-            "unit_mask": np.asarray([item["unit_mask"] for item in items], dtype=np.bool_),
-            "global": np.asarray([item["global"] for item in items], dtype=np.float32),
-            "action_mask": np.asarray([item["action_mask"] for item in items], dtype=np.bool_),
-            "actor_indices": np.asarray([item["actor_indices"] for item in items], dtype=np.int64),
+            **{
+                key: np.asarray([item[key] for item in items], dtype=np.float32)
+                for key in FLOAT_OBSERVATION_KEYS
+            },
+            **{
+                key: np.asarray([item[key] for item in items], dtype=np.bool_)
+                for key in MASK_OBSERVATION_KEYS
+            },
+            **{
+                key: np.asarray([item[key] for item in items], dtype=np.int64)
+                for key in INDEX_OBSERVATION_KEYS
+            },
         }

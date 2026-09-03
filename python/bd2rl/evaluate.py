@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from .env import Bd2Env, EnvConfig
-from .model import load_policy_checkpoint
+from .model import greedy_actions, load_policy_checkpoint
 
 
 def main() -> None:
@@ -32,14 +32,8 @@ def main() -> None:
                 for key, value in observation.items()
             }
             with torch.inference_mode():
-                logits, _ = model(
-                    tensors["units"].float(),
-                    tensors["unit_mask"].bool(),
-                    tensors["global"].float(),
-                    tensors["action_mask"].bool(),
-                    tensors["actor_indices"].long(),
-                )
-            action = logits.argmax(-1)[0].cpu().numpy().astype(np.int64)
+                logits, _ = model(tensors)
+            action = greedy_actions(logits, tensors)[0].cpu().numpy().astype(np.int64)
             observation, reward, terminated, truncated, info = env.step(action)
             total += reward
             if terminated or truncated:

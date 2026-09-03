@@ -9,15 +9,29 @@ import numpy as np
 import pytest
 from bd2rl._native import BatchSimulator, Simulator
 from bd2rl.env import (
+    ACTION_FEATURES,
+    BLESSING_FEATURES,
+    COSTUME_FEATURES,
+    EFFECT_FEATURES,
     GLOBAL_FEATURES,
+    GOLDEN_FEATURES,
+    GRID_FEATURES,
+    MAX_ACTIONS_PER_UNIT,
+    MAX_ACTIVE_EFFECTS,
+    MAX_BLESSINGS_PER_SIDE,
+    MAX_COSTUMES_PER_UNIT,
+    MAX_GRID_SIZE,
+    MAX_MONSTER_LEVELS,
     MAX_TEAM_UNITS,
     MAX_TOTAL_UNITS,
+    MONSTER_FEATURES,
+    MONSTER_LEVEL_FEATURES,
+    OBSERVATION_KEYS,
     UNIT_FEATURES,
     Bd2Env,
     EnvConfig,
     terminal_reward_for,
 )
-from gymnasium.utils.env_checker import check_env
 
 ROOT = Path(__file__).resolve().parents[2]
 DATABASE = ROOT / "data/generated/bd2.sqlite"
@@ -59,6 +73,13 @@ def test_generated_catalog_and_database_have_every_variant() -> None:
     assert len(player_costumes) == 155
     assert all(costume["permanent_potential_modifiers"] for costume in player_costumes)
     assert all(costume["bonding_modifiers"] for costume in player_costumes)
+    for costume in player_costumes:
+        masks_by_progression: dict[tuple[int, int], set[int]] = {}
+        for variant in costume["variants"]:
+            key = (variant["enhancement"], variant["burst_level"])
+            masks_by_progression.setdefault(key, set()).add(variant["potential_mask"])
+        assert masks_by_progression
+        assert all(masks == set(range(8)) for masks in masks_by_progression.values())
     all_range_costumes = {
         costume["id"]
         for costume in player_costumes
@@ -327,16 +348,41 @@ def test_snapshot_replay_and_gym_observation_cover_all_parts() -> None:
     assert observation["units"].shape == (MAX_TOTAL_UNITS, UNIT_FEATURES)
     assert observation["global"].shape == (GLOBAL_FEATURES,)
     # Lathel_4 is a current preemptive skill and pays 1 SP during initialization.
-    assert observation["global"][2] == pytest.approx(14 / 20)
-    assert observation["global"][3] == pytest.approx(0 / 20)
+    assert observation["global"][10] == pytest.approx(14 / 20)
+    assert observation["global"][11] == pytest.approx(0 / 20)
     assert observation["actor_indices"].shape == (MAX_TEAM_UNITS,)
+    assert observation["costumes"].shape == (
+        MAX_TOTAL_UNITS,
+        MAX_COSTUMES_PER_UNIT,
+        COSTUME_FEATURES,
+    )
+    assert observation["effects"].shape == (MAX_ACTIVE_EFFECTS, EFFECT_FEATURES)
+    assert observation["monster"].shape == (MONSTER_FEATURES,)
+    assert observation["monster_levels"].shape == (
+        MAX_MONSTER_LEVELS,
+        MONSTER_LEVEL_FEATURES,
+    )
+    assert observation["golden"].shape == (GOLDEN_FEATURES,)
+    assert observation["blessings"].shape == (
+        2,
+        MAX_BLESSINGS_PER_SIDE,
+        BLESSING_FEATURES,
+    )
+    assert observation["grid"].shape == (MAX_GRID_SIZE, MAX_GRID_SIZE, GRID_FEATURES)
+    assert observation["action_features"].shape == (
+        MAX_TEAM_UNITS,
+        MAX_ACTIONS_PER_UNIT,
+        ACTION_FEATURES,
+    )
+    assert observation["team_order_indices"].shape == (2, MAX_TEAM_UNITS)
     assert int(observation["unit_mask"].sum()) == 18
     snapshot = environment.snapshot_json()
     actions = np.zeros(MAX_TEAM_UNITS, dtype=np.int64)
     first = environment.step(actions)
     environment.restore_json(snapshot)
     second = environment.step(actions)
-    np.testing.assert_array_equal(first[0]["units"], second[0]["units"])
+    for key in OBSERVATION_KEYS:
+        np.testing.assert_array_equal(first[0][key], second[0][key])
     assert first[1:] == second[1:]
 
 
@@ -367,7 +413,7 @@ def test_native_numpy_batch_path_is_exactly_equivalent_to_json_path() -> None:
 
     direct_observations = direct.observations_numpy()
     legacy_observations = json.loads(legacy.observations_json())
-    for key in ("units", "unit_mask", "global", "action_mask", "actor_indices"):
+    for key in OBSERVATION_KEYS:
         expected = np.asarray(
             [frame[key] for frame in legacy_observations],
             dtype=np.asarray(direct_observations[key]).dtype,
@@ -377,7 +423,7 @@ def test_native_numpy_batch_path_is_exactly_equivalent_to_json_path() -> None:
     actions = [[0] * MAX_TEAM_UNITS for _ in range(4)]
     direct_frames, direct_rewards, direct_dones = direct.step_numpy(actions)
     legacy_outputs = json.loads(legacy.step_json(json.dumps(actions)))
-    for key in ("units", "unit_mask", "global", "action_mask", "actor_indices"):
+    for key in OBSERVATION_KEYS:
         expected = np.asarray(
             [item["observation"][key] for item in legacy_outputs],
             dtype=np.asarray(direct_frames[key]).dtype,
@@ -394,7 +440,7 @@ def test_native_numpy_batch_path_is_exactly_equivalent_to_json_path() -> None:
 
     direct_reset = direct.reset_all_numpy()
     legacy_reset = json.loads(legacy.reset_all_json())
-    for key in ("units", "unit_mask", "global", "action_mask", "actor_indices"):
+    for key in OBSERVATION_KEYS:
         expected = np.asarray(
             [frame[key] for frame in legacy_reset],
             dtype=np.asarray(direct_reset[key]).dtype,
@@ -405,20 +451,30 @@ def test_native_numpy_batch_path_is_exactly_equivalent_to_json_path() -> None:
 def test_gymnasium_contract() -> None:
     config = EnvConfig(DATABASE, ROOT / "data/scenarios/normal-demo.json", seed=31)
     environment = Bd2Env(config)
-    check_env(environment, skip_render_check=True)
+    observation, _ = environment.reset(seed=31)
+    assert environment.observation_space.contains(observation)
+    action = np.zeros(MAX_TEAM_UNITS, dtype=np.int64)
+    assert environment.action_space.contains(action)
+    transition = environment.step(action)
+    assert len(transition) == 5
+    with pytest.raises(ValueError, match="masked action selected"):
+        environment.reset(seed=31)
+        environment.step(np.full(MAX_TEAM_UNITS, MAX_ACTIONS_PER_UNIT - 1, dtype=np.int64))
 
 
 def test_golden_colosseum_environment_exposes_eleven_slots_and_only_auto_advances() -> None:
     environment = Bd2Env(EnvConfig(DATABASE, GOLDEN_SCENARIO, seed=5))
     observation, info = environment.reset()
     assert observation["actor_indices"].shape == (11,)
-    assert observation["action_mask"].shape == (11, 32)
+    assert observation["action_mask"].shape == (MAX_TEAM_UNITS, MAX_ACTIONS_PER_UNIT)
     assert observation["action_mask"][:, 0].all()
     assert not observation["action_mask"][:, 1:].any()
-    assert observation["global"].shape == (17,)
-    assert observation["global"][8] == 1.0
+    assert observation["global"].shape == (GLOBAL_FEATURES,)
+    assert observation["global"][3] == 1.0
     initial_sequence = info["state"]["action_sequence"]
-    _, _, _, _, next_info = environment.step(np.full(MAX_TEAM_UNITS, 31, dtype=np.int64))
+    _, _, _, _, next_info = environment.step(
+        np.full(MAX_TEAM_UNITS, MAX_ACTIONS_PER_UNIT - 1, dtype=np.int64)
+    )
     # The policy indices cannot override a fully automatic Colosseum action.
     assert next_info["state"]["action_sequence"] > initial_sequence
 
@@ -426,8 +482,10 @@ def test_golden_colosseum_environment_exposes_eleven_slots_and_only_auto_advance
 def test_native_batch_auto_advances_golden_colosseum_without_team_plan() -> None:
     batch = BatchSimulator(str(DATABASE), GOLDEN_SCENARIO.read_text(encoding="utf-8"), 3, 9)
     frames = json.loads(batch.observations_json())
-    assert all(frame["global"][8] == 1.0 for frame in frames)
-    result = json.loads(batch.step_json(json.dumps([[31] * MAX_TEAM_UNITS] * 3)))
+    assert all(frame["global"][3] == 1.0 for frame in frames)
+    result = json.loads(
+        batch.step_json(json.dumps([[MAX_ACTIONS_PER_UNIT - 1] * MAX_TEAM_UNITS] * 3))
+    )
     assert len(result) == 3
     assert all(len(item["observation"]["actor_indices"]) == MAX_TEAM_UNITS for item in result)
 

@@ -10,11 +10,48 @@ import numpy as np
 
 from . import _native
 
-MAX_TEAM_UNITS = 11
-MAX_TOTAL_UNITS = 32
-MAX_ACTIONS_PER_UNIT = 32
-UNIT_FEATURES = 56
-GLOBAL_FEATURES = 17
+MAX_TEAM_UNITS = int(_native.MAX_TEAM_UNITS)
+MAX_TOTAL_UNITS = int(_native.MAX_TOTAL_UNITS)
+MAX_ACTIONS_PER_UNIT = int(_native.MAX_ACTIONS_PER_UNIT)
+UNIT_FEATURES = int(_native.UNIT_FEATURES)
+ACTION_FEATURES = int(_native.ACTION_FEATURES)
+GLOBAL_FEATURES = int(_native.GLOBAL_FEATURES)
+MAX_COSTUMES_PER_UNIT = int(_native.MAX_COSTUMES_PER_UNIT)
+COSTUME_FEATURES = int(_native.COSTUME_FEATURES)
+MAX_ACTIVE_EFFECTS = int(_native.MAX_ACTIVE_EFFECTS)
+EFFECT_FEATURES = int(_native.EFFECT_FEATURES)
+MONSTER_FEATURES = int(_native.MONSTER_FEATURES)
+MAX_MONSTER_LEVELS = int(_native.MAX_MONSTER_LEVELS)
+MONSTER_LEVEL_FEATURES = int(_native.MONSTER_LEVEL_FEATURES)
+GOLDEN_FEATURES = int(_native.GOLDEN_FEATURES)
+MAX_BLESSINGS_PER_SIDE = int(_native.MAX_BLESSINGS_PER_SIDE)
+BLESSING_FEATURES = int(_native.BLESSING_FEATURES)
+MAX_GRID_SIZE = int(_native.MAX_GRID_SIZE)
+GRID_FEATURES = int(_native.GRID_FEATURES)
+
+FLOAT_OBSERVATION_KEYS = (
+    "units",
+    "costumes",
+    "effects",
+    "global",
+    "monster",
+    "monster_levels",
+    "golden",
+    "blessings",
+    "grid",
+    "action_features",
+)
+MASK_OBSERVATION_KEYS = (
+    "unit_mask",
+    "costume_mask",
+    "effect_mask",
+    "monster_level_mask",
+    "blessing_mask",
+    "action_mask",
+    "team_order_mask",
+)
+INDEX_OBSERVATION_KEYS = ("actor_indices", "team_order_indices")
+OBSERVATION_KEYS = FLOAT_OBSERVATION_KEYS + MASK_OBSERVATION_KEYS + INDEX_OBSERVATION_KEYS
 
 
 def terminal_reward_for(outcome: str, control_side: str) -> float:
@@ -74,10 +111,62 @@ class Bd2Env(gym.Env[dict[str, np.ndarray], np.ndarray]):
                     dtype=np.float32,
                 ),
                 "unit_mask": gym.spaces.MultiBinary(MAX_TOTAL_UNITS),
+                "costumes": gym.spaces.Box(
+                    low=-1_000_000.0,
+                    high=1_000_000.0,
+                    shape=(MAX_TOTAL_UNITS, MAX_COSTUMES_PER_UNIT, COSTUME_FEATURES),
+                    dtype=np.float32,
+                ),
+                "costume_mask": gym.spaces.MultiBinary((MAX_TOTAL_UNITS, MAX_COSTUMES_PER_UNIT)),
+                "effects": gym.spaces.Box(
+                    low=-1_000_000.0,
+                    high=1_000_000.0,
+                    shape=(MAX_ACTIVE_EFFECTS, EFFECT_FEATURES),
+                    dtype=np.float32,
+                ),
+                "effect_mask": gym.spaces.MultiBinary(MAX_ACTIVE_EFFECTS),
                 "global": gym.spaces.Box(
                     low=-1_000_000.0,
                     high=1_000_000.0,
                     shape=(GLOBAL_FEATURES,),
+                    dtype=np.float32,
+                ),
+                "monster": gym.spaces.Box(
+                    low=-1_000_000.0,
+                    high=1_000_000.0,
+                    shape=(MONSTER_FEATURES,),
+                    dtype=np.float32,
+                ),
+                "monster_levels": gym.spaces.Box(
+                    low=-1_000_000.0,
+                    high=1_000_000.0,
+                    shape=(MAX_MONSTER_LEVELS, MONSTER_LEVEL_FEATURES),
+                    dtype=np.float32,
+                ),
+                "monster_level_mask": gym.spaces.MultiBinary(MAX_MONSTER_LEVELS),
+                "golden": gym.spaces.Box(
+                    low=-1_000_000.0,
+                    high=1_000_000.0,
+                    shape=(GOLDEN_FEATURES,),
+                    dtype=np.float32,
+                ),
+                "blessings": gym.spaces.Box(
+                    low=-1_000_000.0,
+                    high=1_000_000.0,
+                    shape=(2, MAX_BLESSINGS_PER_SIDE, BLESSING_FEATURES),
+                    dtype=np.float32,
+                ),
+                "blessing_mask": gym.spaces.MultiBinary((2, MAX_BLESSINGS_PER_SIDE)),
+                "grid": gym.spaces.Box(
+                    low=-1_000_000.0,
+                    high=1_000_000.0,
+                    shape=(MAX_GRID_SIZE, MAX_GRID_SIZE, GRID_FEATURES),
+                    dtype=np.float32,
+                ),
+                "action_features": gym.spaces.Box(
+                    low=-1_000_000.0,
+                    high=1_000_000.0,
+                    shape=(MAX_TEAM_UNITS, MAX_ACTIONS_PER_UNIT, ACTION_FEATURES),
                     dtype=np.float32,
                 ),
                 "action_mask": gym.spaces.Box(
@@ -92,6 +181,13 @@ class Bd2Env(gym.Env[dict[str, np.ndarray], np.ndarray]):
                     shape=(MAX_TEAM_UNITS,),
                     dtype=np.int64,
                 ),
+                "team_order_indices": gym.spaces.Box(
+                    low=0,
+                    high=MAX_TOTAL_UNITS,
+                    shape=(2, MAX_TEAM_UNITS),
+                    dtype=np.int64,
+                ),
+                "team_order_mask": gym.spaces.MultiBinary((2, MAX_TEAM_UNITS)),
             }
         )
 
@@ -125,7 +221,7 @@ class Bd2Env(gym.Env[dict[str, np.ndarray], np.ndarray]):
         self, action: np.ndarray
     ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
         action = np.asarray(action, dtype=np.int64)
-        self.submit_turn(action, self._control_side, strict=False)
+        self.submit_turn(action, self._control_side, strict=True)
         if self.config.auto_opponent:
             self._advance_to_control_side()
         state = json.loads(self.simulator.state_json())
@@ -177,6 +273,9 @@ class Bd2Env(gym.Env[dict[str, np.ndarray], np.ndarray]):
         lookup = self._legal_action_lookup(side, order)
         commands: dict[str, dict[str, Any]] = {}
         for slot, unit_id in enumerate(order[:MAX_TEAM_UNITS]):
+            unit = state["units"][str(unit_id)]
+            if not unit["alive"] or not unit["can_act"]:
+                continue
             selected = int(action[slot])
             if selected < 0 or selected >= len(lookup[slot]):
                 if strict:
@@ -235,12 +334,16 @@ class Bd2Env(gym.Env[dict[str, np.ndarray], np.ndarray]):
         if perspective_side == self._control_side:
             self._action_lookup = action_lookup
         frame = json.loads(self.simulator.training_frame_json(perspective_side))
+        if set(frame) != set(OBSERVATION_KEYS):
+            missing = sorted(set(OBSERVATION_KEYS) - set(frame))
+            extra = sorted(set(frame) - set(OBSERVATION_KEYS))
+            raise RuntimeError(
+                f"native observation schema mismatch: missing={missing}, extra={extra}"
+            )
         return {
-            "units": np.asarray(frame["units"], dtype=np.float32),
-            "unit_mask": np.asarray(frame["unit_mask"], dtype=np.int8),
-            "global": np.asarray(frame["global"], dtype=np.float32),
-            "action_mask": np.asarray(frame["action_mask"], dtype=np.int8),
-            "actor_indices": np.asarray(frame["actor_indices"], dtype=np.int64),
+            **{key: np.asarray(frame[key], dtype=np.float32) for key in FLOAT_OBSERVATION_KEYS},
+            **{key: np.asarray(frame[key], dtype=np.int8) for key in MASK_OBSERVATION_KEYS},
+            **{key: np.asarray(frame[key], dtype=np.int64) for key in INDEX_OBSERVATION_KEYS},
         }
 
     def _controlled_damage(self, state: dict[str, Any]) -> int:

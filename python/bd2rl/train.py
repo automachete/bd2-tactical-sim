@@ -15,6 +15,7 @@ import torch
 from torch import Tensor
 
 from .batch_env import NativeBatchEnv
+from .env import OBSERVATION_KEYS
 from .model import (
     MODEL_ARCHITECTURE_ID,
     OBSERVATION_SCHEMA_ID,
@@ -52,13 +53,7 @@ def to_device(items: dict[str, np.ndarray], device: torch.device) -> dict[str, T
 
 
 def model_forward(model: torch.nn.Module, observation: dict[str, Tensor]) -> tuple[Tensor, Tensor]:
-    logits, values = model(
-        observation["units"].float(),
-        observation["unit_mask"].bool(),
-        observation["global"].float(),
-        observation["action_mask"].bool(),
-        observation["actor_indices"].long(),
-    )
+    logits, values = model(observation)
     # CUDA Graph backends reuse their output storage on the next replay.
     # Rollouts intentionally retain every step, so materialize stable tensors.
     return logits.clone(), values.clone()
@@ -107,11 +102,7 @@ def train(config: TrainConfig) -> None:
 
     for update in range(1, updates + 1):
         rollout: dict[str, list[Tensor]] = {
-            "units": [],
-            "unit_mask": [],
-            "global": [],
-            "action_mask": [],
-            "actor_indices": [],
+            **{key: [] for key in OBSERVATION_KEYS},
             "actions": [],
             "log_probs": [],
             "values": [],
@@ -122,8 +113,8 @@ def train(config: TrainConfig) -> None:
             batch = to_device(observations, device)
             with torch.no_grad(), torch.autocast(device.type, dtype=amp_dtype, enabled=amp_enabled):
                 logits, values = model_forward(model, batch)
-                actions, log_probs, _ = sample_actions(logits)
-            for key in ("units", "unit_mask", "global", "action_mask", "actor_indices"):
+                actions, log_probs, _ = sample_actions(logits, batch)
+            for key in OBSERVATION_KEYS:
                 rollout[key].append(batch[key])
             rollout["actions"].append(actions)
             rollout["log_probs"].append(log_probs)
@@ -168,13 +159,15 @@ def train(config: TrainConfig) -> None:
             for start in range(0, batch_size, config.minibatch_size):
                 selected = indices[start : start + config.minibatch_size]
                 minibatch = {
-                    key: value[selected]
-                    for key, value in flat.items()
-                    if key in {"units", "unit_mask", "global", "action_mask", "actor_indices"}
+                    key: value[selected] for key, value in flat.items() if key in OBSERVATION_KEYS
                 }
                 with torch.autocast(device.type, dtype=amp_dtype, enabled=amp_enabled):
                     logits, new_values = model_forward(model, minibatch)
-                    new_log_probs, entropy = evaluate_actions(logits, flat["actions"][selected])
+                    new_log_probs, entropy = evaluate_actions(
+                        logits,
+                        flat["actions"][selected],
+                        minibatch,
+                    )
                     ratio = (new_log_probs - flat["log_probs"][selected]).exp()
                     unclipped = ratio * flat_advantages[selected]
                     clipped = (
