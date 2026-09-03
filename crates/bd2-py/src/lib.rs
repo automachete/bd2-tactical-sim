@@ -2,11 +2,23 @@ use std::sync::Arc;
 
 use std::collections::BTreeMap;
 
-use bd2_core::{BattleEngine, BattleSetup, Side, TeamTurnPlan};
+use bd2_core::{BattleEngine, BattleSetup, Side, TeamTurnPlan, TerminalResult};
 use bd2_data::Database;
-use pyo3::{exceptions::PyValueError, prelude::*};
+use numpy::{IntoPyArray, ndarray::Array1, ndarray::Array2, ndarray::Array3};
+use pyo3::{exceptions::PyValueError, prelude::*, types::PyDict};
 use rayon::prelude::*;
-use serde_json::json;
+use serde::Serialize;
+
+const MAX_UNITS: usize = 32;
+const FEATURES: usize = 56;
+const MAX_TEAM: usize = 11;
+const MAX_ACTIONS: usize = 32;
+
+type PyBatchStep<'py> = (
+    Bound<'py, PyDict>,
+    Bound<'py, numpy::PyArray1<f32>>,
+    Bound<'py, numpy::PyArray1<bool>>,
+);
 
 fn py_error(error: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(error.to_string())
@@ -21,6 +33,23 @@ struct BatchSlot {
     engine: BattleEngine,
     episode: u64,
     last_damage: i64,
+}
+
+#[derive(Serialize)]
+struct TrainingFrame {
+    units: Vec<Vec<f32>>,
+    unit_mask: Vec<bool>,
+    global: Vec<f32>,
+    action_mask: Vec<Vec<bool>>,
+    actor_indices: Vec<usize>,
+}
+
+#[derive(Serialize)]
+struct BatchStepOutput {
+    observation: TrainingFrame,
+    reward: f32,
+    done: bool,
+    terminal: Option<TerminalResult>,
 }
 
 #[pyclass(name = "BatchSimulator")]
@@ -136,7 +165,53 @@ impl PyBatchSimulator {
         serde_json::to_string(&frames).map_err(py_error)
     }
 
+    fn observations_numpy<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let frames: Vec<_> = self
+            .slots
+            .iter()
+            .map(|slot| training_frame(&slot.engine, Side::Player))
+            .collect();
+        frames_to_numpy(py, &frames)
+    }
+
     fn reset_all_json(&mut self) -> PyResult<String> {
+        self.reset_slots()?;
+        self.observations_json()
+    }
+
+    fn reset_all_numpy<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        self.reset_slots()?;
+        self.observations_numpy(py)
+    }
+
+    fn step_json(&mut self, actions_json: &str) -> PyResult<String> {
+        let actions: Vec<Vec<usize>> = serde_json::from_str(actions_json).map_err(py_error)?;
+        let outputs = self.advance(&actions).map_err(py_error)?;
+        serde_json::to_string(&outputs).map_err(py_error)
+    }
+
+    fn step_numpy<'py>(
+        &mut self,
+        py: Python<'py>,
+        actions: Vec<Vec<usize>>,
+    ) -> PyResult<PyBatchStep<'py>> {
+        let outputs = self.advance(&actions).map_err(py_error)?;
+        let rewards = Array1::from_iter(outputs.iter().map(|output| output.reward));
+        let dones = Array1::from_iter(outputs.iter().map(|output| output.done));
+        let frames: Vec<_> = outputs
+            .into_iter()
+            .map(|output| output.observation)
+            .collect();
+        Ok((
+            frames_to_numpy(py, &frames)?,
+            rewards.into_pyarray(py),
+            dones.into_pyarray(py),
+        ))
+    }
+}
+
+impl PyBatchSimulator {
+    fn reset_slots(&mut self) -> PyResult<()> {
         let catalog = Arc::clone(&self.catalog);
         let setup = self.setup.clone();
         let seed = self.seed;
@@ -154,64 +229,117 @@ impl PyBatchSimulator {
                 slot.last_damage = 0;
                 Ok(())
             })
-            .map_err(py_error)?;
-        self.observations_json()
+            .map_err(py_error)
     }
 
-    fn step_json(&mut self, actions_json: &str) -> PyResult<String> {
-        let actions: Vec<Vec<usize>> = serde_json::from_str(actions_json).map_err(py_error)?;
+    fn advance(&mut self, actions: &[Vec<usize>]) -> Result<Vec<BatchStepOutput>, String> {
         if actions.len() != self.slots.len() {
-            return Err(PyValueError::new_err("action batch size mismatch"));
+            return Err("action batch size mismatch".into());
         }
         let catalog = Arc::clone(&self.catalog);
         let setup = self.setup.clone();
         let base_seed = self.seed;
-        let outputs: Result<Vec<_>, String> = self.slots.par_iter_mut().zip(actions.par_iter()).enumerate().map(|(index, (slot, indices))| {
-            if slot.engine.state().terminal.is_some() {
-                slot.episode = slot.episode.wrapping_add(1);
-                slot.engine = BattleEngine::new(Arc::clone(&catalog), setup.clone(), episode_seed(base_seed, index, slot.episode)).map_err(|error| error.to_string())?;
-                slot.last_damage = 0;
-            }
-            let side = slot.engine.state().active_side;
-            if slot.engine.state().rules.action_flow == bd2_core::ActionFlow::AlternatingCostume {
-                // Golden Colosseum combat is fully automatic; an environment
-                // step advances the single authoritative costume action.
-                slot.engine.step_auto().map_err(|error| error.to_string())?;
-            } else {
-                let order = slot.engine.state().teams[side.index()].action_order.clone();
-                let mut commands = BTreeMap::new();
-                for (position, unit_id) in order.iter().enumerate() {
-                    let legal = slot.engine.legal_actions_for_unit(*unit_id).map_err(|error| error.to_string())?.commands;
-                    if legal.is_empty() {
-                        continue;
-                    }
-                    let selected = indices.get(position).copied().ok_or_else(|| format!("missing action at slot {position}"))?;
-                    let command = legal.get(selected).cloned().ok_or_else(|| format!("masked action selected at slot {position}: {selected}"))?;
-                    commands.insert(*unit_id, command);
+        self.slots
+            .par_iter_mut()
+            .zip(actions.par_iter())
+            .enumerate()
+            .map(|(index, (slot, indices))| {
+                if slot.engine.state().terminal.is_some() {
+                    slot.episode = slot.episode.wrapping_add(1);
+                    slot.engine = BattleEngine::new(
+                        Arc::clone(&catalog),
+                        setup.clone(),
+                        episode_seed(base_seed, index, slot.episode),
+                    )
+                    .map_err(|error| error.to_string())?;
+                    slot.last_damage = 0;
                 }
-                slot.engine.step(TeamTurnPlan { side, order, commands, formation: BTreeMap::new() }).map_err(|error| error.to_string())?;
-            }
-            while slot.engine.state().terminal.is_none() && slot.engine.state().active_side != Side::Player {
-                slot.engine.step_auto().map_err(|error| error.to_string())?;
-            }
-            let total_damage: i64 = slot.engine.state().damage_by_source.iter().filter(|(unit_id, _)| slot.engine.state().units.get(unit_id).is_some_and(|unit| unit.side == Side::Player)).map(|(_, damage)| *damage).sum();
-            let dense = ((total_damage - slot.last_damage) as f32 / 1_000_000.0).clamp(-0.1, 0.1);
-            slot.last_damage = total_damage;
-            let terminal = slot.engine.state().terminal.clone();
-            let terminal_reward = terminal.as_ref().map(|result| match result.outcome { bd2_core::Outcome::Win => 1.0, bd2_core::Outcome::Loss => -1.0, _ => 0.0 }).unwrap_or(0.0);
-            let done = terminal.is_some();
-            let terminal_json = terminal.as_ref().map(|result| {
-                serde_json::to_value(result)
-                    .expect("terminal result must always serialize to JSON")
-            });
-            if done {
-                slot.episode = slot.episode.wrapping_add(1);
-                slot.engine = BattleEngine::new(Arc::clone(&catalog), setup.clone(), episode_seed(base_seed, index, slot.episode)).map_err(|error| error.to_string())?;
-                slot.last_damage = 0;
-            }
-            Ok(json!({ "observation": training_frame(&slot.engine, Side::Player), "reward": terminal_reward + dense, "done": done, "terminal": terminal_json }))
-        }).collect();
-        serde_json::to_string(&outputs.map_err(py_error)?).map_err(py_error)
+                let side = slot.engine.state().active_side;
+                if slot.engine.state().rules.action_flow == bd2_core::ActionFlow::AlternatingCostume
+                {
+                    // Golden Colosseum combat is fully automatic; an environment
+                    // step advances the single authoritative costume action.
+                    slot.engine.step_auto().map_err(|error| error.to_string())?;
+                } else {
+                    let order = slot.engine.state().teams[side.index()].action_order.clone();
+                    let mut commands = BTreeMap::new();
+                    for (position, unit_id) in order.iter().enumerate() {
+                        let legal = slot
+                            .engine
+                            .legal_actions_for_unit(*unit_id)
+                            .map_err(|error| error.to_string())?
+                            .commands;
+                        if legal.is_empty() {
+                            continue;
+                        }
+                        let selected = indices
+                            .get(position)
+                            .copied()
+                            .ok_or_else(|| format!("missing action at slot {position}"))?;
+                        let command = legal.get(selected).cloned().ok_or_else(|| {
+                            format!("masked action selected at slot {position}: {selected}")
+                        })?;
+                        commands.insert(*unit_id, command);
+                    }
+                    slot.engine
+                        .step(TeamTurnPlan {
+                            side,
+                            order,
+                            commands,
+                            formation: BTreeMap::new(),
+                        })
+                        .map_err(|error| error.to_string())?;
+                }
+                while slot.engine.state().terminal.is_none()
+                    && slot.engine.state().active_side != Side::Player
+                {
+                    slot.engine.step_auto().map_err(|error| error.to_string())?;
+                }
+                let total_damage: i64 = slot
+                    .engine
+                    .state()
+                    .damage_by_source
+                    .iter()
+                    .filter(|(unit_id, _)| {
+                        slot.engine
+                            .state()
+                            .units
+                            .get(unit_id)
+                            .is_some_and(|unit| unit.side == Side::Player)
+                    })
+                    .map(|(_, damage)| *damage)
+                    .sum();
+                let dense =
+                    ((total_damage - slot.last_damage) as f32 / 1_000_000.0).clamp(-0.1, 0.1);
+                slot.last_damage = total_damage;
+                let terminal = slot.engine.state().terminal.clone();
+                let terminal_reward = terminal
+                    .as_ref()
+                    .map(|result| match result.outcome {
+                        bd2_core::Outcome::Win => 1.0,
+                        bd2_core::Outcome::Loss => -1.0,
+                        _ => 0.0,
+                    })
+                    .unwrap_or(0.0);
+                let done = terminal.is_some();
+                if done {
+                    slot.episode = slot.episode.wrapping_add(1);
+                    slot.engine = BattleEngine::new(
+                        Arc::clone(&catalog),
+                        setup.clone(),
+                        episode_seed(base_seed, index, slot.episode),
+                    )
+                    .map_err(|error| error.to_string())?;
+                    slot.last_damage = 0;
+                }
+                Ok(BatchStepOutput {
+                    observation: training_frame(&slot.engine, Side::Player),
+                    reward: terminal_reward + dense,
+                    done,
+                    terminal,
+                })
+            })
+            .collect()
     }
 }
 
@@ -219,11 +347,7 @@ fn episode_seed(base: u64, index: usize, episode: u64) -> u64 {
     base ^ (index as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ episode.rotate_left(29)
 }
 
-fn training_frame(engine: &BattleEngine, side: Side) -> serde_json::Value {
-    const MAX_UNITS: usize = 32;
-    const FEATURES: usize = 56;
-    const MAX_TEAM: usize = 11;
-    const MAX_ACTIONS: usize = 32;
+fn training_frame(engine: &BattleEngine, side: Side) -> TrainingFrame {
     let state = engine.state();
     let mut units = vec![vec![0.0_f32; FEATURES]; MAX_UNITS];
     let mut unit_mask = vec![false; MAX_UNITS];
@@ -484,7 +608,64 @@ fn training_frame(engine: &BattleEngine, side: Side) -> serde_json::Value {
             .sum::<u32>() as f32
             / 100.0,
     ];
-    json!({ "units": units, "unit_mask": unit_mask, "global": global, "action_mask": action_mask, "actor_indices": actor_indices })
+    TrainingFrame {
+        units,
+        unit_mask,
+        global,
+        action_mask,
+        actor_indices,
+    }
+}
+
+fn frames_to_numpy<'py>(py: Python<'py>, frames: &[TrainingFrame]) -> PyResult<Bound<'py, PyDict>> {
+    let batch = frames.len();
+    let units = Array3::from_shape_vec(
+        (batch, MAX_UNITS, FEATURES),
+        frames
+            .iter()
+            .flat_map(|frame| frame.units.iter().flatten().copied())
+            .collect(),
+    )
+    .map_err(py_error)?;
+    let unit_mask = Array2::from_shape_vec(
+        (batch, MAX_UNITS),
+        frames
+            .iter()
+            .flat_map(|frame| frame.unit_mask.iter().copied())
+            .collect(),
+    )
+    .map_err(py_error)?;
+    let global = Array2::from_shape_vec(
+        (batch, 17),
+        frames
+            .iter()
+            .flat_map(|frame| frame.global.iter().copied())
+            .collect(),
+    )
+    .map_err(py_error)?;
+    let action_mask = Array3::from_shape_vec(
+        (batch, MAX_TEAM, MAX_ACTIONS),
+        frames
+            .iter()
+            .flat_map(|frame| frame.action_mask.iter().flatten().copied())
+            .collect(),
+    )
+    .map_err(py_error)?;
+    let actor_indices = Array2::from_shape_vec(
+        (batch, MAX_TEAM),
+        frames
+            .iter()
+            .flat_map(|frame| frame.actor_indices.iter().map(|value| *value as i64))
+            .collect(),
+    )
+    .map_err(py_error)?;
+    let result = PyDict::new(py);
+    result.set_item("units", units.into_pyarray(py))?;
+    result.set_item("unit_mask", unit_mask.into_pyarray(py))?;
+    result.set_item("global", global.into_pyarray(py))?;
+    result.set_item("action_mask", action_mask.into_pyarray(py))?;
+    result.set_item("actor_indices", actor_indices.into_pyarray(py))?;
+    Ok(result)
 }
 
 fn parse_side(value: &str) -> PyResult<Side> {

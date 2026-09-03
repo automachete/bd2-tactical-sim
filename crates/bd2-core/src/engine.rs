@@ -232,7 +232,6 @@ impl BattleEngine {
                     },
                 ],
                 rules: setup.rules,
-                pending_events: Vec::new(),
                 event_log: Vec::new(),
                 damage_by_source: BTreeMap::new(),
                 rng,
@@ -395,17 +394,12 @@ impl BattleEngine {
                 commands: Vec::new(),
             });
         }
-        let death_time = self
-            .state
-            .golden_colosseum
-            .as_ref()
-            .is_some_and(|state| state.all_turn >= state.death_time_all_turn);
         let mut commands = if golden {
             Vec::new()
         } else {
             vec![UnitCommand::NormalAttack, UnitCommand::Knockback]
         };
-        if !has_tag(unit, "SILENCE") && !death_time {
+        if self.costume_action_block(unit).is_none() {
             let available_sp = self.state.teams[unit.side.index()].sp;
             for loadout in &unit.costume_loadout {
                 let cooldown = unit.cooldowns.get(&loadout.costume_id).ok_or_else(|| {
@@ -457,6 +451,22 @@ impl BattleEngine {
             commands.push(UnitCommand::NormalAttack);
         }
         Ok(LegalUnitActions { unit_id, commands })
+    }
+
+    fn costume_action_block(&self, unit: &UnitState) -> Option<&'static str> {
+        if has_tag(unit, "SILENCE") {
+            return Some("actor is silenced");
+        }
+        if self.state.rules.mode == BattleMode::GoldenColosseum
+            && self
+                .state
+                .golden_colosseum
+                .as_ref()
+                .is_some_and(|state| state.all_turn >= state.death_time_all_turn)
+        {
+            return Some("skill is disabled by Golden Colosseum rules");
+        }
+        None
     }
 
     pub fn auto_plan(&self, side: Side) -> TeamTurnPlan {
@@ -1218,7 +1228,7 @@ impl BattleEngine {
                     "Monster Chaser action order references missing unit {actor_id}"
                 ))
             })?;
-            if !unit.alive {
+            if !unit.alive || !unit.can_act || self.costume_action_block(&unit).is_some() {
                 continue;
             }
             for loadout in &unit.costume_loadout {
@@ -1329,8 +1339,8 @@ impl BattleEngine {
                     .units
                     .get(&actor_id)
                     .ok_or_else(|| BattleError::IllegalAction("actor missing".into()))?;
-                if has_tag(unit, "SILENCE") {
-                    return Err(BattleError::IllegalAction("actor is silenced".into()));
+                if let Some(reason) = self.costume_action_block(unit) {
+                    return Err(BattleError::IllegalAction(reason.into()));
                 }
                 let variant = self
                     .resolve_variant(unit, &costume_id, burst_level)?
@@ -1340,14 +1350,7 @@ impl BattleEngine {
                         "skill variant is not compiled".into(),
                     ));
                 }
-                if self.state.rules.mode == BattleMode::GoldenColosseum
-                    && (variant.preemptive
-                        || self
-                            .state
-                            .golden_colosseum
-                            .as_ref()
-                            .is_some_and(|state| state.all_turn >= state.death_time_all_turn))
-                {
+                if self.state.rules.mode == BattleMode::GoldenColosseum && variant.preemptive {
                     return Err(BattleError::IllegalAction(
                         "skill is disabled by Golden Colosseum rules".into(),
                     ));
@@ -4925,6 +4928,7 @@ fn validate_state(catalog: &Catalog, state: &BattleState) -> Result<()> {
             "team slots must be ordered PLAYER, ENEMY".into(),
         ));
     }
+    validate_event_history(state)?;
 
     let mut occupied = BTreeSet::new();
     let mut effect_instances = BTreeSet::new();
@@ -5268,6 +5272,99 @@ fn validate_state(catalog: &Catalog, state: &BattleState) -> Result<()> {
             ));
         }
         (_, None) => {}
+    }
+    Ok(())
+}
+
+fn validate_event_history(state: &BattleState) -> Result<()> {
+    if state.event_sequence != state.event_log.len() as u64 {
+        return Err(BattleError::InvalidScenario(format!(
+            "next event sequence {} does not match event log length {}",
+            state.event_sequence,
+            state.event_log.len()
+        )));
+    }
+    if !matches!(
+        state.event_log.first().map(|event| &event.kind),
+        Some(BattleEventKind::BattleStarted { .. })
+    ) {
+        return Err(BattleError::InvalidScenario(
+            "event log must begin with exactly one BATTLE_STARTED event".into(),
+        ));
+    }
+    let mut battle_started = 0_usize;
+    let mut battle_ended = Vec::new();
+    let mut battle_has_ended = false;
+    for (index, event) in state.event_log.iter().enumerate() {
+        if event.sequence != index as u64 {
+            return Err(BattleError::InvalidScenario(format!(
+                "event log sequence {} at index {index} is not contiguous",
+                event.sequence
+            )));
+        }
+        if battle_has_ended && matches!(event.kind, BattleEventKind::ActionStarted { .. }) {
+            return Err(BattleError::InvalidScenario(
+                "event log starts an action after BATTLE_ENDED".into(),
+            ));
+        }
+        match &event.kind {
+            BattleEventKind::BattleStarted { .. } => battle_started += 1,
+            BattleEventKind::BattleEnded { result } => {
+                battle_has_ended = true;
+                battle_ended.push(result);
+            }
+            BattleEventKind::SpChanged { before, after, .. }
+                if !(0..=state.rules.sp_cap).contains(before)
+                    || !(0..=state.rules.sp_cap).contains(after) =>
+            {
+                return Err(BattleError::InvalidScenario(format!(
+                    "SP_CHANGE event {index} is outside 0..={}",
+                    state.rules.sp_cap
+                )));
+            }
+            BattleEventKind::DamageApplied {
+                amount,
+                hp_before,
+                hp_after,
+                ..
+            } if *amount < 0 || *hp_before < 0 || *hp_after < 0 || hp_after > hp_before => {
+                return Err(BattleError::InvalidScenario(format!(
+                    "DAMAGE_APPLIED event {index} has impossible amounts"
+                )));
+            }
+            BattleEventKind::HealApplied {
+                amount,
+                hp_before,
+                hp_after,
+                ..
+            } if *amount < 0 || *hp_before < 0 || *hp_after < *hp_before => {
+                return Err(BattleError::InvalidScenario(format!(
+                    "HEAL_APPLIED event {index} has impossible amounts"
+                )));
+            }
+            _ => {}
+        }
+    }
+    if battle_started != 1 {
+        return Err(BattleError::InvalidScenario(format!(
+            "event log contains {battle_started} BATTLE_STARTED events"
+        )));
+    }
+    match (&state.terminal, battle_ended.as_slice()) {
+        (None, []) => {}
+        (Some(terminal), [event_terminal]) if *terminal == **event_terminal => {}
+        (None, ended) => {
+            return Err(BattleError::InvalidScenario(format!(
+                "non-terminal state contains {} BATTLE_ENDED events",
+                ended.len()
+            )));
+        }
+        (Some(_), ended) => {
+            return Err(BattleError::InvalidScenario(format!(
+                "terminal state has {} matching BATTLE_ENDED events",
+                ended.len()
+            )));
+        }
     }
     Ok(())
 }
@@ -5839,7 +5936,7 @@ mod tests {
     use crate::{
         BarrierSpec, CostumeLoadout, CounterSpec, EffectSpec, Element, EquipmentDefinition,
         EquipmentStat, GridDefinition, MonsterChaserSetup, MonsterDefinition, Offset, PeriodicSpec,
-        SourceRecord, StackRule, UnitBuildSettings, UnitSetup,
+        SkillCondition, SourceRecord, StackRule, UnitBuildSettings, UnitSetup,
     };
 
     fn stats(hp: i64, attack: i64) -> Stats {
@@ -6119,6 +6216,216 @@ mod tests {
         second.restore_json(&snapshot).unwrap();
         assert_eq!(first.snapshot(), second.snapshot());
         assert_eq!(first.step_auto().unwrap(), second.step_auto().unwrap());
+    }
+
+    #[test]
+    fn restore_rejects_event_counter_gaps_and_remains_atomic() {
+        let mut engine = BattleEngine::new(catalog(), setup(BattleMode::Normal), 99).unwrap();
+        let baseline = engine.snapshot();
+        let mut corrupted = baseline.clone();
+        corrupted.event_sequence += 1;
+        let error = engine
+            .restore_json(&serde_json::to_string(&corrupted).unwrap())
+            .unwrap_err();
+        assert!(error.to_string().contains("event sequence"));
+        assert_eq!(engine.snapshot(), baseline);
+    }
+
+    #[test]
+    fn restore_validates_event_history_numeric_boundaries() {
+        fn append(state: &mut BattleState, kind: BattleEventKind) {
+            state.event_log.push(BattleEvent {
+                sequence: state.event_sequence,
+                kind,
+            });
+            state.event_sequence += 1;
+        }
+        fn rejected(catalog: &Arc<Catalog>, state: BattleState) {
+            assert!(BattleEngine::from_state(Arc::clone(catalog), state).is_err());
+        }
+        fn accepted(catalog: &Arc<Catalog>, state: BattleState) {
+            BattleEngine::from_state(Arc::clone(catalog), state).unwrap();
+        }
+
+        let catalog = catalog();
+        let baseline = BattleEngine::new(Arc::clone(&catalog), setup(BattleMode::Normal), 99)
+            .unwrap()
+            .snapshot();
+
+        for (before, after) in [(-1, 0), (0, crate::SP_CAP + 1)] {
+            let mut state = baseline.clone();
+            append(
+                &mut state,
+                BattleEventKind::SpChanged {
+                    side: Side::Player,
+                    before,
+                    after,
+                    reason: "CORRUPTED".into(),
+                },
+            );
+            rejected(&catalog, state);
+        }
+        for (before, after) in [(0, 1), (crate::SP_CAP - 1, crate::SP_CAP)] {
+            let mut state = baseline.clone();
+            append(
+                &mut state,
+                BattleEventKind::SpChanged {
+                    side: Side::Player,
+                    before,
+                    after,
+                    reason: "BOUNDARY".into(),
+                },
+            );
+            accepted(&catalog, state);
+        }
+
+        for (amount, hp_before, hp_after) in [(-1, 1, 0), (1, -1, 0), (1, 1, -1), (1, 1, 2)] {
+            let mut state = baseline.clone();
+            append(
+                &mut state,
+                BattleEventKind::DamageApplied {
+                    actor_id: 1,
+                    target_id: 2,
+                    amount,
+                    hp_before,
+                    hp_after,
+                    critical: false,
+                    hit: 1,
+                },
+            );
+            rejected(&catalog, state);
+        }
+        for (amount, hp_before, hp_after) in [(0, 0, 0), (1, 1, 0)] {
+            let mut state = baseline.clone();
+            append(
+                &mut state,
+                BattleEventKind::DamageApplied {
+                    actor_id: 1,
+                    target_id: 2,
+                    amount,
+                    hp_before,
+                    hp_after,
+                    critical: false,
+                    hit: 1,
+                },
+            );
+            accepted(&catalog, state);
+        }
+
+        for (amount, hp_before, hp_after) in [(-1, 0, 1), (1, -1, 1), (1, 0, -1), (1, 2, 1)] {
+            let mut state = baseline.clone();
+            append(
+                &mut state,
+                BattleEventKind::HealApplied {
+                    actor_id: 1,
+                    target_id: 1,
+                    amount,
+                    hp_before,
+                    hp_after,
+                },
+            );
+            rejected(&catalog, state);
+        }
+        for (amount, hp_before, hp_after) in [(0, 0, 0), (1, 0, 1)] {
+            let mut state = baseline.clone();
+            append(
+                &mut state,
+                BattleEventKind::HealApplied {
+                    actor_id: 1,
+                    target_id: 1,
+                    amount,
+                    hp_before,
+                    hp_after,
+                },
+            );
+            accepted(&catalog, state);
+        }
+    }
+
+    #[test]
+    fn restore_validates_event_history_lifecycle() {
+        fn resequence(state: &mut BattleState) {
+            for (index, event) in state.event_log.iter_mut().enumerate() {
+                event.sequence = index as u64;
+            }
+            state.event_sequence = state.event_log.len() as u64;
+        }
+        let catalog = catalog();
+        let baseline = BattleEngine::new(Arc::clone(&catalog), setup(BattleMode::Normal), 99)
+            .unwrap()
+            .snapshot();
+
+        let mut missing_start = baseline.clone();
+        missing_start.event_log[0].kind = BattleEventKind::TurnStarted {
+            side: Side::Player,
+            turn: 1,
+            sp: 15,
+        };
+        assert!(BattleEngine::from_state(Arc::clone(&catalog), missing_start).is_err());
+
+        let mut duplicate_start = baseline.clone();
+        duplicate_start.event_log.push(BattleEvent {
+            sequence: duplicate_start.event_sequence,
+            kind: BattleEventKind::BattleStarted {
+                first_side: Side::Player,
+            },
+        });
+        duplicate_start.event_sequence += 1;
+        assert!(BattleEngine::from_state(Arc::clone(&catalog), duplicate_start).is_err());
+
+        let mut terminal_engine =
+            BattleEngine::new(Arc::clone(&catalog), setup(BattleMode::Normal), 99).unwrap();
+        while terminal_engine.state.terminal.is_none() {
+            terminal_engine.step_auto().unwrap();
+        }
+        let terminal = terminal_engine.snapshot();
+        let end_index = terminal
+            .event_log
+            .iter()
+            .position(|event| matches!(event.kind, BattleEventKind::BattleEnded { .. }))
+            .unwrap();
+
+        let mut missing_end = terminal.clone();
+        missing_end.event_log.remove(end_index);
+        resequence(&mut missing_end);
+        assert!(BattleEngine::from_state(Arc::clone(&catalog), missing_end).is_err());
+
+        let mut mismatched_end = terminal.clone();
+        if let BattleEventKind::BattleEnded { result } =
+            &mut mismatched_end.event_log[end_index].kind
+        {
+            result.reason.push_str("-CORRUPTED");
+        }
+        assert!(BattleEngine::from_state(Arc::clone(&catalog), mismatched_end).is_err());
+
+        let mut duplicate_end = terminal.clone();
+        duplicate_end
+            .event_log
+            .push(duplicate_end.event_log[end_index].clone());
+        resequence(&mut duplicate_end);
+        assert!(BattleEngine::from_state(Arc::clone(&catalog), duplicate_end).is_err());
+
+        let mut action_after_end = terminal.clone();
+        action_after_end.event_log.push(BattleEvent {
+            sequence: action_after_end.event_sequence,
+            kind: BattleEventKind::ActionStarted {
+                actor_id: 1,
+                command: UnitCommand::NormalAttack,
+            },
+        });
+        action_after_end.event_sequence += 1;
+        assert!(BattleEngine::from_state(Arc::clone(&catalog), action_after_end).is_err());
+
+        let terminal_result = terminal.terminal.clone().unwrap();
+        let mut premature_end = baseline;
+        premature_end.event_log.push(BattleEvent {
+            sequence: premature_end.event_sequence,
+            kind: BattleEventKind::BattleEnded {
+                result: terminal_result,
+            },
+        });
+        premature_end.event_sequence += 1;
+        assert!(BattleEngine::from_state(catalog, premature_end).is_err());
     }
 
     #[test]
@@ -7276,6 +7583,60 @@ mod tests {
         };
         engine.step(plan).unwrap();
         assert_eq!(engine.state.teams[Side::Player.index()].sp, 14);
+    }
+
+    #[test]
+    fn dead_or_inactive_units_cannot_fire_monster_conditionals() {
+        fn engine_with_conditional() -> BattleEngine {
+            let mut owned = (*catalog()).clone();
+            let mut conditional = owned.costumes["hero_skill"].clone();
+            conditional.id = "enemy_conditional".into();
+            conditional.character_id = "enemy".into();
+            conditional.variants[0].sp_cost = 0;
+            conditional.variants[0].activation_condition =
+                Some(SkillCondition::AnyOpponentChainAtLeast { value: 8 });
+            conditional.variants[0].max_uses_per_party = Some(1);
+            owned
+                .characters
+                .get_mut("enemy")
+                .unwrap()
+                .costume_ids
+                .push(conditional.id.clone());
+            owned.costumes.insert(conditional.id.clone(), conditional);
+
+            let mut battle = setup(BattleMode::Normal);
+            battle.units[1].costume_loadout = vec![CostumeLoadout {
+                costume_id: "enemy_conditional".into(),
+                enhancement: 5,
+                burst_level: 0,
+                potential_mask: 0,
+                permanent_potential_enabled: false,
+                costume_link_target: None,
+            }];
+            battle.units[1].ai_priority = vec!["enemy_conditional".into()];
+            let mut engine = BattleEngine::new(Arc::new(owned), battle, 1).unwrap();
+            engine.state.teams[Side::Player.index()]
+                .chain_by_target
+                .insert(2, 8);
+            engine
+        }
+
+        for inactive in [false, true] {
+            let mut engine = engine_with_conditional();
+            if inactive {
+                engine.state.units.get_mut(&2).unwrap().can_act = false;
+            } else {
+                let actor = engine.state.units.get_mut(&2).unwrap();
+                actor.alive = false;
+                actor.hp = 0;
+            }
+
+            let sequence_before = engine.state.action_sequence;
+            engine.trigger_monster_conditionals().unwrap();
+
+            assert_eq!(engine.state.action_sequence, sequence_before);
+            assert!(engine.state.units[&2].triggered_skill_uses.is_empty());
+        }
     }
 
     #[test]

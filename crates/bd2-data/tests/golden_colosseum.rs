@@ -488,6 +488,15 @@ fn dead_next_costume_is_skipped_and_chain_never_resets() {
 fn death_time_stacks_every_two_all_turns_and_disables_skills() {
     let (catalog, setup) = load();
     let mut engine = BattleEngine::new(Arc::clone(&catalog), durable_setup(setup), 3).unwrap();
+    let initial_actor = engine.state().teams[engine.state().active_side.index()].action_order[0];
+    assert!(
+        engine
+            .legal_actions_for_unit(initial_actor)
+            .unwrap()
+            .commands
+            .iter()
+            .any(|command| matches!(command, bd2_core::UnitCommand::UseCostume { .. }))
+    );
     while engine.state().golden_colosseum.as_ref().unwrap().all_turn < 7
         && engine.state().terminal.is_none()
     {
@@ -504,11 +513,17 @@ fn death_time_stacks_every_two_all_turns_and_disables_skills() {
         .unwrap();
     let commands = engine.legal_actions_for_unit(actor).unwrap().commands;
     assert_eq!(commands, vec![bd2_core::UnitCommand::NormalAttack]);
-    assert!(engine.state().units[&actor].effects.iter().any(|effect| {
-        effect.spec.tags.contains("DEATH_TIME")
-            && effect.spec.modifiers.attack_bp == 10_000
-            && effect.spec.modifiers.defense_bp == -10_000
-    }));
+    let death_time = engine.state().units[&actor]
+        .effects
+        .iter()
+        .find(|effect| effect.spec.effect_id == "GOLDEN_DEATH_TIME_1")
+        .unwrap();
+    assert!(death_time.spec.tags.contains("DEATH_TIME"));
+    assert_eq!(death_time.spec.modifiers.attack_bp, 10_000);
+    assert_eq!(death_time.spec.modifiers.magic_bp, 10_000);
+    assert_eq!(death_time.spec.modifiers.defense_bp, -10_000);
+    assert_eq!(death_time.spec.modifiers.magic_resist_bp, -10_000);
+    assert_eq!(death_time.spec.modifiers.incoming_damage_bp, 5_000);
 }
 
 #[test]

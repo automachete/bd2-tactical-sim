@@ -1304,7 +1304,6 @@ pub struct BattleState {
     pub event_sequence: u64,
     pub units: BTreeMap<UnitId, UnitState>,
     pub teams: [TeamState; 2],
-    pub pending_events: Vec<BattleEvent>,
     pub event_log: Vec<BattleEvent>,
     pub damage_by_source: BTreeMap<UnitId, i64>,
     pub rng: crate::DeterministicRng,

@@ -30,6 +30,7 @@ bd2-evaluate = "bd2rl.evaluate:main"
 bd2-gui = "bd2rl.gui:main"
 bd2-play = "bd2rl.gui:main"
 bd2-device-check = "bd2rl.device_check:main"
+bd2-quality-benchmark = "bd2rl.quality_benchmark:main"
 
 [tool.maturin]
 manifest-path = "crates/bd2-py/Cargo.toml"

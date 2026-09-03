@@ -360,6 +360,48 @@ def test_native_batch_frame_has_valid_padding_masks() -> None:
     )
 
 
+def test_native_numpy_batch_path_is_exactly_equivalent_to_json_path() -> None:
+    setup_json = MONSTER_SCENARIO.read_text(encoding="utf-8")
+    direct = BatchSimulator(str(DATABASE), setup_json, 4, 97)
+    legacy = BatchSimulator(str(DATABASE), setup_json, 4, 97)
+
+    direct_observations = direct.observations_numpy()
+    legacy_observations = json.loads(legacy.observations_json())
+    for key in ("units", "unit_mask", "global", "action_mask", "actor_indices"):
+        expected = np.asarray(
+            [frame[key] for frame in legacy_observations],
+            dtype=np.asarray(direct_observations[key]).dtype,
+        )
+        np.testing.assert_array_equal(np.asarray(direct_observations[key]), expected)
+
+    actions = [[0] * MAX_TEAM_UNITS for _ in range(4)]
+    direct_frames, direct_rewards, direct_dones = direct.step_numpy(actions)
+    legacy_outputs = json.loads(legacy.step_json(json.dumps(actions)))
+    for key in ("units", "unit_mask", "global", "action_mask", "actor_indices"):
+        expected = np.asarray(
+            [item["observation"][key] for item in legacy_outputs],
+            dtype=np.asarray(direct_frames[key]).dtype,
+        )
+        np.testing.assert_array_equal(np.asarray(direct_frames[key]), expected)
+    np.testing.assert_array_equal(
+        np.asarray(direct_rewards),
+        np.asarray([item["reward"] for item in legacy_outputs], dtype=np.float32),
+    )
+    np.testing.assert_array_equal(
+        np.asarray(direct_dones),
+        np.asarray([item["done"] for item in legacy_outputs], dtype=np.bool_),
+    )
+
+    direct_reset = direct.reset_all_numpy()
+    legacy_reset = json.loads(legacy.reset_all_json())
+    for key in ("units", "unit_mask", "global", "action_mask", "actor_indices"):
+        expected = np.asarray(
+            [frame[key] for frame in legacy_reset],
+            dtype=np.asarray(direct_reset[key]).dtype,
+        )
+        np.testing.assert_array_equal(np.asarray(direct_reset[key]), expected)
+
+
 def test_gymnasium_contract() -> None:
     config = EnvConfig(DATABASE, ROOT / "data/scenarios/normal-demo.json", seed=31)
     environment = Bd2Env(config)

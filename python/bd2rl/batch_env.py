@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -23,21 +22,29 @@ class NativeBatchEnv:
         self.num_envs = num_envs
 
     def reset(self) -> dict[str, np.ndarray]:
-        return self._stack(json.loads(self.native.reset_all_json()))
+        return self._native_arrays(self.native.reset_all_numpy())
 
     def observe(self) -> dict[str, np.ndarray]:
-        return self._stack(json.loads(self.native.observations_json()))
+        return self._native_arrays(self.native.observations_numpy())
 
     def step(self, actions: np.ndarray) -> tuple[dict[str, np.ndarray], np.ndarray, np.ndarray]:
-        payload = json.loads(
-            self.native.step_json(
-                json.dumps(np.asarray(actions, dtype=np.int64).tolist(), separators=(",", ":"))
-            )
+        action_array = np.asarray(actions, dtype=np.int64)
+        observations, rewards, dones = self.native.step_numpy(action_array.tolist())
+        return (
+            self._native_arrays(observations),
+            np.asarray(rewards, dtype=np.float32),
+            np.asarray(dones, dtype=np.float32),
         )
-        observations = self._stack([item["observation"] for item in payload])
-        rewards = np.asarray([item["reward"] for item in payload], dtype=np.float32)
-        dones = np.asarray([item["done"] for item in payload], dtype=np.float32)
-        return observations, rewards, dones
+
+    @staticmethod
+    def _native_arrays(items: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        return {
+            "units": np.asarray(items["units"], dtype=np.float32),
+            "unit_mask": np.asarray(items["unit_mask"], dtype=np.bool_),
+            "global": np.asarray(items["global"], dtype=np.float32),
+            "action_mask": np.asarray(items["action_mask"], dtype=np.bool_),
+            "actor_indices": np.asarray(items["actor_indices"], dtype=np.int64),
+        }
 
     @staticmethod
     def _stack(items: list[dict[str, object]]) -> dict[str, np.ndarray]:
