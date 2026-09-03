@@ -39,7 +39,8 @@
 .simulator-shell[data-active-element="dark"] { --selection-accent: var(--element-dark); --selection-surface: #62438e; --selection-soft: #b58af42e; --selection-ink: #fff; }
 
 * { box-sizing: border-box; }
-html, body { width: 100%; min-width: 1024px; height: 100%; margin: 0; overflow: hidden; background: #0f0f0f; color: var(--ink); }
+html, body, #app { width: 100%; height: 100%; }
+html, body { min-width: 1024px; margin: 0; overflow: hidden; background: #0f0f0f; color: var(--ink); }
 button, input, select, textarea { font: inherit; }
 button { color: inherit; border: 0; cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .38; }

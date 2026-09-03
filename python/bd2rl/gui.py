@@ -923,6 +923,12 @@ def main() -> None:
     parser.add_argument("--mcts-max-branching", type=int, default=24)
     parser.add_argument("--no-open", action="store_true")
     args = parser.parse_args()
+    ui_root = repository_root / "ui/dist"
+    if not (ui_root / "index.html").is_file():
+        raise RuntimeError(
+            "GUI production bundle is missing; run `npm install` and `npm run build` "
+            "in the ui directory before starting bd2-play"
+        )
     config = MctsConfig(
         simulations=args.mcts_simulations,
         rollout_depth=args.mcts_rollout_depth,
@@ -936,9 +942,7 @@ def main() -> None:
         args.saved_setup_directory,
         args.character_profile_path,
     )
-    server = ThreadingHTTPServer(
-        (args.host, args.port), handler_factory(session, repository_root / "ui")
-    )
+    server = ThreadingHTTPServer((args.host, args.port), handler_factory(session, ui_root))
     url = f"http://{args.host}:{args.port}/"
     print(f"BrownDust2 simulator debug player: {url}")
     if not args.no_open:

@@ -80,6 +80,15 @@ test("renders a single top-down battlefield with two complete 3x4 grids", async 
   await expect(page.locator("#view-toggle")).toHaveCount(0);
 });
 
+test("Svelte mount boundary preserves the full viewport layout", async ({ page }) => {
+  const shell = await page.getByTestId("simulator-shell").boundingBox();
+  expect(shell).not.toBeNull();
+  expect(shell.x).toBe(0);
+  expect(shell.y).toBe(0);
+  expect(shell.width).toBe(1440);
+  expect(shell.height).toBe(900);
+});
+
 test("loads generated token portraits only from local 64px PNG assets", async ({ page, request }) => {
   const portraits = page.locator("img.character-portrait");
   expect(await portraits.count()).toBeGreaterThan(0);

@@ -1449,9 +1449,19 @@ def test_gui_rejects_fractional_turn_payload_without_mutating_battle() -> None:
     assert session.simulator.state_json() == before
 
 
-def test_gui_http_catalog_start_and_turn_round_trip() -> None:
+def test_gui_http_catalog_start_and_turn_round_trip(tmp_path: Path) -> None:
     session = GuiSession(DATABASE, SCENARIOS, 29, FAST_MCTS)
-    server = ThreadingHTTPServer(("127.0.0.1", 0), handler_factory(session, UI))
+    static_root = tmp_path / "dist"
+    asset_root = static_root / "assets"
+    portrait_root = asset_root / "character-icons/64"
+    portrait_root.mkdir(parents=True)
+    (static_root / "index.html").write_text(
+        '<div id="app"></div><script type="module" src="/assets/app.js"></script>',
+        encoding="utf-8",
+    )
+    (asset_root / "app.js").write_text("export {};\n", encoding="utf-8")
+    (portrait_root / "Lathel.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler_factory(session, static_root))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base = f"http://127.0.0.1:{server.server_port}"
@@ -1521,7 +1531,7 @@ def test_gui_http_catalog_start_and_turn_round_trip() -> None:
         restored = post("/api/rollback", {})
         assert restored["state"] == started["state"]
 
-        with urllib.request.urlopen(base + "/battle-ui-model.mjs", timeout=10) as response:
+        with urllib.request.urlopen(base + "/assets/app.js", timeout=10) as response:
             assert response.headers.get_content_type() == "text/javascript"
         with urllib.request.urlopen(
             base + "/assets/character-icons/64/Lathel.png", timeout=10

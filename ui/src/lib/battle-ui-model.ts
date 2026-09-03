@@ -1,6 +1,9 @@
 export const GRID_ROWS = 3;
 export const GRID_DEPTHS = 4;
 
+export type GridCell = { row: number; depth: number };
+export type Formation = Record<string, GridCell>;
+
 export const cellKey = (row, depth) => `${Number(row)},${Number(depth)}`;
 
 export const isValidCell = (row, depth, rows = GRID_ROWS, depths = GRID_DEPTHS) =>
@@ -11,8 +14,8 @@ export const isValidCell = (row, depth, rows = GRID_ROWS, depths = GRID_DEPTHS) 
   Number(depth) >= 0 &&
   Number(depth) < depths;
 
-export const normalizeFormation = (units, partyNo = null) => {
-  const formation = {};
+export const normalizeFormation = (units, partyNo = null): Formation => {
+  const formation: Formation = {};
   for (const unit of units ?? []) {
     if (partyNo !== null && Number(unit.party_no ?? 1) !== Number(partyNo)) continue;
     const position = unit.position ?? unit;
@@ -24,7 +27,7 @@ export const normalizeFormation = (units, partyNo = null) => {
   return formation;
 };
 
-export const occupantAt = (formation, row, depth, exceptUnitId = null) =>
+export const occupantAt = (formation: Formation, row, depth, exceptUnitId = null) =>
   Object.entries(formation ?? {}).find(
     ([unitId, cell]) =>
       String(unitId) !== String(exceptUnitId) &&
@@ -55,7 +58,7 @@ export const moveFormation = (
   return { formation: next, moved: true, swappedUnitId: occupied, source, target };
 };
 
-export const serializeFormation = (formation, allowedUnitIds = null) => {
+export const serializeFormation = (formation: Formation, allowedUnitIds = null) => {
   const allowed = allowedUnitIds ? new Set(allowedUnitIds.map(String)) : null;
   return Object.fromEntries(
     Object.entries(formation ?? {})

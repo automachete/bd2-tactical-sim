@@ -27,7 +27,7 @@ import {
   selectCommand,
   serializeFormation,
   spBreakdown,
-} from "../battle-ui-model.mjs";
+} from "../src/lib/battle-ui-model";
 
 const legal = new Map([
   [1, { commands: [{ type: "NORMAL_ATTACK" }, { type: "USE_COSTUME", costume_id: "a", ui: { sp_cost: 4, burst_sp_cost: 0 } }] }],

@@ -2,6 +2,8 @@
 /.venv/
 /dist/
 /build/
+/ui/dist/
+/ui/node_modules/
 *.pyd
 *.pdb
 *.dll

@@ -503,12 +503,12 @@ export const t = (key, values = {}) => {
 
 export const applyTranslations = (root = document) => {
   root.querySelectorAll("[data-i18n]").forEach(node => {
-    node.textContent = t(node.dataset.i18n);
+    node.textContent = t((node as HTMLElement).dataset.i18n);
   });
   root.querySelectorAll("[data-i18n-aria]").forEach(node => {
-    node.setAttribute("aria-label", t(node.dataset.i18nAria));
+    node.setAttribute("aria-label", t((node as HTMLElement).dataset.i18nAria));
   });
   root.querySelectorAll("[data-i18n-placeholder]").forEach(node => {
-    node.setAttribute("placeholder", t(node.dataset.i18nPlaceholder));
+    node.setAttribute("placeholder", t((node as HTMLElement).dataset.i18nPlaceholder));
   });
 };

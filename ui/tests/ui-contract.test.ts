@@ -1,26 +1,41 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const html = readFileSync(`${root}/index.html`, "utf8");
-const css = readFileSync(`${root}/styles.css`, "utf8");
-const app = readFileSync(`${root}/app.js`, "utf8");
-const i18n = readFileSync(`${root}/i18n.mjs`, "utf8");
-const battleModel = readFileSync(`${root}/battle-ui-model.mjs`, "utf8");
+const entryHtml = readFileSync(`${root}/index.html`, "utf8");
+const svelteShell = readFileSync(`${root}/src/App.svelte`, "utf8");
+const html = `${entryHtml}\n${svelteShell}`;
+const css = readFileSync(`${root}/src/styles.css`, "utf8");
+const app = readFileSync(`${root}/src/lib/battle-controller.ts`, "utf8");
+const i18n = readFileSync(`${root}/src/lib/i18n.ts`, "utf8");
+const battleModel = readFileSync(`${root}/src/lib/battle-ui-model.ts`, "utf8");
+const main = readFileSync(`${root}/src/main.ts`, "utf8");
+const guiServer = readFileSync(`${root}/../python/bd2rl/gui.py`, "utf8");
 
-for (const [name, content] of [["HTML", html], ["CSS", css], ["JavaScript", app]]) {
+test("Svelte 5 and Vite fully own the production UI entry path", () => {
+  assert.match(entryHtml, /src="\/src\/main\.ts"/);
+  assert.match(main, /mount\(App, \{ target \}\)/);
+  assert.match(svelteShell, /onMount\(\(\) =>/);
+  assert.match(svelteShell, /import\("\.\/lib\/battle-controller"\)/);
+  assert.match(guiServer, /repository_root \/ "ui\/dist"/);
+  for (const removed of ["app.js", "battle-ui-model.mjs", "i18n.mjs", "styles.css"]) {
+    assert.equal(existsSync(`${root}/${removed}`), false, `legacy UI entry remains: ${removed}`);
+  }
+});
+
+for (const [name, content] of [["Svelte", html], ["CSS", css], ["TypeScript", app]]) {
   test(`${name} has no external HTTP asset reference`, () => assert.doesNotMatch(content, /https?:\/\//i));
 }
 
-test("JavaScript renders only repository-local generated character portraits", () => {
+test("TypeScript renders only repository-local generated character portraits", () => {
   assert.match(app, /\/assets\/character-icons\/64\/\$\{encodeURIComponent\(character\.id\)\}\.png/);
   assert.match(app, /class="character-portrait"/);
   assert.doesNotMatch(app, /image-bd2db|browndust2|https?:\/\//i);
 });
 test("the runtime portrait bundle contains all 61 five-star characters", () => {
-  const names = readdirSync(`${root}/assets/character-icons/64`).filter(name => name.endsWith(".png"));
+  const names = readdirSync(`${root}/public/assets/character-icons/64`).filter(name => name.endsWith(".png"));
   assert.equal(names.length, 61);
   assert.equal(new Set(names).size, 61);
 });
@@ -105,7 +120,7 @@ test("five-star unit addition opens a searchable character picker", () => {
   assert.match(app, /catalog\.characters[\s\S]+character-option/);
 });
 test("UI copy is managed through the Japanese i18n resource", () => {
-  assert.match(app, /from "\.\/i18n\.mjs"/);
+  assert.match(app, /from "\.\/i18n"/);
   assert.match(html, /data-i18n=/);
   assert.match(i18n, /"ja-JP"/);
   assert.match(i18n, /selector\.NEXT_ALLY_IN_ORDER/);
