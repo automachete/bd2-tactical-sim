@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DATABASE = ROOT / "data/generated/bd2.sqlite"
 CATALOG = ROOT / "data/generated/catalog.json"
 MONSTER_SCENARIO = ROOT / "data/scenarios/monster-chaser-current.json"
+GOLDEN_SCENARIO = ROOT / "data/scenarios/golden-colosseum-reference.json"
 
 
 def event_kinds(transition: dict[str, object]) -> list[dict[str, object]]:
@@ -331,7 +332,7 @@ def test_snapshot_replay_and_gym_observation_cover_all_parts() -> None:
     assert observation["actor_indices"].shape == (MAX_TEAM_UNITS,)
     assert int(observation["unit_mask"].sum()) == 18
     snapshot = environment.snapshot_json()
-    actions = np.zeros(5, dtype=np.int64)
+    actions = np.zeros(MAX_TEAM_UNITS, dtype=np.int64)
     first = environment.step(actions)
     environment.restore_json(snapshot)
     second = environment.step(actions)
@@ -363,6 +364,30 @@ def test_gymnasium_contract() -> None:
     config = EnvConfig(DATABASE, ROOT / "data/scenarios/normal-demo.json", seed=31)
     environment = Bd2Env(config)
     check_env(environment, skip_render_check=True)
+
+
+def test_golden_colosseum_environment_exposes_eleven_slots_and_only_auto_advances() -> None:
+    environment = Bd2Env(EnvConfig(DATABASE, GOLDEN_SCENARIO, seed=5))
+    observation, info = environment.reset()
+    assert observation["actor_indices"].shape == (11,)
+    assert observation["action_mask"].shape == (11, 32)
+    assert observation["action_mask"][:, 0].all()
+    assert not observation["action_mask"][:, 1:].any()
+    assert observation["global"].shape == (17,)
+    assert observation["global"][8] == 1.0
+    initial_sequence = info["state"]["action_sequence"]
+    _, _, _, _, next_info = environment.step(np.full(MAX_TEAM_UNITS, 31, dtype=np.int64))
+    # The policy indices cannot override a fully automatic Colosseum action.
+    assert next_info["state"]["action_sequence"] > initial_sequence
+
+
+def test_native_batch_auto_advances_golden_colosseum_without_team_plan() -> None:
+    batch = BatchSimulator(str(DATABASE), GOLDEN_SCENARIO.read_text(encoding="utf-8"), 3, 9)
+    frames = json.loads(batch.observations_json())
+    assert all(frame["global"][8] == 1.0 for frame in frames)
+    result = json.loads(batch.step_json(json.dumps([[31] * MAX_TEAM_UNITS] * 3)))
+    assert len(result) == 3
+    assert all(len(item["observation"]["actor_indices"]) == MAX_TEAM_UNITS for item in result)
 
 
 def test_enemy_control_is_case_insensitive_starts_on_its_turn_and_inverts_outcome() -> None:

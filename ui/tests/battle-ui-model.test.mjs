@@ -349,6 +349,7 @@ for (const [mode, formation, expected] of [
   ["NORMAL", true, { formation: true, mctsOpponent: true, ruleBasedOpponent: false, twoPlayerParties: false, manualPlayer: true }],
   ["MIRROR_WAR", false, { formation: false, mctsOpponent: true, ruleBasedOpponent: false, twoPlayerParties: false, manualPlayer: true }],
   ["MONSTER_CHASER", true, { formation: true, mctsOpponent: false, ruleBasedOpponent: true, twoPlayerParties: true, manualPlayer: true }],
+  ["GOLDEN_COLOSSEUM", false, { formation: false, mctsOpponent: false, ruleBasedOpponent: false, automaticBattle: true, twoPlayerParties: false, manualPlayer: false }],
 ]) {
   test(`modeCapabilities describes ${mode}`, () => assert.deepEqual(modeCapabilities(mode, formation), expected));
 }

@@ -163,6 +163,78 @@ test("content switching never injects runtime summons such as ET001 into setup",
   }
 });
 
+test("Golden Colosseum preparation reproduces Trial Season 40 and four blessing loadouts", async ({ page }) => {
+  await page.locator("#open-formation").click();
+  const dialog = page.locator("#formation-dialog");
+  await dialog.locator("[data-mode='GOLDEN_COLOSSEUM']").click();
+  await expect(dialog.locator("#player-formation .formation-cell")).toHaveCount(16);
+  await expect(dialog.locator("#enemy-formation .formation-cell")).toHaveCount(16);
+  await expect(dialog.locator("#player-formation .formation-cell.blocked")).toHaveCount(6);
+  await expect(dialog.locator("#enemy-formation .formation-cell.blocked")).toHaveCount(6);
+  await expect(dialog.getByTestId("golden-settings")).toBeVisible();
+  await expect(dialog.locator("#golden-season")).toHaveText("TRIAL-SEASON-40-2026-09-03");
+  await expect(dialog.locator("#golden-rule-summary")).toContainText("4×4");
+  await expect(dialog.locator("#golden-rule-summary")).toContainText("配置不可6マス");
+  await expect(dialog.locator("#golden-rule-summary")).toContainText("週100回");
+  for (const id of ["golden-player-first", "golden-player-second", "golden-enemy-first", "golden-enemy-second"]) {
+    await expect(dialog.getByTestId(id)).toBeVisible();
+  }
+  await expect(dialog.locator(".golden-blessing-row")).not.toHaveCount(0);
+});
+
+test("Golden Colosseum excludes the current season's banned costume while keeping its owner selectable", async ({ page }) => {
+  await page.locator("#open-formation").click();
+  const dialog = page.locator("#formation-dialog");
+  await dialog.locator("[data-mode='GOLDEN_COLOSSEUM']").click();
+  await dialog.locator("#player-roster .remove-unit").first().click();
+  await dialog.locator('[data-add-side="PLAYER"]').click();
+
+  const mamonir = page.getByTestId("character-option-Mamonir");
+  await expect(mamonir).toBeEnabled();
+  await mamonir.click();
+  await dialog.locator("#player-roster .roster-advanced").last().click();
+
+  const banned = dialog.locator(".advanced-costumes .costume-line", { hasText: "終焉の夜" });
+  const equipped = banned.locator("input[type='checkbox']").first();
+  await expect(banned).toContainText("今季使用不可");
+  await expect(equipped).not.toBeChecked();
+  await expect(equipped).toBeDisabled();
+  await expect(dialog.locator(".advanced-costumes .costume-line input[title='装備']:checked")).toHaveCount(1);
+});
+
+test("Golden Colosseum battle advances one automatic costume action and exposes no manual reservation", async ({ page, request }) => {
+  await startMode(request, "GOLDEN_COLOSSEUM");
+  await page.reload();
+  await expect(page.locator("#mode-label")).toHaveText("ゴールデンコロシアム");
+  await expect(page.locator("#player-field .field-cell")).toHaveCount(16);
+  await expect(page.locator("#enemy-field .field-cell")).toHaveCount(16);
+  await expect(page.locator("#player-field")).toHaveAttribute("aria-label", "味方4×4配置盤");
+  await expect(page.locator("#enemy-field")).toHaveAttribute("aria-label", "敵4×4配置盤");
+  await expect(page.locator("#controller-label")).toHaveText("コロシアム自動戦闘");
+  await expect(page.locator("#auto-reserve")).toBeHidden();
+  await expect(page.locator("#sp-text")).toHaveText("∞");
+  await expect(page.locator("#sp-status")).toContainText("交互に自動実行");
+  await expect(page.locator("#costume-strip .command-card")).toHaveCount(0);
+  await expect(page.locator("#command-heading")).toHaveText("次の自動行動");
+  await expect(page.locator("#costume-strip")).toContainText("戦闘中の行動予約はありません");
+  const futureAliveCards = page.locator("#ally-rail .order-card:disabled");
+  await expect(futureAliveCards).toHaveCount(2);
+  expect((await futureAliveCards.evaluateAll(cards => cards.map(card => card.getAttribute("aria-label"))))
+    .every(label => label.includes("実行待ち") && !label.includes("行動不能"))).toBeTruthy();
+
+  const before = await (await request.get("/api/state")).json();
+  await page.getByTestId("speed").click();
+  await page.getByTestId("speed").click();
+  await page.getByTestId("battle-start").click();
+  await expect(page.locator("#game-shell")).not.toHaveClass(/executing/, { timeout: 30_000 });
+  const after = await (await request.get("/api/state")).json();
+  expect(after.state.action_sequence).toBe(before.state.action_sequence + 1);
+  expect(Boolean(after.state.terminal) || after.state.active_side !== before.state.active_side).toBeTruthy();
+  await expect(page.locator("#tip-banner")).toContainText("ALL TURN");
+  await expect(page.locator("#ai-report")).toContainText("コスチューム交互ルールで1行動");
+  await expect(page.locator("#ai-report")).not.toContainText("魔物");
+});
+
 test("interactive controls have names and DOM ids are unique", async ({ page }) => {
   const unnamed = await page.locator("button").evaluateAll(buttons => buttons
     .filter(button => !(button.getAttribute("aria-label") || button.textContent.trim() || button.title))
@@ -1191,17 +1263,6 @@ test("Monster Chaser inserts party two during playback when party one is elimina
   await page.getByTestId("speed").click();
   await page.getByTestId("speed").click();
 
-  const expectVisiblePartyToDefaultToNormalAttacks = async () => {
-    const cards = page.locator("#ally-rail .order-card:not(:disabled)");
-    await expect.poll(async () => cards.evaluateAll(items => (
-      items.length > 0 && items.every(item => item.textContent.includes("通常攻撃"))
-    ))).toBe(true);
-  };
-
-  await expectVisiblePartyToDefaultToNormalAttacks();
-  await page.getByTestId("battle-start").click();
-  await expect(page.locator("#game-shell")).not.toHaveClass(/executing/, { timeout: 45_000 });
-
   await page.evaluate(() => {
     window.__partyTwoInsertedDuringPlayback = false;
     window.__partyTwoObserver?.disconnect();
@@ -1218,7 +1279,18 @@ test("Monster Chaser inserts party two during playback when party one is elimina
     });
   });
 
-  for (let turn = 0; turn < 8; turn += 1) {
+  const expectVisiblePartyToDefaultToNormalAttacks = async () => {
+    const cards = page.locator("#ally-rail .order-card:not(:disabled)");
+    await expect.poll(async () => cards.evaluateAll(items => (
+      items.length > 0 && items.every(item => item.textContent.includes("通常攻撃"))
+    ))).toBe(true);
+  };
+
+  await expectVisiblePartyToDefaultToNormalAttacks();
+  await page.getByTestId("battle-start").click();
+  await expect(page.locator("#game-shell")).not.toHaveClass(/executing/, { timeout: 45_000 });
+
+  for (let turn = 0; turn < 15; turn += 1) {
     const state = await (await request.get("/api/state")).json();
     if (state.state.monster_chaser.current_party === 2) break;
     await expectVisiblePartyToDefaultToNormalAttacks();

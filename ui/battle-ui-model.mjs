@@ -276,13 +276,17 @@ export const knockbackPreviewCells = (direction, rows = GRID_ROWS, depths = GRID
   };
 };
 
-export const modeCapabilities = (mode, allowFormationChange = true) => ({
-  formation: Boolean(allowFormationChange),
-  mctsOpponent: mode !== "MONSTER_CHASER",
-  ruleBasedOpponent: mode === "MONSTER_CHASER",
-  twoPlayerParties: mode === "MONSTER_CHASER",
-  manualPlayer: true,
-});
+export const modeCapabilities = (mode, allowFormationChange = true) => {
+  const golden = mode === "GOLDEN_COLOSSEUM";
+  return {
+    formation: Boolean(allowFormationChange) && !golden,
+    mctsOpponent: mode !== "MONSTER_CHASER" && !golden,
+    ruleBasedOpponent: mode === "MONSTER_CHASER",
+    ...(golden ? { automaticBattle: true } : {}),
+    twoPlayerParties: mode === "MONSTER_CHASER",
+    manualPlayer: !golden,
+  };
+};
 
 export const keyboardTarget = (cell, key, rows = GRID_ROWS, depths = GRID_DEPTHS) => {
   const deltas = {

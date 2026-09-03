@@ -12,7 +12,7 @@ from .env import (
     UNIT_FEATURES,
 )
 
-OBSERVATION_SCHEMA_ID = "bd2rl-observation-v2"
+OBSERVATION_SCHEMA_ID = "bd2rl-observation-v3"
 MODEL_ARCHITECTURE_ID = "masked-transformer-actor-critic-v2"
 
 

@@ -10,11 +10,11 @@ import numpy as np
 
 from . import _native
 
-MAX_TEAM_UNITS = 5
+MAX_TEAM_UNITS = 11
 MAX_TOTAL_UNITS = 32
 MAX_ACTIONS_PER_UNIT = 32
 UNIT_FEATURES = 56
-GLOBAL_FEATURES = 16
+GLOBAL_FEATURES = 17
 
 
 def terminal_reward_for(outcome: str, control_side: str) -> float:
@@ -166,6 +166,12 @@ class Bd2Env(gym.Env[dict[str, np.ndarray], np.ndarray]):
             raise RuntimeError("turn submitted after terminal state")
         if state["active_side"] != side:
             raise RuntimeError(f"submitted side is {side}, active side is {state['active_side']}")
+        if state["rules"]["action_flow"] == "ALTERNATING_COSTUME":
+            # Golden Colosseum has no in-battle player decision. Advancing its
+            # sole masked action executes the authoritative automatic costume
+            # action, while keeping the Gym API rectangular for batched use.
+            self.simulator.step_auto_json()
+            return
         side_index = 0 if side == "PLAYER" else 1
         order = state["teams"][side_index]["action_order"]
         lookup = self._legal_action_lookup(side, order)

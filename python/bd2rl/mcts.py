@@ -151,6 +151,7 @@ class MctsPlanner:
         return _Node(state_json, active_side, terminal, action, unexpanded=unexpanded)
 
     def _candidate_plans(self, side: str, rng: random.Random) -> list[dict[str, Any]]:
+        base_state_json = self._sandbox.state_json()
         legal = json.loads(self._sandbox.legal_actions_json(side))
         auto_plan = json.loads(self._sandbox.auto_plan_json(side))
         order = [entry["unit_id"] for entry in legal]
@@ -159,23 +160,42 @@ class MctsPlanner:
         commands_by_actor = [commands for _, commands in actionable]
         candidates: dict[str, dict[str, Any]] = {}
 
-        def add(commands: list[dict[str, Any]], action_order: list[int] | None = None) -> None:
-            plan = {
+        def add(
+            commands: list[dict[str, Any]] | None = None,
+            action_order: list[int] | None = None,
+            *,
+            complete_plan: dict[str, Any] | None = None,
+        ) -> None:
+            plan = complete_plan or {
                 "side": side,
                 "order": action_order or order,
                 "commands": {
                     str(actor): command
-                    for actor, command in zip(actionable_ids, commands, strict=True)
+                    for actor, command in zip(actionable_ids, commands or [], strict=True)
                 },
                 "formation": {},
             }
-            candidates.setdefault(self._canonical(plan), plan)
+            canonical = self._canonical(plan)
+            if canonical in candidates:
+                return
+            # Per-unit legal actions are not sufficient to prove a whole plan is
+            # legal: multiple costume skills can jointly exceed the team's SP.
+            # Validate every synthesized branch through the authoritative core
+            # and restore the exact search node afterwards.
+            self._sandbox.restore_json(base_state_json)
+            try:
+                self._sandbox.step_json(canonical)
+            except ValueError:
+                return
+            finally:
+                self._sandbox.restore_json(base_state_json)
+            candidates[canonical] = plan
 
         if order:
             auto_command_map = auto_plan["commands"]
             if set(auto_command_map) != {str(actor) for actor in actionable_ids}:
                 raise RuntimeError("auto plan does not exactly cover the actionable units")
-            candidates[self._canonical(auto_plan)] = auto_plan
+            add(complete_plan=auto_plan)
             add([commands[0] for commands in commands_by_actor])
             add([commands[-1] for commands in commands_by_actor])
             auto_commands = [auto_command_map[str(actor)] for actor in actionable_ids]

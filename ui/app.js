@@ -70,6 +70,11 @@ const costumeById = id => [
   ...(catalog?.system_costumes || []),
 ].find(costume => costume.id === id);
 const equipmentById = id => catalog?.equipment?.find(item => item.id === id);
+const enabledCostumeName = unit => {
+  const selected = unit?.costumes?.find(item => item.enabled !== false)?.costume_id
+    || unit?.costume_loadout?.[0]?.costume_id;
+  return selected ? costumeById(selected)?.name || selected : "";
+};
 const equipmentSlots = ["WEAPON", "ARMOR", "HELMET", "JEWELRY", "GLOVES"];
 const defaultBuildSettings = () => {
   if (!catalog?.build_settings_default) {
@@ -159,14 +164,25 @@ const closeDialog = id => {
   if (id === "formation-dialog") document.querySelector(".advanced-popover")?.remove();
 };
 
-const defaultCostumes = character => character.costumes.map(costume => ({
-  costume_id: costume.id,
-  enhancement: costume.max_enhancement,
-  burst_level: costume.max_burst_level,
-  potential_mask: costume.max_potential_mask,
-  permanent_potential_enabled: true,
-  enabled: true,
-}));
+const isGoldenDraft = () => draft?.mode === "GOLDEN_COLOSSEUM";
+const draftGrid = () => draft?.grid || { rows: 3, depths: 4, deployment_limit: 5, blocked: [] };
+const blockedDraftCell = (row, depth) => (draftGrid().blocked || []).some(cell => Number(cell[0]) === Number(row) && Number(cell[1]) === Number(depth));
+const usedCostumeIds = (sideKey, ignoredIndex = -1) => new Set((draft?.[sideKey] || [])
+  .filter((_, index) => index !== ignoredIndex)
+  .flatMap(unit => unit.costumes.filter(item => item.enabled !== false).map(item => item.costume_id)));
+const goldenBannedCostumeIds = () => new Set(draft?.golden_colosseum?.banned_costume_ids || []);
+const defaultCostumes = (character, single = false, excluded = new Set()) => {
+  const unavailable = new Set([...excluded, ...(single ? goldenBannedCostumeIds() : [])]);
+  const firstAvailable = character.costumes.findIndex(item => !unavailable.has(item.id));
+  return character.costumes.map((costume, index) => ({
+    costume_id: costume.id,
+    enhancement: costume.max_enhancement,
+    burst_level: costume.max_burst_level,
+    potential_mask: costume.max_potential_mask,
+    permanent_potential_enabled: true,
+    enabled: single ? index === firstAvailable : true,
+  }));
+};
 
 const normalizeDraft = preset => {
   const value = clone(preset);
@@ -275,8 +291,15 @@ const renderFormationBoard = (selector, sideKey) => {
   const root = $(selector);
   root.innerHTML = "";
   const entries = partyUnits(sideKey);
-  for (let row = 0; row < 3; row += 1) {
-    for (let depth = 0; depth < 4; depth += 1) {
+  const grid = draftGrid();
+  root.setAttribute("aria-label", t(
+    sideKey === "player_units" ? "preparation.playerBoardDynamicAria" : "preparation.enemyBoardDynamicAria",
+    { rows: grid.rows, depths: grid.depths },
+  ));
+  root.style.gridTemplateColumns = `repeat(${grid.depths}, minmax(0, 1fr))`;
+  root.style.gridTemplateRows = `repeat(${grid.rows}, minmax(0, 1fr))`;
+  for (let row = 0; row < Number(grid.rows); row += 1) {
+    for (let depth = 0; depth < Number(grid.depths); depth += 1) {
       const cell = document.createElement("div");
       cell.tabIndex = 0;
       cell.className = "formation-cell";
@@ -285,6 +308,12 @@ const renderFormationBoard = (selector, sideKey) => {
       cell.dataset.coordinate = `${row + 1}-${depth + 1}`;
       cell.dataset.testid = `${sideKey === "player_units" ? "player" : "enemy"}-formation-cell-${row}-${depth}`;
       cell.setAttribute("role", "gridcell");
+      if (blockedDraftCell(row, depth)) {
+        cell.classList.add("blocked");
+        cell.setAttribute("aria-disabled", "true");
+        root.append(cell);
+        continue;
+      }
       const entry = entries.find(item => Number(item.unit.row) === row && Number(item.unit.depth) === depth);
       if (entry) {
         const character = characterById(entry.unit.character_id);
@@ -295,7 +324,7 @@ const renderFormationBoard = (selector, sideKey) => {
         token.setAttribute("role", "button");
         token.setAttribute("aria-label", t("formation.moveAria", { name: character?.name || entry.unit.character_id }));
         token.setAttribute("aria-grabbed", "false");
-        token.innerHTML = `${emblemMarkup(character)}<span class="token-copy"><b>${escapeHtml(character?.name || entry.unit.character_id)}</b><small>${escapeHtml(t(`element.${character?.element || "NONE"}`))}</small></span>`;
+        token.innerHTML = `${emblemMarkup(character)}<span class="token-copy"><b>${escapeHtml(character?.name || entry.unit.character_id)}</b><small>${escapeHtml(isGoldenDraft() ? enabledCostumeName(entry.unit) : t(`element.${character?.element || "NONE"}`))}</small></span>`;
         wireEditorDrag(token, sideKey, entry.index);
         token.addEventListener("click", event => {
           event.stopPropagation();
@@ -351,7 +380,7 @@ const renderFormationRoster = (selector, sideKey) => {
     chip.setAttribute("aria-label", t("formation.rosterAria", { name: character?.name || unit.character_id }));
     chip.className = `roster-chip ${elementClass(character?.element)} ${editorFocus.sideKey === sideKey && editorFocus.index === index ? "selected" : ""}`;
     chip.dataset.testid = `${sideKey}-roster-${index}`;
-    chip.innerHTML = `${emblemMarkup(character)}<b>${escapeHtml(character?.name || unit.character_id)}</b><button type="button" class="roster-advanced" aria-label="${escapeHtml(t("formation.detailsAria", { name: character?.name || unit.character_id }))}">⚙</button><button type="button" class="remove-unit" aria-label="${escapeHtml(t("formation.removeAria", { name: character?.name || unit.character_id }))}">×</button>`;
+    chip.innerHTML = `${emblemMarkup(character)}<span><b>${escapeHtml(character?.name || unit.character_id)}</b>${isGoldenDraft() ? `<small>${escapeHtml(enabledCostumeName(unit))}</small>` : ""}</span><button type="button" class="roster-advanced" aria-label="${escapeHtml(t("formation.detailsAria", { name: character?.name || unit.character_id }))}">⚙</button><button type="button" class="remove-unit" aria-label="${escapeHtml(t("formation.removeAria", { name: character?.name || unit.character_id }))}">×</button>`;
     wireEditorDrag(chip, sideKey, index);
     chip.addEventListener("click", () => { editorFocus = { sideKey, index }; renderFormation(); });
     chip.addEventListener("keydown", event => {
@@ -375,14 +404,121 @@ const renderFormationRoster = (selector, sideKey) => {
   });
 };
 
+const blessingById = id => catalog?.blessings?.find(item => item.id === id);
+
+const renderGoldenLoadouts = () => {
+  const root = $("#golden-loadouts");
+  root.replaceChildren();
+  const config = draft.golden_colosseum;
+  if (!config) return;
+  $("#golden-season").textContent = config.season_label;
+  $("#golden-rule-summary").textContent = t("golden.summary", {
+    rows: draftGrid().rows,
+    depths: draftGrid().depths,
+    members: draftGrid().deployment_limit,
+    blocked: config.undeployable_grid_count,
+    attempts: config.weekly_attempts,
+    refills: config.refill_limit,
+    rating: config.starting_rating,
+    death: config.death_time_all_turn,
+  });
+  const banned = new Set(config.banned_blessing_ids || []);
+  const definitions = (catalog.blessings || []).filter(item => !banned.has(item.id));
+  for (const [sideIndex, sideName] of [[0, "player"], [1, "enemy"]]) {
+    for (const [initiative, suffix, labelKey] of [
+      ["going_first", "first", `golden.${sideName}First`],
+      ["going_second", "second", `golden.${sideName}Second`],
+    ]) {
+      const loadout = config.side_blessings[sideIndex][initiative];
+      const card = document.createElement("section");
+      card.className = "golden-loadout";
+      card.dataset.testid = `golden-${sideName}-${suffix}`;
+      const head = document.createElement("header");
+      const title = document.createElement("b");
+      title.textContent = t(labelKey);
+      const limit = document.createElement("input");
+      limit.type = "number";
+      limit.min = "3";
+      limit.max = "15";
+      limit.value = String(loadout.point_limit);
+      limit.setAttribute("aria-label", `${t(labelKey)} ${t("golden.pointLimit")}`);
+      limit.onchange = () => {
+        loadout.point_limit = Number(limit.value);
+        renderGoldenLoadouts();
+      };
+      head.append(title, limit);
+      card.append(head);
+      const used = new Set(loadout.selected.map(item => item.blessing_id));
+      let spent = 0;
+      loadout.selected.forEach((selection, selectionIndex) => {
+        const definition = blessingById(selection.blessing_id);
+        const levelDefinition = definition?.levels.find(item => Number(item.level) === Number(selection.level));
+        if (!definition || !levelDefinition) throw new Error(`Unknown blessing selection: ${selection.blessing_id}[${selection.level}]`);
+        spent += Number(levelDefinition.point_cost);
+        const row = document.createElement("div");
+        row.className = "golden-blessing-row";
+        const select = document.createElement("select");
+        definitions.forEach(item => {
+          const choice = option(item.id, item.name, item.id === selection.blessing_id);
+          choice.disabled = used.has(item.id) && item.id !== selection.blessing_id;
+          select.append(choice);
+        });
+        select.title = definition.description_ja;
+        select.onchange = () => {
+          selection.blessing_id = select.value;
+          selection.level = blessingById(select.value).levels[0].level;
+          renderGoldenLoadouts();
+        };
+        const level = document.createElement("select");
+        definition.levels.forEach(item => level.append(option(item.level, `Lv.${item.level} · ${item.point_cost}pt`, Number(item.level) === Number(selection.level))));
+        level.onchange = () => {
+          selection.level = Number(level.value);
+          renderGoldenLoadouts();
+        };
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "×";
+        remove.setAttribute("aria-label", t("golden.removeBlessing"));
+        remove.onclick = () => {
+          loadout.selected.splice(selectionIndex, 1);
+          renderGoldenLoadouts();
+        };
+        row.append(select, level, remove);
+        card.append(row);
+      });
+      const footer = document.createElement("footer");
+      const points = document.createElement("strong");
+      points.textContent = t("golden.points", { spent, limit: loadout.point_limit });
+      points.classList.toggle("over-budget", spent > Number(loadout.point_limit));
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "secondary-button";
+      add.textContent = t("golden.addBlessing");
+      const available = definitions.find(item => !used.has(item.id));
+      add.disabled = !available;
+      add.onclick = () => {
+        loadout.selected.push({ blessing_id: available.id, level: available.levels[0].level });
+        renderGoldenLoadouts();
+      };
+      footer.append(points, add);
+      card.append(footer);
+      root.append(card);
+    }
+  }
+};
+
 const renderFormation = () => {
   const monster = draft.mode === "MONSTER_CHASER";
+  const golden = isGoldenDraft();
   $("#enemy-editor").classList.toggle("hidden", monster);
   $("#monster-info").classList.toggle("hidden", !monster);
   $("#party-switch").classList.toggle("hidden", !monster);
-  $$(".mcts-option").forEach(node => node.classList.toggle("hidden", monster));
+  $$(".mcts-option").forEach(node => node.classList.toggle("hidden", monster || golden));
   $$(".monster-option").forEach(node => node.classList.toggle("hidden", !monster));
-  $("#mode-help").textContent = monster ? t("modeHelp.monster") : t("modeHelp.standard");
+  $("#golden-settings").classList.toggle("hidden", !golden);
+  $("#mode-help").textContent = monster ? t("modeHelp.monster") : golden ? t("modeHelp.golden") : t("modeHelp.standard");
+  $("#enemy-formation-heading").textContent = golden ? t("controller.golden") : t("preparation.enemyMcts");
+  if (golden) renderGoldenLoadouts();
   renderFormationBoard("#player-formation", "player_units");
   renderFormationRoster("#player-roster", "player_units");
   if (!monster) {
@@ -394,21 +530,30 @@ const renderFormation = () => {
 const addCharacterToParty = (side, partyNo, characterId) => {
   const sideKey = side === "PLAYER" ? "player_units" : "enemy_units";
   const inParty = draft[sideKey].filter(unit => Number(unit.party_no || 1) === partyNo);
-  if (inParty.length >= 5) throw new Error(t("party.limit", { number: partyNo }));
+  const limit = Number(draftGrid().deployment_limit);
+  if (inParty.length >= limit) throw new Error(t("party.limit", { number: partyNo, limit }));
   const occupied = new Set(inParty.map(unit => cellKey(unit.row, unit.depth)));
-  const cells = Array.from({ length: 12 }, (_, index) => ({ row: Math.floor(index / 4), depth: index % 4 }));
+  const grid = draftGrid();
+  const cells = Array.from({ length: Number(grid.rows) * Number(grid.depths) }, (_, index) => ({
+    row: Math.floor(index / Number(grid.depths)),
+    depth: index % Number(grid.depths),
+  })).filter(value => !blockedDraftCell(value.row, value.depth));
   const cell = cells.find(value => !occupied.has(cellKey(value.row, value.depth)));
   const used = new Set(inParty.map(unit => unit.character_id));
   const character = characterById(characterId);
   if (!cell) throw new Error(t("error.noFormationCell"));
   if (!character) throw new Error(t("error.unknownCharacter"));
-  if (used.has(character.id)) throw new Error(t("error.duplicateCharacter"));
+  if (!isGoldenDraft() && used.has(character.id)) throw new Error(t("error.duplicateCharacter"));
+  const excludedCostumes = usedCostumeIds(sideKey);
+  if (isGoldenDraft() && character.costumes.every(item => excludedCostumes.has(item.id))) {
+    throw new Error(t("error.duplicateCostume"));
+  }
   draft[sideKey].push({
     character_id: character.id,
     row: cell.row,
     depth: cell.depth,
     party_no: partyNo,
-    costumes: defaultCostumes(character),
+    costumes: defaultCostumes(character, isGoldenDraft(), excludedCostumes),
     costume_link_target: null,
     equipment: {},
     build_settings: defaultBuildSettings(),
@@ -433,7 +578,9 @@ const renderCharacterPicker = () => {
     .filter(character => `${character.name} ${character.id}`.toLocaleLowerCase("ja-JP").includes(query))
     .forEach(character => {
       const button = document.createElement("button");
-      const disabled = used.has(character.id);
+      const disabled = isGoldenDraft()
+        ? character.costumes.every(item => usedCostumeIds(sideKey).has(item.id) || goldenBannedCostumeIds().has(item.id))
+        : used.has(character.id);
       button.type = "button";
       button.className = `character-option ${elementClass(character.element)}`;
       button.disabled = disabled;
@@ -456,8 +603,8 @@ const renderCharacterPicker = () => {
 const openCharacterPicker = (side, partyNo) => {
   const sideKey = side === "PLAYER" ? "player_units" : "enemy_units";
   const inParty = draft[sideKey].filter(unit => Number(unit.party_no || 1) === Number(partyNo));
-  if (inParty.length >= 5) {
-    showError(t("party.limit", { number: partyNo }));
+  if (inParty.length >= Number(draftGrid().deployment_limit)) {
+    showError(t("party.limit", { number: partyNo, limit: draftGrid().deployment_limit }));
     return;
   }
   characterPickerTarget = { side, partyNo: Number(partyNo) };
@@ -490,9 +637,11 @@ const renderCostumeEditor = (root, unit) => {
     const line = document.createElement("div");
     line.className = "costume-line";
     const enabled = document.createElement("input");
+    const banned = isGoldenDraft() && goldenBannedCostumeIds().has(loadout.costume_id);
+    if (banned) loadout.enabled = false;
     enabled.type = "checkbox";
     enabled.checked = loadout.enabled !== false;
-    enabled.disabled = enabled.checked && unit.costumes.filter(item => item.enabled !== false).length <= 1;
+    enabled.disabled = banned || (enabled.checked && unit.costumes.filter(item => item.enabled !== false).length <= 1);
     enabled.title = t("loadout.equipped");
     const linkOption = option(loadout.costume_id, definition.name, unit.costume_link_target === loadout.costume_id);
     linkOption.disabled = !enabled.checked;
@@ -500,6 +649,13 @@ const renderCostumeEditor = (root, unit) => {
       if (!enabled.checked && unit.costumes.filter(item => item.enabled !== false).length <= 1) {
         enabled.checked = true;
         showError(t("error.atLeastOneCostume"));
+        return;
+      }
+      if (isGoldenDraft() && enabled.checked) {
+        unit.costumes.forEach(item => { item.enabled = item === loadout; });
+        unit.costume_link_target = null;
+        root.replaceChildren();
+        renderCostumeEditor(root, unit);
         return;
       }
       loadout.enabled = enabled.checked;
@@ -510,7 +666,7 @@ const renderCostumeEditor = (root, unit) => {
       }
     };
     const name = document.createElement("span");
-    name.textContent = definition.name;
+    name.textContent = banned ? `${definition.name} · ${t("golden.bannedCostume")}` : definition.name;
     const enhancement = numberSelect(0, definition.max_enhancement, loadout.enhancement);
     enhancement.title = t("loadout.enhancement");
     enhancement.onchange = () => { loadout.enhancement = Number(enhancement.value); };
@@ -529,6 +685,7 @@ const renderCostumeEditor = (root, unit) => {
     root.append(line);
     link.append(linkOption);
   });
+  if (isGoldenDraft()) return;
   link.onchange = () => { unit.costume_link_target = link.value || null; };
   const label = document.createElement("label");
   label.className = "inline-setting";
@@ -856,7 +1013,10 @@ const openAdvancedEditor = (sideKey, index) => {
       `${item.name} · ${t(`element.${item.element}`)} / ${t(`attack.${item.attack_type}`)}`,
       item.id === unit.character_id,
     );
-    characterOption.disabled = duplicateIds.has(item.id);
+    const costumesUsedByOthers = usedCostumeIds(sideKey, index);
+    characterOption.disabled = isGoldenDraft()
+      ? item.costumes.every(costume => costumesUsedByOthers.has(costume.id) || goldenBannedCostumeIds().has(costume.id))
+      : duplicateIds.has(item.id);
     select.append(characterOption);
   });
   const close = document.createElement("button");
@@ -869,14 +1029,20 @@ const openAdvancedEditor = (sideKey, index) => {
   costumes.className = "advanced-costumes";
   renderCostumeEditor(costumes, unit);
   popover.append(costumes);
-  renderBuildSettingsEditor(popover, unit);
-  renderEquipmentEditor(popover, unit, () => {
-    popover.remove();
-    openAdvancedEditor(sideKey, index);
-  });
+  if (!isGoldenDraft()) {
+    renderBuildSettingsEditor(popover, unit);
+    renderEquipmentEditor(popover, unit, () => {
+      popover.remove();
+      openAdvancedEditor(sideKey, index);
+    });
+  }
   select.onchange = () => {
     unit.character_id = select.value;
-    unit.costumes = defaultCostumes(characterById(select.value));
+    unit.costumes = defaultCostumes(
+      characterById(select.value),
+      isGoldenDraft(),
+      usedCostumeIds(sideKey, index),
+    );
     unit.costume_link_target = null;
     for (const [slot, loadout] of Object.entries(unit.equipment || {})) {
       const equipment = equipmentById(loadout.equipment_id);
@@ -907,8 +1073,8 @@ const cleanUnit = unit => {
       potential_mask: Number(item.potential_mask),
       permanent_potential_enabled: Boolean(item.permanent_potential_enabled),
     })),
-    costume_link_target: unit.costume_link_target || null,
-    equipment: clone(unit.equipment || {}),
+    costume_link_target: isGoldenDraft() ? null : unit.costume_link_target || null,
+    equipment: isGoldenDraft() ? {} : clone(unit.equipment || {}),
     build_settings: clone(unit.build_settings || defaultBuildSettings()),
   };
 };
@@ -920,6 +1086,7 @@ const startRequest = () => ({
   monster_level: Number($("#monster-level").value),
   seed: Number($("#setup-seed").value),
   mcts_simulations: Number($("#mcts-simulations").value),
+  golden_colosseum: draft.mode === "GOLDEN_COLOSSEUM" ? clone(draft.golden_colosseum) : undefined,
 });
 
 const validateSetupControls = () => {
@@ -984,8 +1151,9 @@ const knockbackDiagramMarkup = direction => {
   return `<span class="knockback-value"><b>${escapeHtml(preview.arrow)}</b><em>${preview.distance}</em></span><span class="knockback-grid">${cells}</span>`;
 };
 
-const plannedCost = () => plannedSpCost(plannedOrder, plannedCommands, legalFor, costumeById);
-const plannedBurstCost = () => plannedBurstSpCost(plannedOrder, plannedCommands, legalFor);
+const actionablePlannedOrder = () => plannedOrder.filter(unitId => Boolean(legalFor(unitId)));
+const plannedCost = () => plannedSpCost(actionablePlannedOrder(), plannedCommands, legalFor, costumeById);
+const plannedBurstCost = () => plannedBurstSpCost(actionablePlannedOrder(), plannedCommands, legalFor);
 
 const moveOrderRelative = (movingId, targetId, after = false) => {
   const moving = Number(movingId);
@@ -1002,6 +1170,11 @@ const moveOrderRelative = (movingId, targetId, after = false) => {
 const renderOrder = () => {
   const root = $("#ally-rail");
   root.innerHTML = "";
+  if (capabilities().automaticBattle) {
+    root.setAttribute("aria-label", t("golden.pendingAria", { side: t(`battle.side.${snapshot.state.active_side}`) }));
+  } else {
+    root.setAttribute("aria-label", t("order.listAria"));
+  }
   root.ondragover = event => {
     if (orderDragId === null || event.target !== root) return;
     event.preventDefault();
@@ -1025,15 +1198,24 @@ const renderOrder = () => {
     const character = entityById(unit.character_id);
     const meta = commandMeta(unit, selectedCommand(unit.id));
     const isActionable = Boolean(legalFor(unit.id)?.commands?.length);
+    const announcedAction = capabilities().automaticBattle && !isActionable
+      ? snapshot.state.terminal
+        ? t("golden.battleEnded")
+        : unit.alive
+        ? t("golden.awaitingAction")
+        : meta.name
+      : meta.name;
     const card = document.createElement("button");
     card.type = "button";
-    card.draggable = isActionable;
+    card.draggable = isActionable && capabilities().manualPlayer;
     card.disabled = !isActionable;
     card.className = `order-card ${elementClass(character?.element)} ${selectedUnitId === unit.id ? "selected" : ""} ${isActionable ? "" : "inactive"}`;
     card.dataset.unitId = String(unit.id);
     card.dataset.testid = `order-unit-${unit.id}`;
-    card.setAttribute("aria-label", t("order.cardAria", { order: index + 1, name: character?.name || unit.character_id, action: meta.name }));
-    card.innerHTML = `<span class="order-number">${index + 1}</span>${emblemMarkup(character, "small-emblem")}<span class="order-copy"><b>${escapeHtml(character?.name || unit.character_id)}</b><small>${escapeHtml(meta.name)} · HP ${formatNumber(unit.hp)}</small></span><span class="reserved-mark">${selectedCommandIndex(unit.id) > 0 ? "◆" : ""}</span>`;
+    card.setAttribute("aria-label", capabilities().automaticBattle
+      ? t("golden.pendingCardAria", { order: index + 1, name: character?.name || unit.character_id, action: announcedAction })
+      : t("order.cardAria", { order: index + 1, name: character?.name || unit.character_id, action: meta.name }));
+    card.innerHTML = `<span class="order-number">${index + 1}</span>${emblemMarkup(character, "small-emblem")}<span class="order-copy"><b>${escapeHtml(character?.name || unit.character_id)}</b><small>${escapeHtml(snapshot.state.rules.mode === "GOLDEN_COLOSSEUM" ? enabledCostumeName(unit) : meta.name)} · HP ${formatNumber(unit.hp)}</small></span><span class="reserved-mark">${selectedCommandIndex(unit.id) > 0 ? "◆" : ""}</span>`;
     card.addEventListener("click", event => {
       if (suppressOrderClick) {
         event.preventDefault();
@@ -1042,6 +1224,10 @@ const renderOrder = () => {
       selectUnit(unit.id);
     });
     card.addEventListener("dragstart", event => {
+      if (!capabilities().manualPlayer) {
+        event.preventDefault();
+        return;
+      }
       orderDragId = unit.id;
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", String(unit.id));
@@ -1192,7 +1378,11 @@ const performBattleMove = (unitId, row, depth) => {
     return false;
   }
   try {
-    const result = moveFormation(plannedFormation, unitId, Number(row), Number(depth));
+    const grid = snapshot.state.rules.grid;
+    const result = moveFormation(plannedFormation, unitId, Number(row), Number(depth), {
+      rows: Number(grid.rows),
+      depths: Number(grid.depths),
+    });
     plannedFormation = result.formation;
     selectedUnitId = Number(unitId);
     keyboardDrag = null;
@@ -1239,7 +1429,8 @@ const handleCellKeyboard = event => {
   if (!keyboardDrag) return;
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
     event.preventDefault();
-    const target = keyboardTarget(keyboardDrag, event.key);
+    const grid = snapshot.state.rules.grid;
+    const target = keyboardTarget(keyboardDrag, event.key, Number(grid.rows), Number(grid.depths));
     keyboardDrag.row = target.row;
     keyboardDrag.depth = target.depth;
     refreshKeyboardTarget();
@@ -1324,8 +1515,15 @@ const renderField = (selector, side) => {
   const root = $(selector);
   root.innerHTML = "";
   const units = (side === "PLAYER" ? visiblePlayerUnits() : enemyUnits()).filter(unit => unit.alive);
-  const depths = side === "PLAYER" ? [3, 2, 1, 0] : [0, 1, 2, 3];
-  for (let row = 0; row < 3; row += 1) {
+  const grid = snapshot.state.rules.grid;
+  root.setAttribute("aria-label", t(
+    side === "PLAYER" ? "board.playerDynamicAria" : "board.enemyDynamicAria",
+    { rows: grid.rows, depths: grid.depths },
+  ));
+  root.style.gridTemplateColumns = `repeat(${grid.depths}, minmax(0, 1fr))`;
+  root.style.gridTemplateRows = `repeat(${grid.rows}, minmax(0, 1fr))`;
+  const depths = Array.from({ length: Number(grid.depths) }, (_, index) => side === "PLAYER" ? Number(grid.depths) - index - 1 : index);
+  for (let row = 0; row < Number(grid.rows); row += 1) {
     for (const depth of depths) {
       const cell = document.createElement("div");
       cell.tabIndex = 0;
@@ -1336,6 +1534,12 @@ const renderField = (selector, side) => {
       cell.dataset.testid = `${side.toLowerCase()}-cell-${row}-${depth}`;
       cell.setAttribute("role", "gridcell");
       cell.setAttribute("aria-label", t("formation.cellAria", { side: t(`battle.side.${side}`), row: row + 1, depth: depth + 1 }));
+      if ((grid.blocked || []).some(blocked => Number(blocked[0]) === row && Number(blocked[1]) === depth)) {
+        cell.classList.add("blocked");
+        cell.setAttribute("aria-disabled", "true");
+        root.append(cell);
+        continue;
+      }
       if (side === "PLAYER") {
         cell.addEventListener("dragover", event => {
           if (battleDragId === null || !capabilities().formation) return;
@@ -1365,7 +1569,7 @@ const renderField = (selector, side) => {
         token.dataset.unitId = String(unit.id);
         token.dataset.testid = `${side.toLowerCase()}-token-${unit.id}`;
         token.setAttribute("aria-label", t(side === "PLAYER" ? "formation.playerTokenAria" : "formation.enemyTokenAria", { name: character?.name || unit.character_id, hp: unit.hp }));
-        token.innerHTML = `${emblemMarkup(character)}<span class="token-copy"><b>${escapeHtml(character?.name || unit.character_id)}</b><small>HP ${formatNumber(unit.hp)}</small></span><span class="mini-hp"><i style="width:${hp}%"></i></span>`;
+        token.innerHTML = `${emblemMarkup(character)}<span class="token-copy"><b>${escapeHtml(character?.name || unit.character_id)}</b><small>${snapshot.state.rules.mode === "GOLDEN_COLOSSEUM" ? `${escapeHtml(enabledCostumeName(unit))} · ` : ""}HP ${formatNumber(unit.hp)}</small></span><span class="mini-hp"><i style="width:${hp}%"></i></span>`;
         token.addEventListener("click", event => {
           event.stopPropagation();
           if (pointerDrag?.active) return;
@@ -1390,7 +1594,7 @@ const selectUnit = unitId => {
 const selectCommandForUnit = (unitId, index) => {
   if (animationRunning) return;
   const result = selectCommand({
-    order: plannedOrder,
+    order: actionablePlannedOrder(),
     selections: plannedCommands,
     legalById: legalFor,
     costumeLookup: costumeById,
@@ -1427,6 +1631,14 @@ const renderActionDock = () => {
   $("#reservation-unit-name").textContent = character?.name || unit.character_id;
   $("#reservation-sp").textContent = String(Number(currentPlayerTeam().sp) - plannedCost());
   const selected = selectedCommand(unit.id);
+  if (capabilities().automaticBattle) {
+    const note = document.createElement("p");
+    note.className = "automatic-action-note";
+    note.textContent = t("golden.noManualAction");
+    root.append(note);
+    renderSelectedSkill(unit, selected);
+    return;
+  }
   const options = entry.commands
     .map((command, index) => ({ command, index, available: true }))
     .filter(option => option.command.type !== "USE_COSTUME");
@@ -1462,12 +1674,13 @@ const renderActionDock = () => {
     const isUnaffordable = command.unavailable_reason === "INSUFFICIENT_SP"
       || (available && !isSelected && prospectiveCost > Number(currentPlayerTeam().sp));
     const isOnCooldown = command.unavailable_reason === "COOLDOWN";
-    const miniCells = rangePreviewCells(meta.range);
+    const grid = snapshot.state.rules.grid;
+    const miniCells = rangePreviewCells(meta.range, Number(grid.rows), Number(grid.depths));
     const miniMarkup = command.type === "KNOCKBACK"
       ? knockbackDiagramMarkup(meta.knockback_direction)
-      : Array.from({ length: 12 }, (_, cellIndex) => {
-        const row = Math.floor(cellIndex / 4);
-        const depth = cellIndex % 4;
+      : Array.from({ length: Number(grid.rows) * Number(grid.depths) }, (_, cellIndex) => {
+        const row = Math.floor(cellIndex / Number(grid.depths));
+        const depth = cellIndex % Number(grid.depths);
         return `<i class="${miniCells.has(cellKey(row, depth)) ? "hit" : ""}"></i>`;
       }).join("");
     card.className = `command-card ${index === 0 ? "default-command" : ""} ${isSelected ? "selected" : ""} ${isUnaffordable ? "unaffordable" : ""} ${!available ? "unavailable" : ""}`;
@@ -1475,9 +1688,10 @@ const renderActionDock = () => {
     card.dataset.commandType = command.type;
     if (command.costume_id) card.dataset.costumeId = command.costume_id;
     card.dataset.testid = available ? `command-${unit.id}-${displayIndex}` : `command-${unit.id}-unavailable-${command.costume_id}`;
-    card.disabled = !available;
+    card.disabled = !available || !capabilities().manualPlayer;
     card.setAttribute("role", "option");
     card.setAttribute("aria-selected", String(isSelected));
+    const displayedSp = snapshot.state.rules.mode === "GOLDEN_COLOSSEUM" ? "∞" : meta.sp_cost || 0;
     card.setAttribute("aria-label", t("action.cardAria", {
       name: meta.name,
       burst: variants.length > 1
@@ -1485,7 +1699,7 @@ const renderActionDock = () => {
           ? t("action.burstAriaSuffix", { level: Number(command.burst_level) })
           : t("action.burstNoneAriaSuffix")
         : "",
-      sp: meta.sp_cost || 0,
+      sp: displayedSp,
       cooldown: cooldown ? t("action.cooldownSuffix", { cooldown }) : "",
       state: isSelected
         ? t("action.reservedSuffix")
@@ -1508,8 +1722,13 @@ const renderActionDock = () => {
       ? t("action.unavailable")
       : "";
     card.dataset.burstLevel = String(Number(command.burst_level ?? 0));
-    card.innerHTML = `<span class="command-glyph">${escapeHtml(meta.glyph)}</span><span class="command-name"><b>${escapeHtml(meta.name)}</b><small>${escapeHtml(selector)} · ${escapeHtml(meta.operation_summary || "")}</small><em class="command-prediction" hidden></em></span><span class="command-cost"><b>SP ${meta.sp_cost || 0}</b>${cooldown ? `<small>CT ${cooldown}</small>` : ""}</span><span class="command-range ${command.type === "KNOCKBACK" ? "knockback-range" : ""}" aria-hidden="true">${miniMarkup}</span><span class="command-state">${escapeHtml(stateLabel)}</span>`;
-    if (available) card.addEventListener("click", () => selectCommandForUnit(unit.id, index));
+    card.innerHTML = `<span class="command-glyph">${escapeHtml(meta.glyph)}</span><span class="command-name"><b>${escapeHtml(meta.name)}</b><small>${escapeHtml(selector)} · ${escapeHtml(meta.operation_summary || "")}</small><em class="command-prediction" hidden></em></span><span class="command-cost"><b>SP ${displayedSp}</b>${cooldown && snapshot.state.rules.mode !== "GOLDEN_COLOSSEUM" ? `<small>CT ${cooldown}</small>` : ""}</span><span class="command-range ${command.type === "KNOCKBACK" ? "knockback-range" : ""}" aria-hidden="true">${miniMarkup}</span><span class="command-state">${escapeHtml(stateLabel)}</span>`;
+    if (command.type !== "KNOCKBACK") {
+      const rangeNode = card.querySelector(".command-range");
+      rangeNode.style.gridTemplateColumns = `repeat(${grid.depths}, 8px)`;
+      rangeNode.style.gridTemplateRows = `repeat(${grid.rows}, 8px)`;
+    }
+    if (available && capabilities().manualPlayer) card.addEventListener("click", () => selectCommandForUnit(unit.id, index));
     wrapper.append(card);
     if (variants.length > 1 && isSelected) {
       const level = Number(command.burst_level ?? 0);
@@ -1567,10 +1786,12 @@ const renderSelectedSkill = (unit, command) => {
   $("#selected-skill-name").textContent = meta.name;
   const selectedBurstLevel = Number(command?.burst_level ?? 0);
   $("#selected-upgrade").textContent = loadout ? `+${loadout.enhancement}${selectedBurstLevel ? ` · B${selectedBurstLevel}` : ""}` : "";
-  $("#selected-sp").textContent = meta.sp_cost || 0;
+  $("#selected-sp").textContent = snapshot.state.rules.mode === "GOLDEN_COLOSSEUM" ? "∞" : meta.sp_cost || 0;
   $("#selected-cooldown").textContent = costume ? unit.cooldowns?.[costume.id] || 0 : 0;
   $("#selected-skill-summary").textContent = meta.description_ja || meta.operation_summary;
-  $("#reserved-badge").textContent = t("order.badge", { order: plannedOrder.indexOf(unit.id) + 1 });
+  $("#reserved-badge").textContent = snapshot.state.rules.mode === "GOLDEN_COLOSSEUM"
+    ? t("golden.nextActionBadge", { order: plannedOrder.indexOf(unit.id) + 1 })
+    : t("order.badge", { order: plannedOrder.indexOf(unit.id) + 1 });
   $("#selected-element").textContent = t(`element.${String(character?.element || "NONE")}`);
   requestRangePreview(unit, command, meta);
 };
@@ -1623,9 +1844,13 @@ const renderRange = (range, preview = null, meta = {}) => {
   clearDamageForecast();
   const root = $("#range-preview");
   root.innerHTML = "";
-  const hits = rangePreviewCells(range);
-  for (let row = 0; row < 3; row += 1) {
-    for (let depth = 0; depth < 4; depth += 1) {
+  const grid = snapshot?.state?.rules?.grid || draftGrid();
+  root.setAttribute("aria-label", t("selection.rangeDynamicAria", { rows: grid.rows, depths: grid.depths }));
+  root.style.gridTemplateColumns = `repeat(${grid.depths}, 1fr)`;
+  root.style.gridTemplateRows = `repeat(${grid.rows}, 1fr)`;
+  const hits = rangePreviewCells(range, Number(grid.rows), Number(grid.depths));
+  for (let row = 0; row < Number(grid.rows); row += 1) {
+    for (let depth = 0; depth < Number(grid.depths); depth += 1) {
       const cell = document.createElement("i");
       if (hits.has(cellKey(row, depth))) cell.classList.add("hit");
       root.append(cell);
@@ -1691,6 +1916,24 @@ const requestRangePreview = (unit, command, meta) => {
 };
 
 const renderSp = () => {
+  if (snapshot.state.rules.mode === "GOLDEN_COLOSSEUM") {
+    const panel = $(".sp-panel");
+    panel.classList.add("sp-bypassed");
+    panel.classList.remove("has-consumption", "has-burst", "sp-updated");
+    $("#sp-text").textContent = "∞";
+    $("#sp-status").textContent = t("golden.autoHelp");
+    $("#reservation-sp").textContent = "∞";
+    const root = $("#sp-pips");
+    root.replaceChildren();
+    for (let index = 0; index < CURRENT_SP_CAP; index += 1) {
+      const pip = document.createElement("i");
+      pip.className = "filled bypassed";
+      root.append(pip);
+    }
+    $("#execute").disabled = Boolean(snapshot.state.terminal) || requestInFlight || animationRunning;
+    return;
+  }
+  $(".sp-panel").classList.remove("sp-bypassed");
   const current = Number(currentPlayerTeam().sp);
   const consumed = plannedCost();
   const remaining = current - consumed;
@@ -1783,6 +2026,11 @@ const humanEvent = event => {
   let detail;
   switch (kind.type) {
     case "BATTLE_STARTED": detail = t("event.battleStarted", { side: t(`battle.side.${kind.first_side}`) }); break;
+    case "INITIATIVE_ROLLED": detail = t("event.initiativeRolled", { side: t(`battle.side.${kind.first_side}`), draw: kind.draw_id }); break;
+    case "ALL_TURN_STARTED": detail = t("event.allTurnStarted", { turn: kind.all_turn }); break;
+    case "ALL_TURN_ENDED": detail = t("event.allTurnEnded", { turn: kind.all_turn }); break;
+    case "BLESSING_ACTIVATED": detail = t("event.blessingActivated", { side: t(`battle.side.${kind.side}`), blessing: blessingById(kind.blessing_id)?.name || kind.blessing_id, level: kind.level }); break;
+    case "DEATH_TIME_ADVANCED": detail = t("event.deathTimeAdvanced", { turn: kind.all_turn, stacks: kind.stacks }); break;
     case "TURN_STARTED": detail = t("event.turnStarted", { turn: kind.turn, side: t(`battle.side.${kind.side}`), sp: kind.sp }); break;
     case "FORMATION_CHANGED": detail = t("event.formationChanged", { unit: unit(kind.unit_id), from: cell(kind.from), to: cell(kind.to) }); break;
     case "ACTION_STARTED": detail = t("event.actionStarted", { unit: unit(kind.actor_id), action: commandName(kind.command) }); break;
@@ -1951,6 +2199,19 @@ const animationSleep = async (baseMilliseconds, generation) => {
 const playBattleEvent = async (event, result, generation) => {
   const kind = event.kind || {};
   const turnText = playbackTurnText || t("battle.turn", { turn: result.state.game_turn });
+  if (kind.type === "ALL_TURN_STARTED") {
+    playbackTurnText = t("golden.allTurn", { turn: kind.all_turn });
+    setBattleCue(playbackTurnText, "", playbackTurnText);
+    return animationSleep(420, generation);
+  }
+  if (kind.type === "BLESSING_ACTIVATED") {
+    setBattleCue(blessingById(kind.blessing_id)?.name || kind.blessing_id, t(`battle.side.${kind.side}`), playbackTurnText);
+    return animationSleep(260, generation);
+  }
+  if (kind.type === "DEATH_TIME_ADVANCED") {
+    setBattleCue(t("golden.deathTime", { stacks: kind.stacks }), t("golden.allTurn", { turn: kind.all_turn }), playbackTurnText);
+    return animationSleep(700, generation);
+  }
   if (kind.type === "TURN_STARTED") {
     clearPlaybackFocus();
     playbackTurnText = t("battle.turn", { turn: kind.turn });
@@ -2078,7 +2339,7 @@ const playBattleEvent = async (event, result, generation) => {
     setBattleCue(t("battle.ended"), t(`battle.outcome.${kind.result?.outcome}`), turnText);
     return animationSleep(900, generation);
   }
-  if (["TURN_ENDED", "BATTLE_STARTED", "FORMATION_CHANGED", "RNG_ROLLED", "COOLDOWN_CHANGED", "EFFECT_EXPIRED"].includes(kind.type)) {
+  if (["TURN_ENDED", "ALL_TURN_ENDED", "INITIATIVE_ROLLED", "BATTLE_STARTED", "FORMATION_CHANGED", "RNG_ROLLED", "COOLDOWN_CHANGED", "EFFECT_EXPIRED"].includes(kind.type)) {
     return true;
   }
   return animationSleep(180, generation);
@@ -2145,14 +2406,25 @@ const modeName = mode => t(`mode.${mode}`);
 
 const renderBattleSurface = ({ preserveTip = false } = {}) => {
   const mode = snapshot.state.rules.mode;
-  $("#game-shell").classList.remove("normal", "mirror", "monster");
-  $("#game-shell").classList.add(mode === "MIRROR_WAR" ? "mirror" : mode === "MONSTER_CHASER" ? "monster" : "normal");
+  const golden = mode === "GOLDEN_COLOSSEUM";
+  $("#game-shell").classList.remove("normal", "mirror", "monster", "golden");
+  $("#game-shell").classList.add(mode === "MIRROR_WAR" ? "mirror" : mode === "MONSTER_CHASER" ? "monster" : mode === "GOLDEN_COLOSSEUM" ? "golden" : "normal");
   $("#mode-label").textContent = modeName(mode);
   $("#turn-label").textContent = t("battle.turn", { turn: snapshot.state.game_turn });
   $("#battle-turn").textContent = t("battle.turn", { turn: snapshot.state.game_turn });
   $("#team-label").textContent = t("party.team", { number: activeParty() });
-  $("#controller-label").textContent = snapshot.enemy_controller === "RULE_BASED" ? t("controller.rule") : t("controller.mcts");
+  $("#controller-label").textContent = snapshot.enemy_controller === "RULE_BASED"
+    ? t("controller.rule")
+    : snapshot.enemy_controller === "COLOSSEUM_AUTO"
+    ? t("controller.golden")
+    : t("controller.mcts");
   $("#formation-state").textContent = capabilities().formation ? t("board.formationEditable") : t("board.formationLocked");
+  $("[data-i18n='order.caption']").textContent = t(golden ? "golden.actionCaption" : "order.caption");
+  $("#order-heading").textContent = t(golden ? "golden.actionOrder" : "order.title");
+  $(".order-panel .drag-hint").textContent = t(golden ? "golden.orderFixed" : "order.dragHint");
+  $("#command-heading").textContent = t(golden ? "golden.nextAction" : "reservation.title");
+  $(".reservation-sp small").textContent = t(golden ? "golden.infiniteSp" : "reservation.remainingSp");
+  $(".reservation-workbench").setAttribute("aria-label", t(golden ? "golden.workbenchAria" : "reservation.workbenchAria"));
   renderOrder();
   renderEnemyList();
   renderField("#player-field", "PLAYER");
@@ -2175,6 +2447,10 @@ const renderBattleSurface = ({ preserveTip = false } = {}) => {
       current: snapshot.state.monster_chaser.current_level,
       selected: snapshot.state.monster_chaser.selected_level,
     }));
+    else if (mode === "GOLDEN_COLOSSEUM") setTip(t("tip.golden", {
+      turn: snapshot.state.golden_colosseum.all_turn,
+      initiative: t("golden.initiative", { side: t(`battle.side.${snapshot.state.golden_colosseum.initiative}`) }),
+    }));
     else if (capabilities().formation) setTip(t("tip.editable"));
     else setTip(t("tip.locked"));
   }
@@ -2183,7 +2459,7 @@ const renderBattleSurface = ({ preserveTip = false } = {}) => {
 
 const scheduleAutoTurn = () => {
   window.clearTimeout(autoTurnTimer);
-  if (!autoTurnEnabled || requestInFlight || animationRunning || snapshot?.state.terminal || snapshot?.state.active_side !== "PLAYER" || document.querySelector("dialog[open]")) return;
+  if (!autoTurnEnabled || requestInFlight || animationRunning || snapshot?.state.terminal || (!capabilities().automaticBattle && snapshot?.state.active_side !== "PLAYER") || document.querySelector("dialog[open]")) return;
   autoTurnTimer = window.setTimeout(() => executePlan(), Math.max(180, 850 / speedValue));
 };
 
@@ -2194,24 +2470,41 @@ const renderBattle = data => {
     window.clearTimeout(autoTurnTimer);
     $("#auto-turn").setAttribute("aria-pressed", "false");
   }
-  const validOrder = new Set((data.legal || []).map(entry => Number(entry.unit_id)));
-  plannedOrder = (data.state.teams.find(team => team.side === "PLAYER")?.action_order || []).map(Number).filter(id => validOrder.has(id));
+  const golden = data.state.rules.mode === "GOLDEN_COLOSSEUM";
+  const planSide = golden ? data.state.active_side : "PLAYER";
+  // The authoritative order deliberately retains dead/inactive units because
+  // they may be revived later in the same turn. Only command selection and UI
+  // focus are filtered by legal actions; the submitted order remains complete.
+  plannedOrder = (data.state.teams.find(team => team.side === planSide)?.action_order || []).map(Number);
   plannedCommands = new Map(plannedOrder.map(id => [id, 0]));
+  if (golden && data.auto_plan) {
+    for (const [rawId, command] of Object.entries(data.auto_plan.commands || {})) {
+      const entry = (data.legal || []).find(item => Number(item.unit_id) === Number(rawId));
+      const index = entry?.commands?.findIndex(item => (
+        item.type === command.type
+        && item.costume_id === command.costume_id
+        && Number(item.burst_level ?? 0) === Number(command.burst_level ?? 0)
+      ));
+      if (index >= 0) plannedCommands.set(Number(rawId), index);
+    }
+  }
   plannedBurstLevels = new Map();
   plannedFormation = normalizeFormation(Object.values(data.state.units).filter(unit => unit.alive && unit.side === "PLAYER" && Number(unit.party_no || 1) === Number(data.state.monster_chaser?.current_party || 1)));
   selectedUnitId = plannedOrder.find(id => legalFor(id)?.commands?.length) ?? null;
   keyboardDrag = null;
-  if (autoReserveEnabled) plannedCommands = chooseAutoReserve({ order: plannedOrder, selections: plannedCommands, legalById: legalFor, costumeLookup: costumeById, sp: currentPlayerTeam().sp });
+  if (autoReserveEnabled && !golden) plannedCommands = chooseAutoReserve({ order: actionablePlannedOrder(), selections: plannedCommands, legalById: legalFor, costumeLookup: costumeById, sp: currentPlayerTeam().sp });
   let report = t("ai.idle");
   if (data.last_ai?.controller === "MCTS") report = t("ai.mctsReport", {
     simulations: data.last_ai.simulations,
     candidates: data.last_ai.candidates,
     value: Number(data.last_ai.root_value).toFixed(3),
   });
+  else if (data.last_ai?.controller === "COLOSSEUM_AUTO") report = t("ai.goldenReport");
   else if (data.last_ai) report = t("ai.ruleReport");
   $("#ai-report").textContent = report;
   $("#pause-ai-report").textContent = report;
-  $("#ai-step").classList.toggle("hidden", data.state.rules.mode === "MONSTER_CHASER");
+  $("#ai-step").classList.toggle("hidden", ["MONSTER_CHASER", "GOLDEN_COLOSSEUM"].includes(data.state.rules.mode));
+  $("#auto-reserve").classList.toggle("hidden", golden);
   renderBattleSurface();
   scheduleAutoTurn();
 };
@@ -2222,6 +2515,11 @@ const executePlan = async () => {
   const before = snapshot;
   try {
     const mode = snapshot.state.rules.mode;
+    if (mode === "GOLDEN_COLOSSEUM") {
+      const result = await api("/api/ai-step", {}, t("status.goldenActing"));
+      if (await playBattleEvents(before, result)) renderBattle(result);
+      return;
+    }
     const formation = capabilities().formation
       ? serializeFormation(plannedFormation, visiblePlayerUnits().filter(unit => unit.alive).map(unit => unit.id))
       : {};
@@ -2342,10 +2640,16 @@ $("#screen-toggle").addEventListener("click", async () => {
 $("#auto-reserve").addEventListener("click", () => {
   autoReserveEnabled = !autoReserveEnabled;
   $("#auto-reserve").setAttribute("aria-pressed", String(autoReserveEnabled));
-  if (autoReserveEnabled) plannedCommands = chooseAutoReserve({ order: plannedOrder, selections: plannedCommands, legalById: legalFor, costumeLookup: costumeById, sp: currentPlayerTeam().sp });
+  if (autoReserveEnabled) plannedCommands = chooseAutoReserve({ order: actionablePlannedOrder(), selections: plannedCommands, legalById: legalFor, costumeLookup: costumeById, sp: currentPlayerTeam().sp });
   renderBattleSurface();
 });
 $("#auto-turn").addEventListener("click", () => {
+  if (snapshot?.state.terminal) {
+    autoTurnEnabled = false;
+    window.clearTimeout(autoTurnTimer);
+    $("#auto-turn").setAttribute("aria-pressed", "false");
+    return;
+  }
   autoTurnEnabled = !autoTurnEnabled;
   $("#auto-turn").setAttribute("aria-pressed", String(autoTurnEnabled));
   if (autoTurnEnabled) scheduleAutoTurn();

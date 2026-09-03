@@ -42,8 +42,8 @@ test("HTML has pause, rollback, and resume controls", () => {
   assert.match(html, /id="rollback"/);
   assert.match(html, /id="resume"/);
 });
-test("HTML has all three requested modes", () => {
-  for (const mode of ["NORMAL", "MIRROR_WAR", "MONSTER_CHASER"]) assert.match(html, new RegExp(`data-mode="${mode}"`));
+test("HTML has all four implemented modes", () => {
+  for (const mode of ["NORMAL", "MIRROR_WAR", "MONSTER_CHASER", "GOLDEN_COLOSSEUM"]) assert.match(html, new RegExp(`data-mode="${mode}"`));
 });
 test("battle placement supports HTML drag and drop", () => {
   for (const event of ["dragstart", "dragover", "drop", "dragend"]) assert.match(app, new RegExp(`addEventListener\\("${event}"`));

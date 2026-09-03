@@ -71,7 +71,7 @@ def _preview_footprint(
     anchor: dict[str, int] | None,
     positions: dict[int, dict[str, int]],
 ) -> tuple[list[dict[str, int]], list[int]]:
-    """Project the exact resolved command footprint onto the current 3x4 board."""
+    """Project the exact resolved command footprint onto the current mode grid."""
     if anchor is None or target_side is None:
         return [], []
 
@@ -175,12 +175,16 @@ class GuiSession:
                 else template.new_battle(setup_json, seed)
             )
             preview_simulator = simulator.new_battle(setup_json, seed)
-            planner = MctsPlanner(
-                self.database,
-                setup_json,
-                seed,
-                config,
-                template=simulator,
+            planner = (
+                None
+                if setup["rules"]["mode"] == "GOLDEN_COLOSSEUM"
+                else MctsPlanner(
+                    self.database,
+                    setup_json,
+                    seed,
+                    config,
+                    template=simulator,
+                )
             )
             self.seed = seed
             self.mcts_config = config
@@ -200,12 +204,16 @@ class GuiSession:
             next_seed = self.seed + 1 if seed is None else _strict_int(seed, "seed")
             simulator = self.simulator.new_battle(self.setup_json, next_seed)
             preview_simulator = simulator.new_battle(self.setup_json, next_seed)
-            planner = MctsPlanner(
-                self.database,
-                self.setup_json,
-                next_seed,
-                self.mcts_config,
-                template=simulator,
+            planner = (
+                None
+                if self.setup["rules"]["mode"] == "GOLDEN_COLOSSEUM"
+                else MctsPlanner(
+                    self.database,
+                    self.setup_json,
+                    next_seed,
+                    self.mcts_config,
+                    template=simulator,
+                )
             )
             self.seed = next_seed
             self.simulator = simulator
@@ -226,6 +234,8 @@ class GuiSession:
             state = self._state()
             if state["terminal"] is not None:
                 raise RuntimeError("the battle has already ended")
+            if state["rules"]["mode"] == "GOLDEN_COLOSSEUM":
+                raise RuntimeError("Golden Colosseum actions are resolved automatically")
             if state["active_side"] != "PLAYER":
                 raise RuntimeError("wait for the AI-controlled enemy turn to finish")
             before = self.simulator.state_json()
@@ -249,9 +259,14 @@ class GuiSession:
             before = self.simulator.state_json()
             previous_ai = copy.deepcopy(self.last_ai)
             try:
-                if state["rules"]["mode"] == "MONSTER_CHASER":
+                if state["rules"]["mode"] in {"MONSTER_CHASER", "GOLDEN_COLOSSEUM"}:
                     self.simulator.step_auto_json()
-                    self.last_ai = {"controller": "RULE_BASED", "side": side}
+                    controller = (
+                        "COLOSSEUM_AUTO"
+                        if state["rules"]["mode"] == "GOLDEN_COLOSSEUM"
+                        else "RULE_BASED"
+                    )
+                    self.last_ai = {"controller": controller, "side": side}
                 else:
                     self._step_mcts(side)
                 requested_ai = copy.deepcopy(self.last_ai)
@@ -262,7 +277,7 @@ class GuiSession:
                 self.simulator.restore_json(before)
                 self.last_ai = previous_ai
                 raise
-            if side == "PLAYER":
+            if side == "PLAYER" or state["rules"]["mode"] == "GOLDEN_COLOSSEUM":
                 self.history.append(before)
             return self.payload()
 
@@ -291,24 +306,32 @@ class GuiSession:
         with self.lock:
             live_json = self.simulator.state_json()
             state = json.loads(live_json)
-            if state["terminal"] is not None or state["active_side"] != "PLAYER":
+            if state["terminal"] is not None:
+                raise RuntimeError("target preview is unavailable after battle completion")
+            golden = state["rules"]["mode"] == "GOLDEN_COLOSSEUM"
+            active_side = state["active_side"]
+            if not golden and active_side != "PLAYER":
                 raise RuntimeError("target preview is only available during player preparation")
 
-            current_order = [int(value) for value in state["teams"][0]["action_order"]]
-            requested_order = (
-                current_order if order is None else _strict_int_list(order, "preview order")
-            )
-            if len(requested_order) != len(current_order) or set(requested_order) != set(
-                current_order
-            ):
-                raise ValueError("turn order must contain every active unit exactly once")
+            side_index = 0 if active_side == "PLAYER" else 1
+            current_order = [int(value) for value in state["teams"][side_index]["action_order"]]
             actor_id = _strict_int(unit_id, "preview unit_id")
-            if actor_id not in requested_order:
+            if actor_id not in current_order:
                 raise ValueError("preview actor is not in the active action order")
+            if golden:
+                requested_order = [actor_id]
+            else:
+                requested_order = (
+                    current_order if order is None else _strict_int_list(order, "preview order")
+                )
+                if len(requested_order) != len(current_order) or set(requested_order) != set(
+                    current_order
+                ):
+                    raise ValueError("turn order must contain every active unit exactly once")
 
             temporary = self.preview_simulator
             temporary.restore_json(live_json)
-            legal = json.loads(temporary.legal_actions_json("PLAYER"))
+            legal = json.loads(temporary.legal_actions_json(active_side))
             legal_by_id = {int(entry["unit_id"]): entry["commands"] for entry in legal}
             choices = legal_by_id.get(actor_id)
             if not choices:
@@ -321,7 +344,7 @@ class GuiSession:
             if metadata is not None:
                 command["ui"] = metadata
 
-            normalized_formation = _normalize_formation(formation)
+            normalized_formation = {} if golden else _normalize_formation(formation)
             positions = {
                 int(raw_id): {
                     "row": int(unit["position"]["row"]),
@@ -336,6 +359,8 @@ class GuiSession:
             planned_indices = (
                 _strict_int_list(actions, "preview actions") if actions is not None else None
             )
+            if golden:
+                planned_indices = None
             if planned_indices is not None and len(planned_indices) != len(requested_order):
                 raise ValueError("preview actions must match the requested action order")
             commands: dict[str, dict[str, Any]] = {}
@@ -357,7 +382,7 @@ class GuiSession:
             temporary.step_json(
                 json.dumps(
                     {
-                        "side": "PLAYER",
+                        "side": active_side,
                         "order": requested_order,
                         "commands": commands,
                         "formation": normalized_formation,
@@ -551,6 +576,8 @@ class GuiSession:
     def _advance_enemy(self) -> None:
         for _ in range(16):
             state = self._state()
+            if state["rules"]["mode"] == "GOLDEN_COLOSSEUM":
+                return
             if state["terminal"] is not None or state["active_side"] != "ENEMY":
                 return
             if state["rules"]["mode"] == "MONSTER_CHASER":
@@ -632,7 +659,15 @@ class GuiSession:
                     )
                     unavailable.append(command)
             entry["unavailable_commands"] = unavailable
-        controller = "RULE_BASED" if state["rules"]["mode"] == "MONSTER_CHASER" else "MCTS"
+        controller = {
+            "MONSTER_CHASER": "RULE_BASED",
+            "GOLDEN_COLOSSEUM": "COLOSSEUM_AUTO",
+        }.get(state["rules"]["mode"], "MCTS")
+        auto_plan = (
+            json.loads(self.simulator.auto_plan_json(state["active_side"]))
+            if state["terminal"] is None and state["rules"]["mode"] == "GOLDEN_COLOSSEUM"
+            else None
+        )
         return {
             "state": state,
             "legal": legal,
@@ -645,6 +680,7 @@ class GuiSession:
                 "max_branching": self.mcts_config.max_branching,
             },
             "last_ai": self.last_ai,
+            "auto_plan": auto_plan,
             "setup": copy.deepcopy(self.setup_draft),
             "can_rollback": bool(self.history),
         }

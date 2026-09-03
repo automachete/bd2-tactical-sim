@@ -121,6 +121,7 @@
           <button data-mode="NORMAL" type="button" class="active" data-i18n="mode.NORMAL">通常戦闘</button>
           <button data-mode="MIRROR_WAR" type="button" data-i18n="mode.MIRROR_WAR">鏡戦争</button>
           <button data-mode="MONSTER_CHASER" type="button" data-i18n="mode.MONSTER_CHASER">モンスターチェイサー</button>
+          <button data-mode="GOLDEN_COLOSSEUM" type="button" data-i18n="mode.GOLDEN_COLOSSEUM">ゴールデンコロシアム</button>
         </nav>
         <div class="formation-toolbar">
           <label><span data-i18n="preparation.seed">乱数シード</span><input id="setup-seed" type="number" step="1" required value="42" /></label>
@@ -130,6 +131,10 @@
           <button class="secondary-button" id="restore-preset" type="button" data-i18n="preparation.restore">初期編成へ戻す</button>
         </div>
         <p class="mode-help" id="mode-help"></p>
+        <section class="golden-settings hidden" id="golden-settings" data-testid="golden-settings">
+          <header><div><small data-i18n="golden.caption">シーズンルール</small><b id="golden-season">—</b></div><span id="golden-rule-summary">—</span></header>
+          <div class="golden-loadouts" id="golden-loadouts"></div>
+        </section>
         <div class="party-switch hidden" id="party-switch"><button data-party="1" type="button" class="active">チーム 1</button><button data-party="2" type="button">チーム 2</button></div>
         <div class="formation-content">
           <section class="formation-side" aria-labelledby="player-formation-heading">

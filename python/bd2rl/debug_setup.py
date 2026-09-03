@@ -10,6 +10,7 @@ MODE_SCENARIOS = {
     "NORMAL": "normal-demo.json",
     "MIRROR_WAR": "mirror-war-demo.json",
     "MONSTER_CHASER": "monster-chaser-current.json",
+    "GOLDEN_COLOSSEUM": "golden-colosseum-reference.json",
 }
 
 DEFAULT_CELLS = (
@@ -133,6 +134,34 @@ class DebugSetupCatalog:
                 """,
                 (ruleset_id,),
             ).fetchall()
+            blessing_rows = connection.execute(
+                """
+                SELECT blessing_id, record_json
+                FROM blessings
+                WHERE ruleset_id = ?
+                ORDER BY blessing_id
+                """,
+                (ruleset_id,),
+            ).fetchall()
+
+        self.blessings = []
+        for blessing_id, record_json in blessing_rows:
+            record = json.loads(record_json)
+            self.blessings.append(
+                {
+                    "id": str(blessing_id),
+                    "name": self._display_name(record["names"], str(blessing_id)),
+                    "description_ja": "\n".join(str(line) for line in record["descriptions"]["ja"]),
+                    "category": str(record["category"]),
+                    "levels": [
+                        {
+                            "level": int(level["level"]),
+                            "point_cost": int(level["point_cost"]),
+                        }
+                        for level in record["levels"]
+                    ],
+                }
+            )
 
         self.equipment: dict[str, dict[str, Any]] = {}
         for equipment_id, record_json in equipment_rows:
@@ -430,6 +459,7 @@ class DebugSetupCatalog:
             "system_costumes": list(self.system_costumes.values()),
             "monster_skills": self.monster_skills,
             "equipment": list(self.equipment.values()),
+            "blessings": copy.deepcopy(self.blessings),
             "build_settings_default": copy.deepcopy(DEFAULT_BUILD_SETTINGS),
             "presets": {
                 mode: self._preset_from_template(mode, template)
@@ -496,29 +526,57 @@ class DebugSetupCatalog:
         self, mode: str, setup: dict[str, Any], *, preserve_loadout: bool
     ) -> dict[str, Any]:
         player_units = [
-            self._editor_unit(unit, preserve_loadout=preserve_loadout)
+            self._editor_unit(unit, mode=mode, preserve_loadout=preserve_loadout)
             for unit in setup["units"]
             if unit["side"] == "PLAYER" and unit["character_id"] in self.characters
         ]
         enemy_units = [
-            self._editor_unit(unit, preserve_loadout=preserve_loadout)
+            self._editor_unit(unit, mode=mode, preserve_loadout=preserve_loadout)
             for unit in setup["units"]
             if unit["side"] == "ENEMY" and unit["character_id"] in self.characters
         ]
         payload: dict[str, Any] = {
             "mode": mode,
+            "grid": copy.deepcopy(setup["rules"]["grid"]),
             "player_units": player_units,
             "enemy_units": enemy_units,
         }
         if setup.get("monster_chaser"):
             payload["monster_level"] = setup["monster_chaser"]["selected_level"]
+        if setup.get("golden_colosseum"):
+            payload["golden_colosseum"] = copy.deepcopy(setup["golden_colosseum"])
         return payload
 
     def _editor_unit(
-        self, unit: dict[str, Any], *, preserve_loadout: bool = False
+        self, unit: dict[str, Any], *, mode: str, preserve_loadout: bool = False
     ) -> dict[str, Any]:
         character = self.characters.get(unit["character_id"])
-        if character is not None and not preserve_loadout:
+        if character is not None and mode == "GOLDEN_COLOSSEUM":
+            configured = {item["costume_id"]: item for item in unit["costume_loadout"]}
+            costumes = []
+            for costume in character["costumes"]:
+                loadout = configured.get(costume["id"])
+                costumes.append(
+                    {
+                        "costume_id": costume["id"],
+                        "enhancement": (
+                            loadout["enhancement"] if loadout else costume["max_enhancement"]
+                        ),
+                        "burst_level": (
+                            loadout["burst_level"] if loadout else costume["max_burst_level"]
+                        ),
+                        "potential_mask": (
+                            loadout.get("potential_mask", 7)
+                            if loadout
+                            else costume["max_potential_mask"]
+                        ),
+                        "permanent_potential_enabled": (
+                            loadout.get("permanent_potential_enabled", True) if loadout else True
+                        ),
+                        "enabled": loadout is not None,
+                    }
+                )
+        elif character is not None and not preserve_loadout:
             costumes = [
                 {
                     "costume_id": costume["id"],
@@ -564,13 +622,17 @@ class DebugSetupCatalog:
             raise ValueError(f"unknown battle mode: {mode}")
         setup = copy.deepcopy(self.templates[mode])
         setup["scenario_id"] = f"gui-{mode.lower().replace('_', '-')}"
-        # Debug play intentionally enables the human PLAYER side even in Mirror War.
-        setup["rules"]["allow_manual_commands"] = [True, False]
+        # Debug play intentionally enables the human PLAYER side where the mode permits it.
+        if mode != "GOLDEN_COLOSSEUM":
+            setup["rules"]["allow_manual_commands"] = [True, False]
+
+        grid = setup["rules"]["grid"]
+        limit = int(grid["deployment_limit"])
 
         player_request = request.get("player_units")
         if not isinstance(player_request, list):
             raise ValueError("player_units must be a list")
-        player_units = self._build_side_units(mode, "PLAYER", player_request)
+        player_units = self._build_side_units(mode, "PLAYER", player_request, grid, limit)
         if mode == "MONSTER_CHASER":
             enemy_units = [unit for unit in setup["units"] if unit["side"] == "ENEMY"]
             monster = setup["monster_chaser"]
@@ -587,19 +649,29 @@ class DebugSetupCatalog:
             enemy_request = request.get("enemy_units")
             if not isinstance(enemy_request, list):
                 raise ValueError("enemy_units must be a list")
-            enemy_units = self._build_side_units(mode, "ENEMY", enemy_request)
+            enemy_units = self._build_side_units(mode, "ENEMY", enemy_request, grid, limit)
+        if mode == "GOLDEN_COLOSSEUM":
+            setup["golden_colosseum"] = self._build_golden_colosseum(
+                request.get("golden_colosseum"), setup["golden_colosseum"], grid
+            )
         setup["units"] = player_units + enemy_units
         return setup
 
     def _build_side_units(
-        self, mode: str, side: str, requests: list[dict[str, Any]]
+        self,
+        mode: str,
+        side: str,
+        requests: list[dict[str, Any]],
+        grid: dict[str, Any],
+        deployment_limit: int,
     ) -> list[dict[str, Any]]:
-        limit = 10 if mode == "MONSTER_CHASER" and side == "PLAYER" else 5
+        limit = 10 if mode == "MONSTER_CHASER" and side == "PLAYER" else deployment_limit
         if not 1 <= len(requests) <= limit:
             raise ValueError(f"{side} must contain between 1 and {limit} units")
         party_counts: dict[int, int] = {}
         occupied: set[tuple[int, int, int]] = set()
         characters_by_party: set[tuple[int, str]] = set()
+        costumes_by_party: set[tuple[int, str]] = set()
         units: list[dict[str, Any]] = []
         for index, request in enumerate(requests):
             if not isinstance(request, dict):
@@ -614,21 +686,34 @@ class DebugSetupCatalog:
             if party_no not in (1, 2):
                 raise ValueError("party_no must be 1 or 2")
             party_counts[party_no] = party_counts.get(party_no, 0) + 1
-            if party_counts[party_no] > 5:
-                raise ValueError(f"party {party_no} exceeds the five-unit deployment limit")
+            party_limit = deployment_limit if mode == "GOLDEN_COLOSSEUM" else 5
+            if party_counts[party_no] > party_limit:
+                raise ValueError(
+                    f"party {party_no} exceeds the {party_limit}-unit deployment limit"
+                )
             character_key = (party_no, character_id)
-            if character_key in characters_by_party:
+            if mode != "GOLDEN_COLOSSEUM" and character_key in characters_by_party:
                 raise ValueError(f"duplicate character in party {party_no}: {character_id}")
             characters_by_party.add(character_key)
             row = _strict_int(request.get("row", DEFAULT_CELLS[index % 5]["row"]), "row")
             depth = _strict_int(request.get("depth", DEFAULT_CELLS[index % 5]["depth"]), "depth")
-            if not 0 <= row < 3 or not 0 <= depth < 4:
+            if not 0 <= row < int(grid["rows"]) or not 0 <= depth < int(grid["depths"]):
                 raise ValueError(f"invalid formation cell: row={row}, depth={depth}")
+            if [row, depth] in grid.get("blocked", []):
+                raise ValueError(f"blocked formation cell: row={row}, depth={depth}")
             cell_key = (party_no, row, depth)
             if cell_key in occupied:
                 raise ValueError(f"duplicate formation cell in party {party_no}: {row},{depth}")
             occupied.add(cell_key)
-            loadout = self._build_loadout(character, request)
+            loadout = self._build_loadout(
+                character, request, maximum_costumes=1 if mode == "GOLDEN_COLOSSEUM" else None
+            )
+            costume_key = (party_no, loadout[0]["costume_id"])
+            if mode == "GOLDEN_COLOSSEUM" and costume_key in costumes_by_party:
+                raise ValueError(
+                    f"duplicate costume in party {party_no}: {loadout[0]['costume_id']}"
+                )
+            costumes_by_party.add(costume_key)
             unit_id = self._unit_id(side, party_no, index, party_counts[party_no])
             units.append(
                 {
@@ -639,7 +724,11 @@ class DebugSetupCatalog:
                     "costume_loadout": loadout,
                     "stat_overrides": None,
                     "build_settings": self._build_settings(request),
-                    "equipment": self._build_equipment(request, character_id),
+                    "equipment": (
+                        {}
+                        if mode == "GOLDEN_COLOSSEUM"
+                        else self._build_equipment(request, character_id)
+                    ),
                     "ai_priority": [item["costume_id"] for item in loadout],
                     "party_no": party_no,
                     "hp_owner": None,
@@ -658,7 +747,10 @@ class DebugSetupCatalog:
         return party_position
 
     def _build_loadout(
-        self, character: dict[str, Any], request: dict[str, Any]
+        self,
+        character: dict[str, Any],
+        request: dict[str, Any],
+        maximum_costumes: int | None = None,
     ) -> list[dict[str, Any]]:
         available = {item["id"]: item for item in character["costumes"]}
         requested = request.get("costumes")
@@ -672,6 +764,11 @@ class DebugSetupCatalog:
         for value in requested:
             if not isinstance(value, dict):
                 raise ValueError("costume entries must be objects")
+            enabled = value.get("enabled", True)
+            if not isinstance(enabled, bool):
+                raise ValueError("costume enabled must be a boolean")
+            if not enabled:
+                continue
             costume_id = str(value.get("costume_id", ""))
             maximum = available.get(costume_id)
             if maximum is None:
@@ -705,11 +802,122 @@ class DebugSetupCatalog:
                     "costume_link_target": None,
                 }
             )
+        if not result:
+            raise ValueError(f"{character['id']} must equip at least one enabled costume")
+        if maximum_costumes is not None and len(result) > maximum_costumes:
+            raise ValueError(
+                f"{character['id']} may equip at most {maximum_costumes} costume in this mode"
+            )
         if link_target:
             if link_target not in seen:
                 raise ValueError("costume_link_target must be an equipped costume")
             result[0]["costume_link_target"] = str(link_target)
         return result
+
+    def _build_golden_colosseum(
+        self, value: Any, fallback: dict[str, Any], grid: dict[str, Any]
+    ) -> dict[str, Any]:
+        if value is None:
+            return copy.deepcopy(fallback)
+        if not isinstance(value, dict):
+            raise ValueError("golden_colosseum must be an object")
+        required = {
+            "season_label",
+            "weekly_attempts",
+            "refill_limit",
+            "starting_rating",
+            "undeployable_grid_count",
+            "death_time_all_turn",
+            "banned_costume_ids",
+            "banned_blessing_ids",
+            "side_blessings",
+        }
+        if set(value) != required:
+            raise ValueError("golden_colosseum has unknown or missing fields")
+        if not isinstance(value["season_label"], str) or not value["season_label"].strip():
+            raise ValueError("golden_colosseum.season_label must be non-empty")
+        weekly_attempts = _strict_int(value["weekly_attempts"], "weekly_attempts")
+        refill_limit = _strict_int(value["refill_limit"], "refill_limit")
+        starting_rating = _strict_int(value["starting_rating"], "starting_rating")
+        undeployable_count = _strict_int(
+            value["undeployable_grid_count"], "undeployable_grid_count"
+        )
+        if weekly_attempts < 1 or refill_limit < 0 or starting_rating < 1:
+            raise ValueError("Golden Colosseum season counters must be non-negative")
+        if undeployable_count != len(grid["blocked"]):
+            raise ValueError("undeployable_grid_count must match the materialized blocked cells")
+        death_turn = _strict_int(value["death_time_all_turn"], "death_time_all_turn")
+        if death_turn < 1:
+            raise ValueError("death_time_all_turn must be positive")
+        known_blessings = {item["id"] for item in self.blessings}
+        banned_costumes = value["banned_costume_ids"]
+        banned_blessings = value["banned_blessing_ids"]
+        if not isinstance(banned_costumes, list) or not all(
+            isinstance(item, str) and item in self.costume_records for item in banned_costumes
+        ):
+            raise ValueError("banned_costume_ids contains an unknown costume")
+        if not isinstance(banned_blessings, list) or not all(
+            isinstance(item, str) and item in known_blessings for item in banned_blessings
+        ):
+            raise ValueError("banned_blessing_ids contains an unknown blessing")
+        sides = value["side_blessings"]
+        if not isinstance(sides, list) or len(sides) != 2:
+            raise ValueError("side_blessings must contain PLAYER and ENEMY")
+        normalized_sides: list[dict[str, Any]] = []
+        by_id = {item["id"]: item for item in self.blessings}
+        for side_index, side in enumerate(sides):
+            if not isinstance(side, dict) or set(side) != {"going_first", "going_second"}:
+                raise ValueError(f"side_blessings[{side_index}] has an invalid schema")
+            normalized: dict[str, Any] = {}
+            for initiative in ("going_first", "going_second"):
+                loadout = side[initiative]
+                if not isinstance(loadout, dict) or set(loadout) != {"point_limit", "selected"}:
+                    raise ValueError(f"{initiative} blessing loadout has an invalid schema")
+                point_limit = _strict_int(loadout["point_limit"], f"{initiative}.point_limit")
+                selected = loadout["selected"]
+                if not 3 <= point_limit <= 15 or not isinstance(selected, list):
+                    raise ValueError(f"{initiative} blessing loadout is outside current ranges")
+                normalized_selected: list[dict[str, Any]] = []
+                seen: set[str] = set()
+                spent = 0
+                for selection in selected:
+                    if not isinstance(selection, dict) or set(selection) != {
+                        "blessing_id",
+                        "level",
+                    }:
+                        raise ValueError("blessing selection has an invalid schema")
+                    blessing_id = str(selection["blessing_id"])
+                    level_number = _strict_int(selection["level"], "blessing level")
+                    definition = by_id.get(blessing_id)
+                    if definition is None or blessing_id in banned_blessings or blessing_id in seen:
+                        raise ValueError(f"illegal blessing selection: {blessing_id}")
+                    level = next(
+                        (item for item in definition["levels"] if item["level"] == level_number),
+                        None,
+                    )
+                    if level is None:
+                        raise ValueError(f"unknown blessing level: {blessing_id}[{level_number}]")
+                    seen.add(blessing_id)
+                    spent += int(level["point_cost"])
+                    normalized_selected.append({"blessing_id": blessing_id, "level": level_number})
+                if spent > point_limit:
+                    raise ValueError(f"{initiative} blessing loadout exceeds its point limit")
+                normalized[initiative] = {
+                    "point_limit": point_limit,
+                    "selected": normalized_selected,
+                }
+            normalized_sides.append(normalized)
+        return {
+            "season_label": value["season_label"].strip(),
+            "weekly_attempts": weekly_attempts,
+            "refill_limit": refill_limit,
+            "starting_rating": starting_rating,
+            "undeployable_grid_count": undeployable_count,
+            "death_time_all_turn": death_turn,
+            "banned_costume_ids": list(dict.fromkeys(banned_costumes)),
+            "banned_blessing_ids": list(dict.fromkeys(banned_blessings)),
+            "side_blessings": normalized_sides,
+        }
 
     def _build_equipment(self, request: dict[str, Any], character_id: str) -> dict[str, Any]:
         value = request.get("equipment", {})

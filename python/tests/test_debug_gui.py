@@ -46,7 +46,7 @@ def maximum_loadout(catalog: DebugSetupCatalog, character_id: str) -> list[dict[
     ]
 
 
-def test_debug_catalog_builds_all_three_modes_from_external_data() -> None:
+def test_debug_catalog_builds_all_four_modes_from_external_data() -> None:
     catalog = DebugSetupCatalog(DATABASE, SCENARIOS)
     public = catalog.public_payload()
     assert public["ruleset_id"].startswith("bd2-current-")
@@ -99,7 +99,13 @@ def test_debug_catalog_builds_all_three_modes_from_external_data() -> None:
     assert entities["fiend:10072"]["name"] == "仇怨のキメラ（風）"  # noqa: RUF001
     assert entities["summon:PersonaOfWorship"]["name"] == "Persona of Worship"
     assert system_costumes["summon:PersonaOfWorship:skill"]["name"] == "精神崩潰"
-    assert set(public["presets"]) == {"NORMAL", "MIRROR_WAR", "MONSTER_CHASER"}
+    assert set(public["presets"]) == {
+        "NORMAL",
+        "MIRROR_WAR",
+        "MONSTER_CHASER",
+        "GOLDEN_COLOSSEUM",
+    }
+    assert len(public["blessings"]) == 47
 
     for mode, preset in public["presets"].items():
         setup = catalog.build_setup(preset)
@@ -107,8 +113,15 @@ def test_debug_catalog_builds_all_three_modes_from_external_data() -> None:
         simulator = Simulator(str(DATABASE), json.dumps(setup), 13)
         state = json.loads(simulator.state_json())
         assert state["rules"]["mode"] == mode
-        assert state["rules"]["allow_manual_commands"] == [True, False]
-        assert state["active_side"] == "PLAYER"
+        if mode == "GOLDEN_COLOSSEUM":
+            assert state["rules"]["allow_manual_commands"] == [False, False]
+            assert state["golden_colosseum"]["initiative"] in {"PLAYER", "ENEMY"}
+            assert state["active_side"] == state["golden_colosseum"]["initiative"]
+            assert all(len(unit["costume_loadout"]) == 1 for unit in state["units"].values())
+            assert all(not unit["equipment"] for unit in setup["units"])
+        else:
+            assert state["rules"]["allow_manual_commands"] == [True, False]
+            assert state["active_side"] == "PLAYER"
 
     monster = catalog.build_setup(public["presets"]["MONSTER_CHASER"])
     parties = {unit["party_no"] for unit in monster["units"] if unit["side"] == "PLAYER"}
@@ -607,6 +620,41 @@ def test_gui_session_uses_mcts_and_monster_rule_controller() -> None:
     after_turn = session.step([2, 2, 2, 2, 2])
     assert after_turn["state"]["active_side"] == "PLAYER"
     assert after_turn["last_ai"] == {"controller": "RULE_BASED", "side": "ENEMY"}
+
+
+def test_golden_colosseum_allows_same_character_costumes_and_only_auto_steps() -> None:
+    session = GuiSession(DATABASE, SCENARIOS, 23, FAST_MCTS)
+    request = session.catalog.public_payload()["presets"]["GOLDEN_COLOSSEUM"]
+    loen = session.catalog.characters["Loen"]
+    request["player_units"][1]["character_id"] = "Loen"
+    request["player_units"][1]["costumes"] = [
+        {
+            "costume_id": costume["id"],
+            "enhancement": costume["max_enhancement"],
+            "burst_level": costume["max_burst_level"],
+            "potential_mask": costume["max_potential_mask"],
+            "permanent_potential_enabled": True,
+            "enabled": costume["id"] == "Loen_2",
+        }
+        for costume in loen["costumes"]
+    ]
+    started = session.start(request)
+    assert started["enemy_controller"] == "COLOSSEUM_AUTO"
+    player_costumes = [
+        unit["costume_loadout"][0]["costume_id"]
+        for unit in started["state"]["units"].values()
+        if unit["side"] == "PLAYER"
+    ]
+    assert player_costumes[:2] == ["Loen_1", "Loen_2"]
+    with pytest.raises(RuntimeError, match="resolved automatically"):
+        session.step([], [], {})
+
+    before_sequence = started["state"]["action_sequence"]
+    active_side = started["state"]["active_side"]
+    advanced = session.ai_step()
+    assert advanced["state"]["action_sequence"] == before_sequence + 1
+    assert advanced["last_ai"] == {"controller": "COLOSSEUM_AUTO", "side": active_side}
+    assert advanced["can_rollback"] is True
 
 
 def test_gui_payload_preserves_the_exact_editor_setup_and_mcts_configuration() -> None:
