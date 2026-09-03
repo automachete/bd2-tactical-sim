@@ -8,14 +8,15 @@ BrownDust2の戦闘を、決定論的なRustコア、SQLiteカタログ、ブラ
 |---|---|---|
 | 通常戦闘 | GUI操作または方策 | MCTS |
 | 鏡戦争 | GUI操作または方策 | MCTS |
+| ゴールデンコロシアム | 衣装編成・加護設定後に自動進行 | 衣装単位の交互行動AI |
 | 魔物追跡者 | 2パーティを編成してGUI操作 | データ駆動のルールAI |
 
-2026-09-02版のデータには、★5プレイアブル61体、プレイヤー用155コスチューム、召喚4種、現行ボス用5スキルを収録しています。強化、潜在力、バーストを展開したスキル派生は12,509件です。
+2026-09-03版のデータには、★5プレイアブル61体、プレイヤー用164コスチューム、召喚4種、現行ボス用5スキル、剣闘士の加護47種を収録しています。強化、潜在力、バーストを展開したスキル派生は12,509件です。
 
 主な機能は次のとおりです。
 
 - シードと入力から同じ結果を再現できる整数演算ベースの戦闘コア
-- 3×4盤面の配置、行動予約、対象範囲、戦闘再生を操作できるローカルGUI
+- 通常3×4／コロシアム可変盤面の配置、行動予約、対象範囲、戦闘再生を操作できるローカルGUI
 - コスチューム、装備、成長値、バフをSQLiteから読み込むデータ駆動構成
 - 事前学習を必要としないMCTSと、魔物追跡者用の行動順序AI
 - 合法手マスク付きのGymnasium/TorchRL環境とGPU対応PPO
@@ -64,6 +65,7 @@ cargo run -p bd2-data --bin bd2-data -- import-catalog data/generated/catalog.js
 cargo run -p bd2-data --bin bd2-data -- import-scenario data/scenarios/normal-demo.json data/generated/bd2.sqlite
 cargo run -p bd2-data --bin bd2-data -- import-scenario data/scenarios/mirror-war-demo.json data/generated/bd2.sqlite
 cargo run -p bd2-data --bin bd2-data -- import-scenario data/scenarios/monster-chaser-current.json data/generated/bd2.sqlite
+cargo run -p bd2-data --bin bd2-data -- import-scenario data/scenarios/golden-colosseum-reference.json data/generated/bd2.sqlite
 cargo run -p bd2-data --bin bd2-data -- inspect data/generated/bd2.sqlite
 ```
 
@@ -88,6 +90,8 @@ cargo run -p bd2-data --bin bd2-data -- inspect data/generated/bd2.sqlite
 
 鏡戦争など配置が固定される場面では、盤面上の移動操作も無効になります。
 
+ゴールデンコロシアムでは、同一キャラクターの別衣装を独立した駒として最大3体編成し、先攻用・後攻用の加護をポイント内で設定します。戦闘開始後はランダムに決まった先攻側から1衣装ずつ交互に自動行動するため、手動の行動予約は表示しません。現行体験シーズン40の4×4盤面、配置不可6セル、無限SP、CT無効、戦闘中チェイン維持、ALLターン5からのデスタイムをセットアップから読み込みます。
+
 ### 編成と能力値
 
 戦闘準備画面では、次の設定を変更できます。
@@ -109,7 +113,7 @@ cargo run -p bd2-data --bin bd2-data -- inspect data/generated/bd2.sqlite
 .\.venv\Scripts\bd2-play.exe --mcts-simulations 96
 ```
 
-魔物追跡者では、魔物のスキル順序、CT、発動条件をSQLiteの定義から読み込みます。
+魔物追跡者では魔物のスキル順序、CT、発動条件をSQLiteの定義から読み込みます。ゴールデンコロシアムでは双方とも専用の衣装交互スケジューラを使い、MCTSによる手動選択は行いません。
 
 ## 強化学習
 
@@ -123,7 +127,7 @@ GPUの認識、学習、評価は個別のコマンドで実行します。
 
 学習環境はRustの並列シミュレータを直接使用します。GUIを起動しない学習経路には、HTTP配信、画面描画、MCTSは含まれません。WindowsではCUDA Graph、対応環境ではInductorを選択し、CUDA上でbf16またはfp16の混合精度を使用します。
 
-観測は最大32ユニット×56特徴、戦闘全体の16特徴、5つの行動スロットから実ユニットへの索引、5×32の合法手マスクで構成されます。HP、位置、能力値、軽減、回避、バリア、状態効果、CT、チェイン、召喚、ボス部位、魔物追跡者のレベルと残HPを含みます。チェックポイントには観測スキーマとモデル構造IDが保存され、互換性のないモデルは読み込み時に拒否されます。
+観測は最大32ユニット×56特徴、戦闘全体の17特徴、各陣営最大11の行動スロットから実ユニットへの索引、11×32の合法手マスクで構成されます。HP、位置、能力値、軽減、回避、バリア、状態効果、CT、チェイン、召喚、ボス部位、魔物追跡者のレベルと残HP、ゴールデンコロシアムのモード識別を含みます。チェックポイントには観測スキーマとモデル構造IDが保存され、互換性のないモデルは読み込み時に拒否されます。
 
 ## プロジェクト構成
 
@@ -196,6 +200,7 @@ cd ..
 - 伝説装備30種と専用装備61種について、全3,626精錬／主能力ケースを本番能力値計算へ入力
 - 配置、行動順、複数予約、召喚、チェイン、衝突、編成交替、終局表示を実ブラウザで操作
 - 連続した対象プレビュー、装備所有者制約、成長設定、外部バフ、魔物レベルと共有HPを検証
+- 現行コロシアムの4×4盤面、配置不可数、衣装交互順、先後別加護、47加護の全段階、無限SP、CT無効、チェイン維持、デスタイムを検証
 
 ## 関連資料
 
@@ -204,6 +209,7 @@ cd ..
 - [戦闘UIリファレンス](docs/research/browndust2-combat-ui-reference.md)
 - [実機検証マトリクス](docs/research/browndust2-combat-verification-matrix.md)
 - [UIゲームプレイ検証記録](docs/validation/ui-gameplay-bug-hunt-2026-09-01.md)
+- [ゴールデンコロシアム現行仕様](docs/research/golden-colosseum-specification.md)
 - [BD2DB装備照合データ](docs/validation/bd2db-current-equipment-oracle.json)
 
 ## ライセンス
