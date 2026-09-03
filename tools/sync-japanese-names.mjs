@@ -39,7 +39,7 @@ const decodeHtml = value => value
   .replaceAll("&lt;", "<")
   .replaceAll("&gt;", ">");
 
-const response = await fetch(SOURCE_URL, { headers: { "user-agent": "pcg-rpg-localization-sync/0.1" } });
+const response = await fetch(SOURCE_URL, { headers: { "user-agent": "bd2-tactical-sim-localization-sync/0.1" } });
 if (!response.ok) throw new Error(`${SOURCE_URL}: HTTP ${response.status}`);
 const page = await response.text();
 const byCharacter = new Map();

@@ -29,7 +29,7 @@ const toolDirectory = dirname(fileURLToPath(import.meta.url));
 const localizationPath = resolve(toolDirectory, "../data/localization/ja-JP.json");
 
 async function getText(url) {
-  const response = await fetch(url, { headers: { "user-agent": "pcg-rpg-research-sync/0.1" } });
+  const response = await fetch(url, { headers: { "user-agent": "bd2-tactical-sim-research-sync/0.1" } });
   if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
   return response.text();
 }
