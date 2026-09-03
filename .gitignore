@@ -15,6 +15,7 @@ __pycache__/
 /runs/
 /data/generated/
 /data/scenarios/saved/*.json
+/data/profiles/*.json
 /tools/test-results/
 /tools/test-results-*/
 /tools/playwright-report/

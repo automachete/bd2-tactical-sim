@@ -17,7 +17,7 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: `..\\.venv\\Scripts\\bd2-play.exe --no-open --port ${port} --mcts-simulations 3 --mcts-rollout-depth 2 --mcts-max-branching 5`,
+    command: `..\\.venv\\Scripts\\bd2-play.exe --no-open --port ${port} --mcts-simulations 3 --mcts-rollout-depth 2 --mcts-max-branching 5 --character-profile-path ..\\data\\generated\\e2e-character-profiles-${port}.json`,
     url: `http://127.0.0.1:${port}/api/state`,
     timeout: 30_000,
     reuseExistingServer: true,

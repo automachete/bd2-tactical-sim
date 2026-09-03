@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from . import _native
+from .character_profiles import CharacterProfileStore
 from .debug_setup import DebugSetupCatalog
 from .mcts import MctsConfig, MctsPlanner, MctsResult
 
@@ -184,11 +185,16 @@ class GuiSession:
         seed: int,
         mcts_config: MctsConfig | None = None,
         saved_setup_directory: Path | None = None,
+        character_profile_path: Path | None = None,
     ) -> None:
         self.lock = threading.RLock()
         self.database = database.resolve()
         self.catalog = DebugSetupCatalog(self.database, scenario_directory)
         self.saved_setups = SavedSetupStore(saved_setup_directory or scenario_directory / "saved")
+        self.character_profiles = CharacterProfileStore(
+            character_profile_path,
+            self.catalog,
+        )
         self.seed = seed
         self.mcts_config = mcts_config or MctsConfig()
         self.setup: dict[str, Any] = {}
@@ -204,9 +210,21 @@ class GuiSession:
     def save_setup(self, name: Any, request: dict[str, Any]) -> dict[str, Any]:
         """Validate and save a canonical scenario consumable by bd2-train."""
         with self.lock:
-            setup = self.catalog.build_setup(request)
+            setup = self.catalog.build_setup(self.character_profiles.apply_to_request(request))
             saved = self.saved_setups.save(name, setup)
             return {"saved": saved, "saved_setups": self.saved_setups.list()}
+
+    def save_character_profile(self, profile: Any) -> dict[str, Any]:
+        with self.lock:
+            saved = self.character_profiles.save(profile)
+            self.setup_draft = self.character_profiles.apply_to_request(self.setup_draft)
+            return {"profile": saved, **self.character_profiles.payload()}
+
+    def reset_character_profile(self, character_id: Any) -> dict[str, Any]:
+        with self.lock:
+            reset = self.character_profiles.reset(character_id)
+            self.setup_draft = self.character_profiles.apply_to_request(self.setup_draft)
+            return {"profile": reset, **self.character_profiles.payload()}
 
     def load_setup(self, name: Any) -> dict[str, Any]:
         """Load a canonical saved scenario back into the editor and simulator."""
@@ -227,7 +245,8 @@ class GuiSession:
 
     def start(self, request: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
-            setup = self.catalog.build_setup(request)
+            profiled_request = self.character_profiles.apply_to_request(request)
+            setup = self.catalog.build_setup(profiled_request)
             seed = _strict_int(request.get("seed", self.seed), "seed")
             simulations = _strict_int(
                 request.get("mcts_simulations", self.mcts_config.simulations),
@@ -780,6 +799,10 @@ def handler_factory(session: GuiSession, ui_root: Path) -> type[BaseHTTPRequestH
             if self.path == "/api/catalog":
                 self._json(session.catalog.public_payload())
                 return
+            if self.path == "/api/character-profiles":
+                with session.lock:
+                    self._json(session.character_profiles.payload())
+                return
             relative = "index.html" if self.path in {"/", ""} else self.path.lstrip("/")
             path = (ui_root / relative).resolve()
             if ui_root.resolve() not in path.parents and path != ui_root.resolve():
@@ -836,6 +859,10 @@ def handler_factory(session: GuiSession, ui_root: Path) -> type[BaseHTTPRequestH
                     self._json(session.save_setup(payload["name"], payload["setup"]))
                 elif self.path == "/api/load-setup":
                     self._json(session.load_setup(payload["name"]))
+                elif self.path == "/api/save-character-profile":
+                    self._json(session.save_character_profile(payload["profile"]))
+                elif self.path == "/api/reset-character-profile":
+                    self._json(session.reset_character_profile(payload["character_id"]))
                 else:
                     self.send_error(HTTPStatus.NOT_FOUND)
             except (KeyError, TypeError, ValueError, RuntimeError) as error:
@@ -882,6 +909,12 @@ def main() -> None:
         default=repository_root / "data/scenarios/saved",
         help="directory for GUI-authored canonical BattleSetup JSON files",
     )
+    parser.add_argument(
+        "--character-profile-path",
+        type=Path,
+        default=repository_root / "data/profiles/characters.json",
+        help="strict persistent player-character profile document",
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--seed", type=int, default=42)
@@ -901,6 +934,7 @@ def main() -> None:
         args.seed,
         config,
         args.saved_setup_directory,
+        args.character_profile_path,
     )
     server = ThreadingHTTPServer(
         (args.host, args.port), handler_factory(session, repository_root / "ui")

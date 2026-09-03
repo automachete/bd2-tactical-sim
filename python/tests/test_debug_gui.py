@@ -221,6 +221,10 @@ def test_gui_payload_describes_the_exact_configured_costume_variant() -> None:
     loen = next(unit for unit in request["player_units"] if unit["character_id"] == "Loen")
     loadout = next(item for item in loen["costumes"] if item["costume_id"] == "Loen_1")
     loadout.update(enhancement=0, burst_level=0, potential_mask=0)
+    profile = session.character_profiles.get("Loen")
+    profile_loadout = next(item for item in profile["costumes"] if item["costume_id"] == "Loen_1")
+    profile_loadout.update(enhancement=0, burst_level=0, potential_mask=0)
+    session.save_character_profile(profile)
 
     payload = session.start(request)
     loen_id = next(
@@ -303,7 +307,6 @@ def test_gui_metadata_fails_closed_and_preserves_an_explicit_empty_range() -> No
 def test_gui_typed_equipment_changes_stats_but_not_skill_cost_metadata() -> None:
     session = GuiSession(DATABASE, SCENARIOS, 12, FAST_MCTS)
     request = session.catalog.public_payload()["presets"]["NORMAL"]
-    loen = next(unit for unit in request["player_units"] if unit["character_id"] == "Loen")
     baseline = session.start(copy.deepcopy(request))
     baseline_loen = next(
         unit
@@ -315,7 +318,7 @@ def test_gui_typed_equipment_changes_stats_but_not_skill_cost_metadata() -> None
         for item in session.catalog.equipment.values()
         if item["kind"] == "CRAFTED_LEGENDARY" and item["slot"] == "WEAPON"
     )
-    loen["equipment"] = {
+    configured_equipment = {
         "WEAPON": {
             "equipment_id": equipment["id"],
             "refinement_score": 18,
@@ -324,6 +327,9 @@ def test_gui_typed_equipment_changes_stats_but_not_skill_cost_metadata() -> None
             "substats": [equipment["allowed_substats"][0]["key"]] * 3,
         }
     }
+    profile = session.character_profiles.get("Loen")
+    profile["equipment"] = configured_equipment
+    session.save_character_profile(profile)
     payload = session.start(request)
     unit_id = next(
         int(unit_id)
@@ -347,6 +353,11 @@ def test_configured_burst_unlock_level_caps_runtime_action_stages() -> None:
     michaela = next(unit for unit in request["player_units"] if unit["character_id"] == "Michaela")
     loadout = next(item for item in michaela["costumes"] if item["costume_id"] == "Michaela_1")
     loadout["burst_level"] = 2
+    profile = session.character_profiles.get("Michaela")
+    next(item for item in profile["costumes"] if item["costume_id"] == "Michaela_1")[
+        "burst_level"
+    ] = 2
+    session.save_character_profile(profile)
 
     payload = session.start(request)
     unit_id = next(
@@ -670,6 +681,14 @@ def test_gui_payload_preserves_the_exact_editor_setup_and_mcts_configuration() -
         }
     ]
     unit["build_settings"]["external_buffs"]["crit_damage_bp"] = 1234
+    profile = session.character_profiles.get(unit["character_id"])
+    profile_costume = next(
+        item
+        for item in profile["costumes"]
+        if item["costume_id"] == unit["costumes"][0]["costume_id"]
+    )
+    profile_costume.update(enhancement=0, potential_mask=0)
+    session.save_character_profile(profile)
     request["seed"] = 73
     request["mcts_simulations"] = 7
 
@@ -714,6 +733,14 @@ def test_gui_saves_and_reloads_strict_training_scenario(tmp_path: Path) -> None:
             "substats": [equipment["allowed_substats"][0]["key"]] * 3,
         }
     }
+    profile = session.character_profiles.get(unit["character_id"])
+    profile_costume = next(
+        item for item in profile["costumes"] if item["costume_id"] == costume["costume_id"]
+    )
+    profile_costume.update(enhancement=2, burst_level=0, potential_mask=0b101)
+    profile["awakening_enabled"] = False
+    profile["equipment"] = copy.deepcopy(unit["equipment"])
+    session.save_character_profile(profile)
 
     response = session.save_setup("涙ノード検証", request)
 
@@ -742,6 +769,179 @@ def test_gui_saves_and_reloads_strict_training_scenario(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="forbidden path character"):
         session.save_setup("../outside", request)
+
+
+def test_character_profiles_are_complete_strict_and_formation_independent(tmp_path: Path) -> None:
+    profile_path = tmp_path / "profiles" / "characters.json"
+    session = GuiSession(
+        DATABASE,
+        SCENARIOS,
+        73,
+        FAST_MCTS,
+        saved_setup_directory=tmp_path / "setups",
+        character_profile_path=profile_path,
+    )
+    document = session.character_profiles.payload()
+    assert document["schema_version"] == 1
+    assert len(document["profiles"]) == 61
+    assert {item["character_id"] for item in document["profiles"]} == set(
+        session.catalog.characters
+    )
+
+    normal = session.catalog.public_payload()["presets"]["NORMAL"]
+    character_id = "Michaela"
+    character = session.catalog.characters[character_id]
+    profile = session.character_profiles.get(character_id)
+    burst_costume = next(item for item in character["costumes"] if item["max_burst_level"] == 3)
+    configured_costume = next(
+        item for item in profile["costumes"] if item["costume_id"] == burst_costume["id"]
+    )
+    configured_costume.update(enhancement=2, burst_level=1, potential_mask=0b101)
+    profile["awakening_enabled"] = False
+    equipment = next(
+        item
+        for item in session.catalog.equipment.values()
+        if item["kind"] == "CRAFTED_LEGENDARY" and item["slot"] == "WEAPON"
+    )
+    profile["equipment"] = {
+        "WEAPON": {
+            "equipment_id": equipment["id"],
+            "refinement_score": 22,
+            "primary_stat": None,
+            "secondary_stat": None,
+            "substats": [equipment["allowed_substats"][0]["key"]] * 3,
+        }
+    }
+    saved = session.save_character_profile(profile)
+    assert saved["profile"]["is_default"] is False
+    assert profile_path.is_file()
+    persisted = json.loads(profile_path.read_text(encoding="utf-8"))
+    assert set(persisted) == {"schema_version", "profiles"}
+    assert len(persisted["profiles"]) == 61
+
+    reloaded = GuiSession(
+        DATABASE,
+        SCENARIOS,
+        73,
+        FAST_MCTS,
+        saved_setup_directory=tmp_path / "setups-reloaded",
+        character_profile_path=profile_path,
+    )
+    assert reloaded.character_profiles.get(character_id) == profile
+
+    request = copy.deepcopy(normal)
+    player = next(unit for unit in request["player_units"] if unit["character_id"] == character_id)
+    player["costumes"] = maximum_loadout(reloaded.catalog, character_id)
+    player["equipment"] = {}
+    player["build_settings"]["awakening_enabled"] = True
+    request["enemy_units"] = [request["enemy_units"][0]]
+    enemy = request["enemy_units"][0]
+    enemy["character_id"] = character_id
+    enemy["costumes"] = maximum_loadout(reloaded.catalog, character_id)
+    enemy["equipment"] = {}
+    enemy["build_settings"]["awakening_enabled"] = True
+    payload = reloaded.start(request)
+    restored_player = next(
+        unit for unit in payload["setup"]["player_units"] if unit["character_id"] == character_id
+    )
+    restored_enemy = payload["setup"]["enemy_units"][0]
+    restored_costume = next(
+        item for item in restored_player["costumes"] if item["costume_id"] == burst_costume["id"]
+    )
+    assert restored_costume["enhancement"] == 2
+    assert restored_costume["burst_level"] == 1
+    assert restored_costume["potential_mask"] == 0b101
+    assert restored_player["build_settings"]["awakening_enabled"] is False
+    assert restored_player["equipment"] == profile["equipment"]
+    assert restored_enemy["build_settings"]["awakening_enabled"] is True
+    assert restored_enemy["equipment"] == {}
+
+    invalid = copy.deepcopy(profile)
+    invalid["legacy_fallback"] = True
+    with pytest.raises(ValueError, match="must contain only"):
+        reloaded.save_character_profile(invalid)
+
+    legacy = copy.deepcopy(persisted)
+    legacy["schema_version"] = 0
+    profile_path.write_text(json.dumps(legacy), encoding="utf-8")
+    with pytest.raises(ValueError, match="unsupported character profile schema"):
+        GuiSession(
+            DATABASE,
+            SCENARIOS,
+            73,
+            FAST_MCTS,
+            saved_setup_directory=tmp_path / "legacy-setups",
+            character_profile_path=profile_path,
+        )
+
+    partial = copy.deepcopy(persisted)
+    partial["profiles"] = partial["profiles"][:-1]
+    profile_path.write_text(json.dumps(partial), encoding="utf-8")
+    with pytest.raises(ValueError, match="exactly match the current catalog"):
+        GuiSession(
+            DATABASE,
+            SCENARIOS,
+            73,
+            FAST_MCTS,
+            saved_setup_directory=tmp_path / "partial-setups",
+            character_profile_path=profile_path,
+        )
+
+
+def test_every_five_star_character_fixed_profile_round_trips_without_slot_scope(
+    tmp_path: Path,
+) -> None:
+    profile_path = tmp_path / "profiles" / "characters.json"
+    session = GuiSession(
+        DATABASE,
+        SCENARIOS,
+        77,
+        FAST_MCTS,
+        saved_setup_directory=tmp_path / "setups",
+        character_profile_path=profile_path,
+    )
+    equipment = next(
+        item
+        for item in session.catalog.equipment.values()
+        if item["kind"] == "CRAFTED_LEGENDARY" and item["slot"] == "WEAPON"
+    )
+    expected: dict[str, dict[str, object]] = {}
+    for character_id, character in session.catalog.characters.items():
+        profile = session.character_profiles.get(character_id)
+        profile["awakening_enabled"] = False
+        for loadout in profile["costumes"]:
+            costume = next(
+                item for item in character["costumes"] if item["id"] == loadout["costume_id"]
+            )
+            loadout.update(
+                enhancement=min(2, costume["max_enhancement"]),
+                burst_level=min(1, costume["max_burst_level"]),
+                potential_mask=costume["max_potential_mask"] & 0b101,
+            )
+        profile["equipment"] = {
+            "WEAPON": {
+                "equipment_id": equipment["id"],
+                "refinement_score": 24,
+                "primary_stat": None,
+                "secondary_stat": None,
+                "substats": [equipment["allowed_substats"][0]["key"]] * 3,
+            }
+        }
+        session.save_character_profile(profile)
+        expected[character_id] = profile
+
+    reloaded = GuiSession(
+        DATABASE,
+        SCENARIOS,
+        77,
+        FAST_MCTS,
+        saved_setup_directory=tmp_path / "setups-reloaded",
+        character_profile_path=profile_path,
+    )
+    assert {
+        character_id: reloaded.character_profiles.get(character_id)
+        for character_id in reloaded.catalog.characters
+    } == expected
 
 
 def test_gui_turn_is_atomic_when_automatic_opponent_fails(monkeypatch: pytest.MonkeyPatch) -> None:

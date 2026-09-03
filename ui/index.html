@@ -97,6 +97,7 @@
       <footer class="battle-footer">
         <div class="footer-tools">
           <button class="hud-button" id="open-formation" type="button"><span>▦</span><span data-i18n="footer.preparation">戦闘準備</span></button>
+          <button class="hud-button" id="open-character-profiles" type="button" data-testid="open-character-profiles"><span>◇</span><span data-i18n="footer.characterProfiles">キャラクター設定</span></button>
           <button class="hud-button" id="screen-toggle" type="button"><span>□</span><span data-i18n="footer.fullscreen">全画面</span></button>
         </div>
         <section class="sp-panel" aria-label="スキルポイント残量" data-i18n-aria="footer.spAria" aria-live="polite" aria-atomic="true">
@@ -159,6 +160,30 @@
         </div>
         <footer class="dialog-actions"><button class="start-button" id="start-battle" type="button" data-testid="start-battle"><span data-i18n="preparation.start">この編成で戦闘開始</span> <span>›</span></button></footer>
       </form>
+    </dialog>
+
+    <dialog class="sim-dialog profile-dialog" id="character-profile-dialog" data-testid="character-profile-dialog">
+      <section class="dialog-frame profile-frame">
+        <header class="dialog-title profile-title"><div><small data-i18n="profiles.caption">キャラクターデータベース</small><h1 data-i18n="profiles.title">キャラクター設定</h1></div><button class="dialog-close" data-close="character-profile-dialog" aria-label="キャラクター設定を閉じる" data-i18n-aria="profiles.closeAria">×</button></header>
+        <div class="profile-layout">
+          <section class="profile-library" aria-labelledby="profile-library-heading">
+            <header><div><h2 id="profile-library-heading" data-i18n="profiles.libraryTitle">★5キャラクター一覧</h2><p data-i18n="profiles.libraryHelp">ここで保存した育成・装備は、編成やコンテンツをまたいで味方キャラクターへ適用されます。</p></div><strong id="profile-count">0</strong></header>
+            <div class="profile-filters">
+              <label class="profile-search"><span data-i18n="profiles.search">キャラクター検索</span><input id="profile-search" type="search" autocomplete="off" placeholder="名前またはID" data-i18n-placeholder="profiles.searchPlaceholder" /></label>
+              <div class="profile-element-filters" id="profile-element-filters" role="group" aria-label="属性で絞り込み" data-i18n-aria="profiles.elementFilterAria">
+                <button type="button" data-element="ALL" class="active" data-i18n="profiles.allElements">すべて</button>
+                <button type="button" data-element="FIRE" data-i18n="element.FIRE">火</button>
+                <button type="button" data-element="WATER" data-i18n="element.WATER">水</button>
+                <button type="button" data-element="WIND" data-i18n="element.WIND">風</button>
+                <button type="button" data-element="LIGHT" data-i18n="element.LIGHT">光</button>
+                <button type="button" data-element="DARK" data-i18n="element.DARK">闇</button>
+              </div>
+            </div>
+            <div class="profile-character-grid" id="profile-character-grid" role="list" aria-label="★5キャラクター一覧" data-i18n-aria="profiles.gridAria"></div>
+          </section>
+          <aside class="profile-detail" id="profile-detail" aria-live="polite"></aside>
+        </div>
+      </section>
     </dialog>
 
     <dialog class="sim-dialog character-picker" id="character-picker" data-testid="character-picker">

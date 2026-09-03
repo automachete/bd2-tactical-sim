@@ -58,6 +58,10 @@ let previewGeneration = 0;
 let previewTimer = null;
 let previewController = null;
 let characterPickerTarget = null;
+let profileDocument = null;
+let selectedProfileId = null;
+let profileElementFilter = "ALL";
+let profileDrafts = new Map();
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => Array.from(document.querySelectorAll(selector));
@@ -70,6 +74,11 @@ const costumeById = id => [
   ...(catalog?.system_costumes || []),
 ].find(costume => costume.id === id);
 const equipmentById = id => catalog?.equipment?.find(item => item.id === id);
+const profileByCharacterId = id => {
+  const profile = profileDocument?.profiles?.find(item => item.character_id === id);
+  if (!profile) throw new Error(`character profile is missing for ${id}`);
+  return profile;
+};
 const enabledCostumeName = unit => {
   const selected = unit?.costumes?.find(item => item.enabled !== false)?.costume_id
     || unit?.costume_loadout?.[0]?.costume_id;
@@ -171,17 +180,40 @@ const usedCostumeIds = (sideKey, ignoredIndex = -1) => new Set((draft?.[sideKey]
   .filter((_, index) => index !== ignoredIndex)
   .flatMap(unit => unit.costumes.filter(item => item.enabled !== false).map(item => item.costume_id)));
 const goldenBannedCostumeIds = () => new Set(draft?.golden_colosseum?.banned_costume_ids || []);
-const defaultCostumes = (character, single = false, excluded = new Set()) => {
+const defaultCostumes = (character, single = false, excluded = new Set(), profile = null) => {
   const unavailable = new Set([...excluded, ...(single ? goldenBannedCostumeIds() : [])]);
   const firstAvailable = character.costumes.findIndex(item => !unavailable.has(item.id));
+  const fixedById = new Map((profile?.costumes || []).map(item => [item.costume_id, item]));
   return character.costumes.map((costume, index) => ({
     costume_id: costume.id,
-    enhancement: costume.max_enhancement,
-    burst_level: costume.max_burst_level,
-    potential_mask: costume.max_potential_mask,
+    enhancement: Number(fixedById.get(costume.id)?.enhancement ?? costume.max_enhancement),
+    burst_level: Number(fixedById.get(costume.id)?.burst_level ?? costume.max_burst_level),
+    potential_mask: Number(fixedById.get(costume.id)?.potential_mask ?? costume.max_potential_mask),
     permanent_potential_enabled: true,
     enabled: single ? index === firstAvailable : true,
   }));
+};
+
+const applyProfileToPlayerUnit = unit => {
+  const character = characterById(unit.character_id);
+  const profile = profileByCharacterId(unit.character_id);
+  if (!character) throw new Error(`catalog character is missing for ${unit.character_id}`);
+  const existing = new Map((unit.costumes || []).map(item => [item.costume_id, item]));
+  unit.costumes = profile.costumes.map(fixed => {
+    const previous = existing.get(fixed.costume_id);
+    return {
+      costume_id: fixed.costume_id,
+      enhancement: Number(fixed.enhancement),
+      burst_level: Number(fixed.burst_level),
+      potential_mask: Number(fixed.potential_mask),
+      permanent_potential_enabled: true,
+      enabled: previous ? previous.enabled !== false : false,
+    };
+  });
+  unit.equipment = clone(profile.equipment);
+  unit.build_settings = clone(unit.build_settings || defaultBuildSettings());
+  unit.build_settings.awakening_enabled = Boolean(profile.awakening_enabled);
+  return unit;
 };
 
 const normalizeDraft = preset => {
@@ -190,12 +222,15 @@ const normalizeDraft = preset => {
   for (const side of ["player_units", "enemy_units"]) {
     value[side] = (value[side] || [])
       .filter(unit => playableCharacterIds.has(unit.character_id))
-      .map(unit => ({
-      ...unit,
-      equipment: clone(unit.equipment || {}),
-      build_settings: clone(unit.build_settings || defaultBuildSettings()),
-      costumes: unit.costumes.map(costume => ({ ...costume, enabled: costume.enabled !== false })),
-      }));
+      .map(unit => {
+        const normalized = {
+          ...unit,
+          equipment: clone(unit.equipment || {}),
+          build_settings: clone(unit.build_settings || defaultBuildSettings()),
+          costumes: unit.costumes.map(costume => ({ ...costume, enabled: costume.enabled !== false })),
+        };
+        return side === "player_units" ? applyProfileToPlayerUnit(normalized) : normalized;
+      });
   }
   return value;
 };
@@ -559,10 +594,20 @@ const addCharacterToParty = (side, partyNo, characterId) => {
     row: cell.row,
     depth: cell.depth,
     party_no: partyNo,
-    costumes: defaultCostumes(character, isGoldenDraft(), excludedCostumes),
+    costumes: defaultCostumes(
+      character,
+      isGoldenDraft(),
+      excludedCostumes,
+      side === "PLAYER" ? profileByCharacterId(character.id) : null,
+    ),
     costume_link_target: null,
-    equipment: {},
-    build_settings: defaultBuildSettings(),
+    equipment: side === "PLAYER" ? clone(profileByCharacterId(character.id).equipment) : {},
+    build_settings: {
+      ...defaultBuildSettings(),
+      awakening_enabled: side === "PLAYER"
+        ? Boolean(profileByCharacterId(character.id).awakening_enabled)
+        : defaultBuildSettings().awakening_enabled,
+    },
   });
   editorFocus = { sideKey, index: draft[sideKey].length - 1 };
   renderFormation();
@@ -621,7 +666,7 @@ const openCharacterPicker = (side, partyNo) => {
   $("#character-search").focus();
 };
 
-const renderCostumeEditor = (root, unit) => {
+const renderCostumeEditor = (root, unit, { fixedReadOnly = false } = {}) => {
   const character = characterById(unit.character_id);
   if (unit.costume_link_target && unit.costumes.find(item => item.costume_id === unit.costume_link_target)?.enabled === false) {
     unit.costume_link_target = null;
@@ -661,7 +706,7 @@ const renderCostumeEditor = (root, unit) => {
         unit.costumes.forEach(item => { item.enabled = item === loadout; });
         unit.costume_link_target = null;
         root.replaceChildren();
-        renderCostumeEditor(root, unit);
+        renderCostumeEditor(root, unit, { fixedReadOnly });
         return;
       }
       loadout.enabled = enabled.checked;
@@ -676,10 +721,12 @@ const renderCostumeEditor = (root, unit) => {
     const enhancement = numberSelect(0, definition.max_enhancement, loadout.enhancement);
     enhancement.title = t("loadout.enhancement");
     enhancement.dataset.testid = `costume-enhancement-${definition.id}`;
+    enhancement.disabled = fixedReadOnly;
     enhancement.onchange = () => { loadout.enhancement = Number(enhancement.value); };
     const burst = numberSelect(0, definition.max_burst_level, loadout.burst_level);
     burst.title = t("loadout.burst");
     burst.dataset.testid = `costume-burst-${definition.id}`;
+    burst.disabled = fixedReadOnly;
     burst.onchange = () => { loadout.burst_level = Number(burst.value); };
     const tears = document.createElement("span");
     tears.className = "goddess-tear-toggles";
@@ -689,7 +736,7 @@ const renderCostumeEditor = (root, unit) => {
       const toggle = document.createElement("input");
       toggle.type = "checkbox";
       toggle.checked = Boolean(Number(loadout.potential_mask) & Number(node.bit));
-      toggle.disabled = !node.available;
+      toggle.disabled = fixedReadOnly || !node.available;
       toggle.dataset.testid = `goddess-tear-${definition.id}-${node.index}`;
       toggle.setAttribute("aria-label", t("loadout.goddessTearNode", { number: node.index }));
       toggle.onchange = () => {
@@ -797,6 +844,10 @@ const renderEquipmentEditor = (root, unit, reopen) => {
     slotLabel.textContent = t(`equipment.slot.${slot}`);
     const item = document.createElement("select");
     item.dataset.testid = `equipment-item-${slot}`;
+    item.setAttribute(
+      "aria-label",
+      `${t(`equipment.slot.${slot}`)} ${t("equipment.itemHeading")}`,
+    );
     item.append(option("", t("equipment.unequipped"), !definition));
     for (const candidate of (catalog.equipment || []).filter(value => (
       value.slot === slot
@@ -925,7 +976,7 @@ const buildSettingRow = (labelKey, control, suffix = "") => {
   return label;
 };
 
-const renderBuildSettingsEditor = (root, unit) => {
+const renderBuildSettingsEditor = (root, unit, { fixedAwakening = false } = {}) => {
   unit.build_settings ||= defaultBuildSettings();
   const settings = unit.build_settings;
   const details = document.createElement("details");
@@ -949,9 +1000,13 @@ const renderBuildSettingsEditor = (root, unit) => {
   };
 
   const progression = grid();
+  const awakening = buildCheckbox(settings.awakening_enabled, "build-awakening", value => {
+    settings.awakening_enabled = value;
+  });
+  awakening.disabled = fixedAwakening;
   progression.append(
     buildSettingRow("build.engraving", buildCheckbox(settings.engraving_enabled, "build-engraving", value => { settings.engraving_enabled = value; })),
-    buildSettingRow("build.awakening", buildCheckbox(settings.awakening_enabled, "build-awakening", value => { settings.awakening_enabled = value; })),
+    buildSettingRow("build.awakening", awakening),
   );
   group("build.progression", progression);
 
@@ -1046,9 +1101,27 @@ const openAdvancedEditor = (sideKey, index) => {
   popover.append(top);
   const costumes = document.createElement("div");
   costumes.className = "advanced-costumes";
-  renderCostumeEditor(costumes, unit);
+  renderCostumeEditor(costumes, unit, { fixedReadOnly: sideKey === "player_units" });
   popover.append(costumes);
-  if (!isGoldenDraft()) {
+  if (sideKey === "player_units") {
+    const profileNotice = document.createElement("section");
+    profileNotice.className = "profile-owned-notice";
+    const message = document.createElement("p");
+    message.textContent = t("profiles.formationOwned");
+    const openProfile = document.createElement("button");
+    openProfile.type = "button";
+    openProfile.className = "secondary-button";
+    openProfile.textContent = t("profiles.openFromFormation");
+    openProfile.dataset.testid = "open-profile-from-formation";
+    openProfile.onclick = () => {
+      popover.remove();
+      closeDialog("formation-dialog");
+      openCharacterProfiles(unit.character_id);
+    };
+    profileNotice.append(message, openProfile);
+    popover.append(profileNotice);
+    renderBuildSettingsEditor(popover, unit, { fixedAwakening: true });
+  } else if (!isGoldenDraft()) {
     renderBuildSettingsEditor(popover, unit);
     renderEquipmentEditor(popover, unit, () => {
       popover.remove();
@@ -1056,18 +1129,23 @@ const openAdvancedEditor = (sideKey, index) => {
     });
   }
   select.onchange = () => {
-    unit.character_id = select.value;
+    const selectedCharacter = characterById(select.value);
+    unit.character_id = selectedCharacter.id;
     unit.costumes = defaultCostumes(
-      characterById(select.value),
+      selectedCharacter,
       isGoldenDraft(),
       usedCostumeIds(sideKey, index),
+      sideKey === "player_units" ? profileByCharacterId(selectedCharacter.id) : null,
     );
     unit.costume_link_target = null;
-    for (const [slot, loadout] of Object.entries(unit.equipment || {})) {
-      const equipment = equipmentById(loadout.equipment_id);
-      if (equipment?.kind === "EXCLUSIVE" && equipment.owner_character_id !== unit.character_id) {
-        delete unit.equipment[slot];
-      }
+    unit.equipment = sideKey === "player_units"
+      ? clone(profileByCharacterId(selectedCharacter.id).equipment)
+      : {};
+    unit.build_settings = defaultBuildSettings();
+    if (sideKey === "player_units") {
+      unit.build_settings.awakening_enabled = Boolean(
+        profileByCharacterId(selectedCharacter.id).awakening_enabled,
+      );
     }
     popover.remove();
     renderFormation();
@@ -1077,6 +1155,256 @@ const openAdvancedEditor = (sideKey, index) => {
   // the formation dialog backdrop.
   $("#formation-dialog").append(popover);
   select.focus();
+};
+
+const profileForSave = profile => ({
+  character_id: profile.character_id,
+  awakening_enabled: Boolean(profile.awakening_enabled),
+  costumes: profile.costumes.map(costume => ({
+    costume_id: costume.costume_id,
+    enhancement: Number(costume.enhancement),
+    burst_level: Number(costume.burst_level),
+    potential_mask: Number(costume.potential_mask),
+  })),
+  equipment: clone(profile.equipment),
+});
+
+const editableProfile = characterId => {
+  if (!profileDrafts.has(characterId)) {
+    profileDrafts.set(characterId, profileForSave(profileByCharacterId(characterId)));
+  }
+  return profileDrafts.get(characterId);
+};
+
+const profileIsDirty = characterId => profileDrafts.has(characterId)
+  && JSON.stringify(profileForSave(profileDrafts.get(characterId)))
+    !== JSON.stringify(profileForSave(profileByCharacterId(characterId)));
+
+const updateProfileDirtyIndicator = () => {
+  const indicator = $("#profile-dirty");
+  if (indicator) indicator.classList.toggle("hidden", !profileIsDirty(selectedProfileId));
+  const card = selectedProfileId
+    ? $("#profile-character-grid").querySelector(`[data-character-id="${CSS.escape(selectedProfileId)}"]`)
+    : null;
+  if (card) {
+    const badge = card.querySelector(".profile-card-status");
+    if (badge && profileIsDirty(selectedProfileId)) badge.textContent = t("profiles.unsaved");
+  }
+};
+
+const renderProfileLibrary = () => {
+  const root = $("#profile-character-grid");
+  const query = $("#profile-search").value.trim().toLocaleLowerCase("ja-JP");
+  const characters = catalog.characters.filter(character => (
+    (profileElementFilter === "ALL" || character.element === profileElementFilter)
+    && `${character.name} ${character.id}`.toLocaleLowerCase("ja-JP").includes(query)
+  ));
+  root.replaceChildren();
+  $("#profile-count").textContent = `${characters.length} / ${catalog.characters.length}`;
+  if (!characters.length) {
+    const empty = document.createElement("p");
+    empty.className = "profile-empty";
+    empty.textContent = t("profiles.noResult");
+    root.append(empty);
+    return;
+  }
+  for (const character of characters) {
+    const profile = profileByCharacterId(character.id);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `profile-character-card ${elementClass(character.element)} ${selectedProfileId === character.id ? "selected" : ""}`;
+    button.dataset.characterId = character.id;
+    button.dataset.testid = `profile-card-${character.id}`;
+    button.setAttribute("role", "listitem");
+    button.setAttribute("aria-label", t("profiles.cardAria", { name: character.name }));
+    const status = profileIsDirty(character.id)
+      ? t("profiles.unsaved")
+      : profile.is_default ? t("profiles.defaultBadge") : t("profiles.customBadge");
+    button.innerHTML = `${emblemMarkup(character, "profile-avatar")}<span class="profile-card-copy"><b>${escapeHtml(character.name)}</b><small>${escapeHtml(t(`element.${character.element}`))} · ${escapeHtml(t(`attack.${character.attack_type}`))}</small></span><em class="profile-card-status">${escapeHtml(status)}</em>`;
+    button.onclick = () => {
+      selectedProfileId = character.id;
+      renderProfileLibrary();
+      renderProfileDetail();
+    };
+    root.append(button);
+  }
+};
+
+const markProfileChanged = () => {
+  updateProfileDirtyIndicator();
+};
+
+const renderProfileCostumes = (root, character, profile) => {
+  const section = document.createElement("section");
+  section.className = "profile-section profile-costumes";
+  section.innerHTML = `<header><div><h3>${escapeHtml(t("profiles.costumes"))}</h3><p>${escapeHtml(t("profiles.costumeHelp"))}</p></div></header>`;
+  const headings = document.createElement("div");
+  headings.className = "profile-costume-row profile-costume-headings";
+  for (const key of ["loadout.costume", "loadout.enhancement", "loadout.burst", "loadout.goddessTears"]) {
+    const label = document.createElement("span");
+    label.textContent = t(key);
+    headings.append(label);
+  }
+  section.append(headings);
+  for (const loadout of profile.costumes) {
+    const definition = character.costumes.find(costume => costume.id === loadout.costume_id);
+    if (!definition) throw new Error(`profile costume is missing from catalog: ${loadout.costume_id}`);
+    const row = document.createElement("div");
+    row.className = "profile-costume-row";
+    const name = document.createElement("span");
+    name.className = "profile-costume-name";
+    name.innerHTML = `<b>${escapeHtml(definition.name)}</b><small>${escapeHtml(definition.id)}</small>`;
+    const enhancement = numberSelect(0, definition.max_enhancement, loadout.enhancement);
+    enhancement.dataset.testid = `profile-enhancement-${definition.id}`;
+    enhancement.setAttribute("aria-label", `${definition.name} ${t("loadout.enhancement")}`);
+    enhancement.onchange = () => {
+      loadout.enhancement = Number(enhancement.value);
+      markProfileChanged();
+    };
+    const burst = numberSelect(0, definition.max_burst_level, loadout.burst_level);
+    burst.dataset.testid = `profile-burst-${definition.id}`;
+    burst.setAttribute("aria-label", `${definition.name} ${t("loadout.burst")}`);
+    burst.onchange = () => {
+      loadout.burst_level = Number(burst.value);
+      markProfileChanged();
+    };
+    const tears = document.createElement("span");
+    tears.className = "profile-tears goddess-tear-toggles";
+    tears.setAttribute("role", "group");
+    tears.setAttribute("aria-label", t("loadout.goddessTearsFor", { name: definition.name }));
+    for (const node of definition.goddess_tear_nodes) {
+      const label = document.createElement("label");
+      const toggle = document.createElement("input");
+      toggle.type = "checkbox";
+      toggle.checked = Boolean(Number(loadout.potential_mask) & Number(node.bit));
+      toggle.disabled = !node.available;
+      toggle.dataset.testid = `profile-tear-${definition.id}-${node.index}`;
+      toggle.setAttribute("aria-label", t("loadout.goddessTearNode", { number: node.index }));
+      toggle.onchange = () => {
+        const bit = Number(node.bit);
+        loadout.potential_mask = toggle.checked
+          ? Number(loadout.potential_mask) | bit
+          : Number(loadout.potential_mask) & ~bit;
+        markProfileChanged();
+      };
+      const number = document.createElement("span");
+      number.textContent = String(node.index);
+      label.append(toggle, number);
+      tears.append(label);
+    }
+    row.append(name, enhancement, burst, tears);
+    section.append(row);
+  }
+  root.append(section);
+};
+
+const applyProfilesToCurrentDraft = () => {
+  for (const unit of draft?.player_units || []) applyProfileToPlayerUnit(unit);
+  if (draft) renderFormation();
+};
+
+const renderProfileDetail = () => {
+  const root = $("#profile-detail");
+  root.replaceChildren();
+  const character = characterById(selectedProfileId);
+  if (!character) return;
+  const profile = editableProfile(character.id);
+  const header = document.createElement("header");
+  header.className = `profile-detail-header ${elementClass(character.element)}`;
+  header.innerHTML = `${emblemMarkup(character, "profile-detail-avatar")}<div><small>${escapeHtml(t("profiles.savedScope"))}</small><h2>${escapeHtml(character.name)}</h2><span>${escapeHtml(t(`element.${character.element}`))} · ${escapeHtml(t(`attack.${character.attack_type}`))} · ${t("unit.levelRarity")}</span></div><em id="profile-dirty" class="${profileIsDirty(character.id) ? "" : "hidden"}">${escapeHtml(t("profiles.unsaved"))}</em>`;
+  root.append(header);
+
+  const progression = document.createElement("section");
+  progression.className = "profile-section profile-progression";
+  progression.innerHTML = `<header><div><h3>${escapeHtml(t("profiles.progression"))}</h3><p>${escapeHtml(t("profiles.awakeningHelp"))}</p></div></header>`;
+  const awakening = document.createElement("label");
+  awakening.className = "profile-switch";
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = Boolean(profile.awakening_enabled);
+  checkbox.dataset.testid = `profile-awakening-${character.id}`;
+  checkbox.onchange = () => {
+    profile.awakening_enabled = checkbox.checked;
+    markProfileChanged();
+  };
+  const switchCopy = document.createElement("span");
+  switchCopy.innerHTML = `<b>${escapeHtml(t("profiles.awakening"))}</b><small>Lv.100</small>`;
+  awakening.append(checkbox, switchCopy);
+  progression.append(awakening);
+  root.append(progression);
+
+  renderProfileCostumes(root, character, profile);
+  const equipmentUnit = {
+    character_id: character.id,
+    equipment: profile.equipment,
+  };
+  renderEquipmentEditor(root, equipmentUnit, () => {
+    profile.equipment = equipmentUnit.equipment;
+    renderProfileDetail();
+    updateProfileDirtyIndicator();
+  });
+
+  const actions = document.createElement("footer");
+  actions.className = "profile-actions";
+  const reset = document.createElement("button");
+  reset.type = "button";
+  reset.className = "secondary-button";
+  reset.dataset.testid = "reset-character-profile";
+  reset.textContent = t("profiles.reset");
+  reset.onclick = async () => {
+    try {
+      const result = await api(
+        "/api/reset-character-profile",
+        { character_id: character.id },
+        t("status.resettingProfile"),
+      );
+      profileDocument = { schema_version: result.schema_version, profiles: result.profiles };
+      profileDrafts.delete(character.id);
+      applyProfilesToCurrentDraft();
+      renderProfileLibrary();
+      renderProfileDetail();
+      setTip(t("profiles.resetDone", { name: character.name }));
+    } catch (error) {
+      showError(error);
+    }
+  };
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "start-button profile-save";
+  save.dataset.testid = "save-character-profile";
+  save.textContent = t("profiles.save");
+  save.onclick = async () => {
+    try {
+      const result = await api(
+        "/api/save-character-profile",
+        { profile: profileForSave(profile) },
+        t("status.savingProfile"),
+      );
+      profileDocument = { schema_version: result.schema_version, profiles: result.profiles };
+      profileDrafts.delete(character.id);
+      applyProfilesToCurrentDraft();
+      renderProfileLibrary();
+      renderProfileDetail();
+      setTip(t("profiles.saved", { name: character.name }));
+    } catch (error) {
+      showError(error);
+    }
+  };
+  actions.append(reset, save);
+  root.append(actions);
+};
+
+const openCharacterProfiles = (preferredCharacterId = null) => {
+  profileDrafts = new Map();
+  selectedProfileId = preferredCharacterId || selectedProfileId || catalog.characters[0]?.id || null;
+  $("#profile-search").value = "";
+  profileElementFilter = "ALL";
+  $$("#profile-element-filters button").forEach(button => {
+    button.classList.toggle("active", button.dataset.element === "ALL");
+  });
+  renderProfileLibrary();
+  renderProfileDetail();
+  openDialog("character-profile-dialog");
 };
 
 const cleanUnit = unit => {
@@ -2586,6 +2914,7 @@ $$('[data-close]').forEach(button => button.addEventListener("click", () => {
 $$("dialog").forEach(dialog => dialog.addEventListener("close", () => {
   if (dialog.id === "formation-dialog") document.querySelector(".advanced-popover")?.remove();
   if (dialog.id === "character-picker") characterPickerTarget = null;
+  if (dialog.id === "character-profile-dialog") profileDrafts = new Map();
   if (dialog.id === "pause-dialog") animationPaused = false;
   scheduleAutoTurn();
 }));
@@ -2604,6 +2933,12 @@ $$('[data-add-side]').forEach(button => button.addEventListener("click", () => {
   );
 }));
 $("#character-search").addEventListener("input", renderCharacterPicker);
+$("#profile-search").addEventListener("input", renderProfileLibrary);
+$$("#profile-element-filters button").forEach(button => button.addEventListener("click", () => {
+  profileElementFilter = button.dataset.element;
+  $$("#profile-element-filters button").forEach(item => item.classList.toggle("active", item === button));
+  renderProfileLibrary();
+}));
 
 $("#restore-preset").addEventListener("click", () => loadPreset(draft.mode));
 $("#saved-setup-list").addEventListener("change", event => {
@@ -2669,6 +3004,7 @@ $("#terminal-log").addEventListener("click", () => openDialog("log-dialog"));
 $("#reset").addEventListener("click", resetBattle);
 $("#terminal-reset").addEventListener("click", resetBattle);
 $("#open-formation").addEventListener("click", () => openDialog("formation-dialog"));
+$("#open-character-profiles").addEventListener("click", () => openCharacterProfiles());
 $("#pause-formation").addEventListener("click", () => { cancelPlayback(); closeDialog("pause-dialog"); openDialog("formation-dialog"); });
 $("#open-pause").addEventListener("click", () => {
   window.clearTimeout(autoTurnTimer);
@@ -2726,6 +3062,11 @@ document.addEventListener("keydown", event => {
 try {
   catalog = await api("/api/catalog", undefined, t("status.loadingData"));
   $("#ruleset").textContent = catalog.ruleset_id;
+  profileDocument = await api(
+    "/api/character-profiles",
+    undefined,
+    t("status.loadingProfiles"),
+  );
   const initialState = await api("/api/state", undefined, t("status.preparingField"));
   loadDraft(initialState.setup || catalog.presets[initialState.state.rules.mode]);
   $("#setup-seed").value = String(initialState.seed);

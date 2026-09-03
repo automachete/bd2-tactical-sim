@@ -6,7 +6,12 @@ const toolsRequire = createRequire(new URL("../../../tools/package.json", import
 const { expect, test } = toolsRequire("@playwright/test");
 const savedE2eSetup = fileURLToPath(new URL("../../../data/scenarios/saved/e2e-tear-settings.json", import.meta.url));
 
-test.afterEach(() => rmSync(savedE2eSetup, { force: true }));
+test.afterEach(async ({ request }) => {
+  rmSync(savedE2eSetup, { force: true });
+  for (const characterId of ["Loen", "Michaela"]) {
+    await request.post("/api/reset-character-profile", { data: { character_id: characterId } });
+  }
+});
 
 const startMode = async (request, mode = "NORMAL") => {
   const catalogResponse = await request.get("/api/catalog");
@@ -33,6 +38,21 @@ const maximumLoadout = character => character.costumes.map(costume => ({
   potential_mask: costume.max_potential_mask,
   permanent_potential_enabled: true,
 }));
+
+const saveCharacterProfile = async (request, characterId, mutate) => {
+  const document = await (await request.get("/api/character-profiles")).json();
+  const stored = document.profiles.find(profile => profile.character_id === characterId);
+  const profile = {
+    character_id: stored.character_id,
+    awakening_enabled: stored.awakening_enabled,
+    costumes: structuredClone(stored.costumes),
+    equipment: structuredClone(stored.equipment),
+  };
+  mutate(profile);
+  const response = await request.post("/api/save-character-profile", { data: { profile } });
+  expect(response.ok()).toBeTruthy();
+  return profile;
+};
 
 const startWithCharacter = async (request, characterId) => {
   const catalog = await (await request.get("/api/catalog")).json();
@@ -87,45 +107,65 @@ test("player reservation exposes no wait action", async ({ page }) => {
   await expect(page.locator("#costume-strip")).not.toContainText("待機");
 });
 
-test("three Goddess Tear nodes and awakening are independently saved and restored", async ({ page }) => {
-  await page.locator("#open-formation").click();
-  await page.locator("#player-roster .roster-advanced").first().click();
-  const tears = page.locator(".advanced-costumes .goddess-tear-toggles input");
-  await expect(tears).toHaveCount(9);
-  await expect(page.getByTestId("goddess-tear-Loen_1-1")).toBeChecked();
-  await expect(page.getByTestId("goddess-tear-Loen_1-2")).toBeChecked();
-  await expect(page.getByTestId("goddess-tear-Loen_1-3")).toBeChecked();
-  await page.getByTestId("goddess-tear-Loen_1-2").uncheck();
-  await page.getByTestId("costume-enhancement-Loen_1").selectOption("2");
-  await page.locator(".build-settings-editor summary").click();
-  await page.getByTestId("build-awakening").uncheck();
+test("character database persists fixed profiles beyond formation and content changes", async ({ page, request }) => {
+  const catalog = await (await request.get("/api/catalog")).json();
+  const michaela = catalog.characters.find(character => character.id === "Michaela");
+  const burstCostume = michaela.costumes.find(costume => costume.max_burst_level === 3);
+  expect(burstCostume).toBeTruthy();
+
+  await page.getByTestId("open-character-profiles").click();
+  await expect(page.getByTestId("character-profile-dialog")).toBeVisible();
+  await expect(page.locator("#profile-character-grid .profile-character-card")).toHaveCount(61);
+  await page.getByTestId("profile-card-Michaela").click();
+  await page.getByTestId("profile-enhancement-Michaela_1").selectOption("2");
+  await page.getByTestId(`profile-burst-${burstCostume.id}`).selectOption("1");
+  await page.getByTestId("profile-tear-Michaela_1-2").uncheck();
+  await page.getByTestId("profile-awakening-Michaela").uncheck();
   await page.getByTestId("equipment-item-WEAPON").selectOption({ index: 1 });
   const savedEquipment = await page.getByTestId("equipment-item-WEAPON").inputValue();
   expect(savedEquipment).not.toBe("");
-  await page.locator(".advanced-top .secondary-button").click();
+  await page.getByTestId("save-character-profile").click();
+  await expect(page.getByTestId("profile-card-Michaela").locator(".profile-card-status")).toHaveText("設定済み");
+  await page.getByRole("button", { name: "キャラクター設定を閉じる" }).click();
 
-  await page.locator("#saved-setup-name").fill("e2e-tear-settings");
-  await page.getByTestId("save-setup").click();
-  await expect(page.locator("#saved-setup-list")).toHaveValue("e2e-tear-settings");
+  await page.getByTestId("open-character-profiles").click();
+  await page.locator("#profile-element-filters [data-element='WATER']").click();
+  await expect(page.getByTestId("profile-card-Michaela")).toHaveCount(0);
+  await page.locator("#profile-element-filters [data-element='LIGHT']").click();
+  await expect(page.getByTestId("profile-card-Michaela")).toBeVisible();
+  await page.getByRole("button", { name: "キャラクター設定を閉じる" }).click();
 
-  await page.locator("#player-roster .roster-advanced").first().click();
-  await page.getByTestId("goddess-tear-Loen_1-2").check();
-  await page.getByTestId("costume-enhancement-Loen_1").selectOption("5");
-  await page.locator(".build-settings-editor summary").click();
-  await page.getByTestId("build-awakening").check();
-  await page.getByTestId("equipment-item-WEAPON").selectOption("");
-  await page.locator(".advanced-top .secondary-button").click();
-  await page.getByTestId("load-setup").click();
-  await expect(page.locator("#saved-setup-path")).toContainText("読み込みました");
-
-  await page.locator("#player-roster .roster-advanced").first().click();
-  await expect(page.getByTestId("goddess-tear-Loen_1-1")).toBeChecked();
-  await expect(page.getByTestId("goddess-tear-Loen_1-2")).not.toBeChecked();
-  await expect(page.getByTestId("goddess-tear-Loen_1-3")).toBeChecked();
-  await expect(page.getByTestId("costume-enhancement-Loen_1")).toHaveValue("2");
-  await page.locator(".build-settings-editor summary").click();
-  await expect(page.getByTestId("build-awakening")).not.toBeChecked();
+  await page.reload();
+  await page.getByTestId("open-character-profiles").click();
+  await page.getByTestId("profile-card-Michaela").click();
+  await expect(page.getByTestId("profile-enhancement-Michaela_1")).toHaveValue("2");
+  await expect(page.getByTestId(`profile-burst-${burstCostume.id}`)).toHaveValue("1");
+  await expect(page.getByTestId("profile-tear-Michaela_1-2")).not.toBeChecked();
+  await expect(page.getByTestId("profile-awakening-Michaela")).not.toBeChecked();
   await expect(page.getByTestId("equipment-item-WEAPON")).toHaveValue(savedEquipment);
+  await page.getByRole("button", { name: "キャラクター設定を閉じる" }).click();
+
+  await page.locator("#open-formation").click();
+  await page.locator("#content-tabs [data-mode='MIRROR_WAR']").click();
+  await page.locator("#content-tabs [data-mode='NORMAL']").click();
+  const michaelaRoster = page.locator("#player-roster .roster-chip").filter({ hasText: "ミカエラ" });
+  await michaelaRoster.locator(".remove-unit").click();
+  await page.locator("[data-add-side='PLAYER']").click();
+  await page.locator("#character-options .character-option").filter({ hasText: "ミカエラ" }).click();
+  await page.locator("#player-roster .roster-chip").filter({ hasText: "ミカエラ" }).locator(".roster-advanced").click();
+  await expect(page.getByTestId("costume-enhancement-Michaela_1")).toHaveValue("2");
+  await expect(page.getByTestId("costume-enhancement-Michaela_1")).toBeDisabled();
+  await expect(page.getByTestId("open-profile-from-formation")).toBeVisible();
+  await page.locator(".advanced-top .secondary-button").click();
+  await page.getByTestId("start-battle").click();
+
+  const state = await (await request.get("/api/state")).json();
+  const unit = state.setup.player_units.find(item => item.character_id === "Michaela");
+  expect(unit.build_settings.awakening_enabled).toBe(false);
+  expect(unit.equipment.WEAPON.equipment_id).toBe(savedEquipment);
+  expect(unit.costumes.find(item => item.costume_id === "Michaela_1").enhancement).toBe(2);
+  expect(unit.costumes.find(item => item.costume_id === "Michaela_1").potential_mask).toBe(5);
+  expect(unit.costumes.find(item => item.costume_id === burstCostume.id).burst_level).toBe(1);
 });
 
 test("selected costume shows the resolved official Japanese description in the battle header", async ({ page }) => {
@@ -612,7 +652,8 @@ test("typed Legendary equipment changes the battle unit stats through the real s
   const baseline = before.state.units["1"].base_stats;
   const setup = structuredClone(catalog.presets.NORMAL);
   const equipment = catalog.equipment.find(item => item.kind === "CRAFTED_LEGENDARY" && item.slot === "WEAPON");
-  setup.player_units[0].equipment = {
+  await saveCharacterProfile(request, setup.player_units[0].character_id, profile => {
+    profile.equipment = {
     WEAPON: {
       equipment_id: equipment.id,
       refinement_score: 18,
@@ -620,7 +661,8 @@ test("typed Legendary equipment changes the battle unit stats through the real s
       secondary_stat: null,
       substats: Array(3).fill(equipment.allowed_substats[0].key),
     },
-  };
+    };
+  });
   setup.mcts_simulations = 3;
   const response = await request.post("/api/start", { data: setup });
   expect(response.ok()).toBeTruthy();
@@ -964,7 +1006,7 @@ test("formation drag is persisted when a new battle starts", async ({ page }) =>
   await expect(page.getByTestId("player-cell-0-3").getByTestId("player-token-1")).toHaveCount(1);
 });
 
-test("unit details expose character, costume, link, potential, and equipment controls", async ({ page }) => {
+test("formation details keep formation choices separate from persistent character settings", async ({ page }) => {
   await page.locator("#open-formation").click();
   await page.locator("#player-roster").getByRole("button", { name: /ロエンの詳細設定/ }).click();
   await expect(page.locator(".advanced-popover")).toBeVisible();
@@ -972,9 +1014,11 @@ test("unit details expose character, costume, link, potential, and equipment con
   await expect(page.locator(".advanced-top select option")).toHaveCount(61);
   await expect(page.locator(".costume-line")).not.toHaveCount(0);
   await expect(page.locator(".inline-setting select")).toBeVisible();
-  await expect(page.locator(".equipment-slot-row")).toHaveCount(5);
-  await expect(page.locator(".equipment-editor textarea")).toHaveCount(0);
+  await expect(page.locator(".profile-owned-notice")).toBeVisible();
+  await expect(page.getByTestId("open-profile-from-formation")).toBeVisible();
+  await expect(page.locator(".equipment-slot-row")).toHaveCount(0);
   await expect(page.locator(".build-settings-editor")).toBeVisible();
+  await expect(page.getByTestId("build-awakening")).toBeDisabled();
   await expect(page.locator(".advanced-top select option").first()).not.toContainText(/FIRE|WATER|WIND|LIGHT|DARK|PHYSICAL|MAGICAL/);
 });
 
@@ -984,8 +1028,8 @@ test("exclusive equipment exposes owner-only main abilities and persists refinem
   const exclusive = catalog.equipment.find(item => item.kind === "EXCLUSIVE" && item.owner_character_id === owner);
   expect(exclusive).toBeTruthy();
 
-  await page.locator("#open-formation").click();
-  await page.locator("#player-roster .roster-advanced").first().click();
+  await page.getByTestId("open-character-profiles").click();
+  await page.getByTestId(`profile-card-${owner}`).click();
   const item = page.getByTestId(`equipment-item-${exclusive.slot}`);
   await expect(item.locator(`option[value="${exclusive.id}"]`)).toContainText("専用UR");
   await item.selectOption(exclusive.id);
@@ -999,11 +1043,14 @@ test("exclusive equipment exposes owner-only main abilities and persists refinem
   }
   const selectedPrimary = await page.getByTestId(`equipment-primary-${exclusive.slot}`).inputValue();
   const selectedSecondary = await page.getByTestId(`equipment-secondary-${exclusive.slot}`).inputValue();
-  await page.locator(".advanced-top .secondary-button").click();
-  await page.getByTestId("start-battle").click();
+  await page.getByTestId("save-character-profile").click();
+  const setup = structuredClone(catalog.presets.NORMAL);
+  setup.mcts_simulations = 3;
+  const started = await request.post("/api/start", { data: setup });
+  expect(started.ok()).toBeTruthy();
 
   const state = await (await request.get("/api/state")).json();
-  const equipped = state.setup.player_units[0].equipment[exclusive.slot];
+  const equipped = state.setup.player_units.find(unit => unit.character_id === owner).equipment[exclusive.slot];
   expect(equipped.equipment_id).toBe(exclusive.id);
   expect(equipped.refinement_score).toBe(24);
   expect(equipped.primary_stat).toBe(selectedPrimary);
@@ -1015,12 +1062,27 @@ test("exclusive equipment is removed atomically when its owner is replaced", asy
   const owner = catalog.presets.NORMAL.player_units[0].character_id;
   const exclusive = catalog.equipment.find(item => item.kind === "EXCLUSIVE" && item.owner_character_id === owner);
   const replacement = catalog.characters.find(item => item.id !== owner && !catalog.presets.NORMAL.player_units.some(unit => unit.character_id === item.id));
+  await saveCharacterProfile(request, owner, profile => {
+    profile.equipment = {
+      [exclusive.slot]: {
+        equipment_id: exclusive.id,
+        refinement_score: 18,
+        primary_stat: exclusive.primary_stat_options[0].key,
+        secondary_stat: exclusive.secondary_stat_options[0].key,
+        substats: Array(3).fill(exclusive.allowed_substats[0].key),
+      },
+    };
+  });
+  await page.reload();
   await page.locator("#open-formation").click();
   await page.locator("#player-roster .roster-advanced").first().click();
-  await page.getByTestId(`equipment-item-${exclusive.slot}`).selectOption(exclusive.id);
   await page.locator(".advanced-top select").selectOption(replacement.id);
-  await expect(page.getByTestId(`equipment-item-${exclusive.slot}`)).toHaveValue("");
-  await expect(page.getByTestId(`equipment-item-${exclusive.slot}`).locator(`option[value="${exclusive.id}"]`)).toHaveCount(0);
+  await expect(page.locator(".equipment-slot-row")).toHaveCount(0);
+  await page.locator(".advanced-top .secondary-button").click();
+  await page.getByTestId("start-battle").click();
+  const state = await (await request.get("/api/state")).json();
+  expect(state.setup.player_units[0].character_id).toBe(replacement.id);
+  expect(state.setup.player_units[0].equipment).toEqual({});
 });
 
 test("exclusive equipment editor stays operable without horizontal overflow on a narrow browser", async ({ page, request }) => {
@@ -1028,12 +1090,12 @@ test("exclusive equipment editor stays operable without horizontal overflow on a
   const owner = catalog.presets.NORMAL.player_units[0].character_id;
   const exclusive = catalog.equipment.find(item => item.kind === "EXCLUSIVE" && item.owner_character_id === owner);
   await page.setViewportSize({ width: 640, height: 720 });
-  await page.locator("#open-formation").click();
-  await page.locator("#player-roster .roster-advanced").first().click();
+  await page.getByTestId("open-character-profiles").click();
+  await page.getByTestId(`profile-card-${owner}`).click();
   await page.getByTestId(`equipment-item-${exclusive.slot}`).selectOption(exclusive.id);
   await expect(page.getByTestId(`equipment-primary-${exclusive.slot}`)).toBeVisible();
   await expect(page.getByTestId(`equipment-secondary-${exclusive.slot}`)).toBeVisible();
-  const layout = await page.locator(".advanced-popover").evaluate(popover => {
+  const layout = await page.locator("#character-profile-dialog").evaluate(popover => {
     const box = popover.getBoundingClientRect();
     return {
       left: box.left,
@@ -1140,9 +1202,10 @@ test("automatic turns stay suspended while a modal editor is open", async ({ pag
 test("configured costume potential changes the displayed skill range variant", async ({ page, request }) => {
   const catalog = await (await request.get("/api/catalog")).json();
   const setup = structuredClone(catalog.presets.NORMAL);
-  const loen = setup.player_units.find(unit => unit.character_id === "Loen");
-  const costume = loen.costumes.find(item => item.costume_id === "Loen_1");
-  Object.assign(costume, { enhancement: 0, burst_level: 0, potential_mask: 0 });
+  await saveCharacterProfile(request, "Loen", profile => {
+    const costume = profile.costumes.find(item => item.costume_id === "Loen_1");
+    Object.assign(costume, { enhancement: 0, burst_level: 0, potential_mask: 0 });
+  });
   setup.mcts_simulations = 3;
   await request.post("/api/start", { data: setup });
   await page.goto("/");

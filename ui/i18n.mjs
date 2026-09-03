@@ -46,6 +46,7 @@ export const resources = {
     "opponent.caption": "対戦相手",
     "opponent.title": "敵情報",
     "footer.preparation": "戦闘準備",
+    "footer.characterProfiles": "キャラクター設定",
     "footer.fullscreen": "全画面",
     "footer.battle": "戦闘",
     "footer.start": "開始 ›",
@@ -55,6 +56,36 @@ export const resources = {
     "picker.title": "★5キャラクターを選択",
     "picker.search": "名前またはIDで検索",
     "picker.closeAria": "キャラクター選択を閉じる",
+    "profiles.caption": "キャラクターデータベース",
+    "profiles.title": "キャラクター設定",
+    "profiles.closeAria": "キャラクター設定を閉じる",
+    "profiles.libraryTitle": "★5キャラクター一覧",
+    "profiles.libraryHelp": "保存した育成・装備は、編成やコンテンツをまたいで味方キャラクターへ適用されます。",
+    "profiles.search": "キャラクター検索",
+    "profiles.searchPlaceholder": "名前またはID",
+    "profiles.elementFilterAria": "属性で絞り込み",
+    "profiles.gridAria": "★5キャラクター一覧",
+    "profiles.allElements": "すべて",
+    "profiles.defaultBadge": "既定値",
+    "profiles.customBadge": "設定済み",
+    "profiles.cardAria": "{name}の固定設定を開く",
+    "profiles.progression": "キャラクター育成",
+    "profiles.awakening": "覚醒",
+    "profiles.awakeningHelp": "レベル100固定。覚醒の有無だけを保存します。",
+    "profiles.costumes": "コスチューム強化",
+    "profiles.costumeHelp": "凸、バースト上限、女神の涙3ノードを衣装ごとに保存します。",
+    "profiles.savedScope": "味方プロフィール · 全編成共通",
+    "profiles.save": "このキャラクターを保存",
+    "profiles.reset": "既定値に戻す",
+    "profiles.saved": "{name}の固定設定を保存しました。",
+    "profiles.resetDone": "{name}を既定値へ戻しました。",
+    "profiles.unsaved": "未保存の変更",
+    "profiles.noResult": "条件に一致するキャラクターはいません。",
+    "profiles.openFromFormation": "固定設定を開く",
+    "profiles.formationOwned": "凸・バースト上限・覚醒・女神の涙・装備は全編成共通プロフィールから適用されます。",
+    "status.loadingProfiles": "キャラクター設定を読み込み中…",
+    "status.savingProfile": "キャラクター設定を保存中…",
+    "status.resettingProfile": "キャラクター設定を初期化中…",
     "action.normal": "通常攻撃",
     "action.knockback": "ノックバック",
     "action.costume": "コスチュームスキル",
@@ -476,5 +507,8 @@ export const applyTranslations = (root = document) => {
   });
   root.querySelectorAll("[data-i18n-aria]").forEach(node => {
     node.setAttribute("aria-label", t(node.dataset.i18nAria));
+  });
+  root.querySelectorAll("[data-i18n-placeholder]").forEach(node => {
+    node.setAttribute("placeholder", t(node.dataset.i18nPlaceholder));
   });
 };

@@ -475,6 +475,83 @@ class DebugSetupCatalog:
             },
         }
 
+    def default_character_profile(self, character_id: str) -> dict[str, Any]:
+        character = self.characters.get(character_id)
+        if character is None:
+            raise ValueError(f"unknown character profile: {character_id}")
+        return {
+            "character_id": character_id,
+            "awakening_enabled": True,
+            "costumes": [
+                {
+                    "costume_id": costume["id"],
+                    "enhancement": costume["max_enhancement"],
+                    "burst_level": costume["max_burst_level"],
+                    "potential_mask": costume["max_potential_mask"],
+                }
+                for costume in character["costumes"]
+            ],
+            "equipment": {},
+        }
+
+    def normalize_character_profile(self, value: Any) -> dict[str, Any]:
+        """Validate the only supported character-profile schema."""
+
+        required = {"character_id", "awakening_enabled", "costumes", "equipment"}
+        if not isinstance(value, dict) or set(value) != required:
+            raise ValueError(
+                "character profile must contain only character_id, awakening_enabled, "
+                "costumes and equipment"
+            )
+        character_id = value["character_id"]
+        if not isinstance(character_id, str) or character_id not in self.characters:
+            raise ValueError(f"unknown character profile: {character_id}")
+        awakening_enabled = _strict_bool(value["awakening_enabled"], "awakening_enabled")
+        costumes = value["costumes"]
+        if not isinstance(costumes, list):
+            raise ValueError("character profile costumes must be an array")
+        normalized_input: list[dict[str, Any]] = []
+        for index, costume in enumerate(costumes):
+            expected = {"costume_id", "enhancement", "burst_level", "potential_mask"}
+            if not isinstance(costume, dict) or set(costume) != expected:
+                raise ValueError(
+                    f"character profile costumes[{index}] must contain only "
+                    "costume_id, enhancement, burst_level and potential_mask"
+                )
+            normalized_input.append(
+                {
+                    **costume,
+                    "permanent_potential_enabled": True,
+                }
+            )
+        expected_costumes = {item["id"] for item in self.characters[character_id]["costumes"]}
+        actual_costumes = [str(item["costume_id"]) for item in normalized_input]
+        if len(actual_costumes) != len(set(actual_costumes)):
+            raise ValueError(f"duplicate costume in character profile: {character_id}")
+        if set(actual_costumes) != expected_costumes:
+            raise ValueError(
+                f"character profile {character_id} must contain every current costume exactly once"
+            )
+        normalized_loadout = self._build_loadout(
+            self.characters[character_id],
+            {"costumes": normalized_input, "costume_link_target": None},
+        )
+        equipment = self._build_equipment({"equipment": value["equipment"]}, character_id)
+        return {
+            "character_id": character_id,
+            "awakening_enabled": awakening_enabled,
+            "costumes": [
+                {
+                    "costume_id": item["costume_id"],
+                    "enhancement": item["enhancement"],
+                    "burst_level": item["burst_level"],
+                    "potential_mask": item["potential_mask"],
+                }
+                for item in normalized_loadout
+            ],
+            "equipment": equipment,
+        }
+
     def _load_monster_skills(self) -> list[dict[str, Any]]:
         template = self.templates["MONSTER_CHASER"]
         ids = [
