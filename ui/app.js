@@ -2407,6 +2407,7 @@ const modeName = mode => t(`mode.${mode}`);
 const renderBattleSurface = ({ preserveTip = false } = {}) => {
   const mode = snapshot.state.rules.mode;
   const golden = mode === "GOLDEN_COLOSSEUM";
+  $("#game-shell").dataset.mode = mode;
   $("#game-shell").classList.remove("normal", "mirror", "monster", "golden");
   $("#game-shell").classList.add(mode === "MIRROR_WAR" ? "mirror" : mode === "MONSTER_CHASER" ? "monster" : mode === "GOLDEN_COLOSSEUM" ? "golden" : "normal");
   $("#mode-label").textContent = modeName(mode);

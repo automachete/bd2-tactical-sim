@@ -418,7 +418,20 @@ test("global SP HUD stays centered and renders twenty true diamond markers witho
 });
 
 test("turn recovery saturates core state and the global SP HUD at twenty", async ({ page, request }) => {
-  await openBattle(page, request, "MIRROR_WAR");
+  const catalog = await (await request.get("/api/catalog")).json();
+  const setup = structuredClone(catalog.presets.MIRROR_WAR);
+  setup.seed = 42;
+  setup.mcts_simulations = 3;
+  setup.mcts_rollout_depth = 2;
+  setup.mcts_max_branching = 5;
+  for (const unit of [...setup.player_units, ...setup.enemy_units]) {
+    // Keep both sides alive long enough to exercise recovery after SP has
+    // already reached the cap; the stock mirror preset can end after one turn.
+    unit.build_settings.external_buffs.shield_flat = 1_000_000_000;
+  }
+  const started = await request.post("/api/start", { data: setup });
+  expect(started.ok()).toBeTruthy();
+  await page.goto("/");
   let payload = await (await request.get("/api/state")).json();
   for (let turn = 0; turn < 2 && payload.state.terminal === null; turn += 1) {
     const order = payload.state.teams[0].action_order;

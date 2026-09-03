@@ -12,7 +12,8 @@
     "sync": "node sync-bd2db.mjs",
     "validate:equipment": "node validate-bd2db-equipment.mjs",
     "validate:icons": "node validate-character-icons.mjs",
-    "test:ui": "playwright test -c playwright.config.mjs"
+    "test:ui": "playwright test -c playwright.config.mjs",
+    "test:ui:quality": "playwright test -c playwright.config.mjs model-based-quality.spec.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1"

@@ -1274,3 +1274,22 @@ def test_gui_http_catalog_start_and_turn_round_trip() -> None:
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+@pytest.mark.parametrize(
+    "disconnect",
+    [BrokenPipeError(), ConnectionAbortedError(), ConnectionResetError()],
+)
+def test_gui_response_body_tolerates_clients_that_disconnect_during_write(
+    disconnect: OSError,
+) -> None:
+    class DisconnectedStream:
+        def write(self, body: bytes) -> None:
+            assert body == b"response"
+            raise disconnect
+
+    handler_type = handler_factory(object(), UI)  # type: ignore[arg-type]
+    handler = object.__new__(handler_type)
+    handler.wfile = DisconnectedStream()
+
+    handler._write_body(b"response")

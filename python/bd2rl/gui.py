@@ -718,7 +718,7 @@ def handler_factory(session: GuiSession, ui_root: Path) -> type[BaseHTTPRequestH
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            self._write_body(body)
 
         def do_POST(self) -> None:
             try:
@@ -765,9 +765,17 @@ def handler_factory(session: GuiSession, ui_root: Path) -> type[BaseHTTPRequestH
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
+                self._write_body(body)
+            except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+                # The peer can disconnect while response headers are being sent.
+                return
+
+        def _write_body(self, body: bytes) -> None:
+            try:
                 self.wfile.write(body)
             except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
-                # Rapid selection changes supersede in-flight target previews.
+                # Navigation and rapid selection changes legitimately supersede
+                # in-flight static assets and target previews.
                 return
 
     return Handler
