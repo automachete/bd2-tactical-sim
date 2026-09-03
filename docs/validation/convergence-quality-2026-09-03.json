@@ -1,0 +1,84 @@
+{
+  "schema": "bd2-convergence-quality-v1",
+  "catalog_ruleset": "bd2-current-2026-09-03",
+  "scenario_ids": [
+    "normal-demo",
+    "mirror-war-demo",
+    "monster-chaser-10072-level-6",
+    "golden-colosseum-reference"
+  ],
+  "variant_execution": {
+    "catalog_variants": 12509,
+    "executed_variants": 12509,
+    "preemptive_variants": 288,
+    "action_variants": 12221,
+    "elapsed_seconds": 0.1655085,
+    "failures": []
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "seed": 762176622167703883,
+      "episodes": 100000,
+      "transitions": 540566,
+      "state_invariant_checks": 640566,
+      "snapshot_replay_checks": 540566,
+      "rejected_plan_atomicity_checks": 100000,
+      "terminal_episodes": 100000,
+      "modes": {
+        "GOLDEN_COLOSSEUM": 25000,
+        "MIRROR_WAR": 25000,
+        "MONSTER_CHASER": 25000,
+        "NORMAL": 25000
+      },
+      "elapsed_seconds": 7.6677569,
+      "failures": []
+    },
+    {
+      "round": 2,
+      "seed": 8360299671544575115,
+      "episodes": 100000,
+      "transitions": 541006,
+      "state_invariant_checks": 641006,
+      "snapshot_replay_checks": 541006,
+      "rejected_plan_atomicity_checks": 100000,
+      "terminal_episodes": 100000,
+      "modes": {
+        "GOLDEN_COLOSSEUM": 25000,
+        "MIRROR_WAR": 25000,
+        "MONSTER_CHASER": 25000,
+        "NORMAL": 25000
+      },
+      "elapsed_seconds": 7.5218784,
+      "failures": []
+    },
+    {
+      "round": 3,
+      "seed": 8834216583290715802,
+      "episodes": 100000,
+      "transitions": 541444,
+      "state_invariant_checks": 641444,
+      "snapshot_replay_checks": 541444,
+      "rejected_plan_atomicity_checks": 100000,
+      "terminal_episodes": 100000,
+      "modes": {
+        "GOLDEN_COLOSSEUM": 25000,
+        "MIRROR_WAR": 25000,
+        "MONSTER_CHASER": 25000,
+        "NORMAL": 25000
+      },
+      "elapsed_seconds": 7.5843777,
+      "failures": []
+    }
+  ],
+  "totals": {
+    "episodes": 300000,
+    "transitions": 1623016,
+    "state_invariant_checks": 1923016,
+    "snapshot_replay_checks": 1623016,
+    "rejected_plan_atomicity_checks": 300000,
+    "terminal_episodes": 300000,
+    "failures": 0
+  },
+  "status": "ok"
+}

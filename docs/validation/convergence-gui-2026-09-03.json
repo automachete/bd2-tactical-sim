@@ -1,0 +1,14 @@
+{
+  "schema": "bd2-gui-model-quality-v1",
+  "sequences": 1000,
+  "completedTurns": 1680,
+  "modes": [
+    "NORMAL",
+    "MIRROR_WAR",
+    "MONSTER_CHASER",
+    "GOLDEN_COLOSSEUM"
+  ],
+  "shards": 4,
+  "failures": 0,
+  "status": "ok"
+}

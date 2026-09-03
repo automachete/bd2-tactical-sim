@@ -1,0 +1,20 @@
+{
+  "schema": "bd2-performance-v1",
+  "platform": "Windows",
+  "python": "3.13.7",
+  "torch": "2.13.0+cu130",
+  "batch_size": 64,
+  "measured_environment_steps": 12800,
+  "cpu_batch": {
+    "legacy_json_steps_per_second": 5827.6,
+    "direct_numpy_steps_per_second": 51805.7,
+    "speedup": 8.89
+  },
+  "gpu_input": {
+    "available": true,
+    "device": "NVIDIA GeForce RTX 5070 Ti",
+    "transfer_frames_per_second": 541191.9,
+    "forward_frames_per_second": 36417.4
+  },
+  "status": "ok"
+}

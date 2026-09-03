@@ -11,7 +11,7 @@ BrownDust2の戦闘を、決定論的なRustコア、SQLiteカタログ、ブラ
 | ゴールデンコロシアム | 衣装編成・加護設定後に自動進行 | 衣装単位の交互行動AI |
 | 魔物追跡者 | 2パーティを編成してGUI操作 | データ駆動のルールAI |
 
-2026-09-03版のデータには、★5プレイアブル61体、プレイヤー用164コスチューム、召喚4種、現行ボス用5スキル、剣闘士の加護47種を収録しています。強化、潜在力、バーストを展開したスキル派生は12,509件です。
+2026-09-03版のデータには、★5プレイアブル61体、プレイヤー用155コスチューム、召喚4種、現行ボス用5スキル、剣闘士の加護47種を収録しています。これら全164コスチュームについて、強化、潜在力、バーストを展開したスキル派生は12,509件です。
 
 主な機能は次のとおりです。
 
@@ -194,6 +194,22 @@ npm run test:ui
 cd ..
 ```
 
+### 収束型品質検証
+
+全モードを対象に、seed付き状態遷移、スナップショット復元、独立不変条件、全スキル派生の実行可能性をまとめて検証できます。
+
+```powershell
+cargo run --release -p bd2-data --bin bd2-quality -- --episodes 100000 --rounds 3 --output docs/validation/convergence-quality.json
+.\.venv\Scripts\python.exe -m bd2rl.quality_benchmark --output docs/validation/convergence-performance.json
+
+cd tools
+$env:BD2_GUI_QUALITY_SEQUENCES = "1000"
+npm run test:ui:quality
+cd ..
+```
+
+GUI検証は`BD2_GUI_QUALITY_OFFSET`でseed範囲をずらし、`BD2_PLAYWRIGHT_PORT`で独立サーバーを指定できます。複数シャードの結果は`tools/aggregate-gui-quality.mjs`で、範囲の重複や欠落を拒否しながら集約します。
+
 回帰テストには次の検証が含まれます。
 
 - 全★5キャラクターの通常攻撃、ノックバック、合法スキルについて、対象ロックと効果範囲を独立した戦闘実行と照合
@@ -201,6 +217,7 @@ cd ..
 - 配置、行動順、複数予約、召喚、チェイン、衝突、編成交替、終局表示を実ブラウザで操作
 - 連続した対象プレビュー、装備所有者制約、成長設定、外部バフ、魔物レベルと共有HPを検証
 - 現行コロシアムの4×4盤面、配置不可数、衣装交互順、先後別加護、47加護の全段階、無限SP、CT無効、チェイン維持、デスタイムを検証
+- 全12,509スキル派生の実行、復元後の同一入力によるビット単位一致、未知・破損状態のfail-closed検証
 
 ## 関連資料
 
@@ -211,6 +228,7 @@ cd ..
 - [UIゲームプレイ検証記録](docs/validation/ui-gameplay-bug-hunt-2026-09-01.md)
 - [ゴールデンコロシアム現行仕様](docs/research/golden-colosseum-specification.md)
 - [BD2DB装備照合データ](docs/validation/bd2db-current-equipment-oracle.json)
+- [収束型品質検証記録](docs/validation/convergence-quality-2026-09-03.md)
 
 ## ライセンス
 
