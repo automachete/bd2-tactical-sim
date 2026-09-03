@@ -1,0 +1,52 @@
+{
+  "scenario_id": "golden-colosseum-reference",
+  "rules": {
+    "mode": "GOLDEN_COLOSSEUM",
+    "grid": {
+      "rows": 4,
+      "depths": 4,
+      "deployment_limit": 3,
+      "blocked": [[0, 1], [0, 2], [1, 3], [2, 3], [3, 1], [3, 2]]
+    },
+    "initial_sp": [0, 0],
+    "sp_cap": 20,
+    "recovery_after_team_turn": [0, 0],
+    "first_side": "PLAYER",
+    "max_game_turns": 4294967295,
+    "chain_reset_on_team_turn": false,
+    "sp_costs_bypassed": true,
+    "cooldowns_disabled": true,
+    "action_flow": "ALTERNATING_COSTUME",
+    "allow_formation_change": false,
+    "allow_manual_commands": [false, false]
+  },
+  "units": [
+    { "unit_id": 1, "character_id": "Loen", "side": "PLAYER", "position": { "row": 0, "depth": 0 }, "costume_loadout": [{ "costume_id": "Loen_1", "enhancement": 5, "burst_level": 0, "costume_link_target": null }], "equipment": {}, "ai_priority": ["Loen_1"] },
+    { "unit_id": 2, "character_id": "Michaela", "side": "PLAYER", "position": { "row": 1, "depth": 0 }, "costume_loadout": [{ "costume_id": "Michaela_2", "enhancement": 5, "burst_level": 0, "costume_link_target": null }], "equipment": {}, "ai_priority": ["Michaela_2"] },
+    { "unit_id": 3, "character_id": "Wilhelmina", "side": "PLAYER", "position": { "row": 2, "depth": 0 }, "costume_loadout": [{ "costume_id": "Wilhelmina_1", "enhancement": 5, "burst_level": 0, "costume_link_target": null }], "equipment": {}, "ai_priority": ["Wilhelmina_1"] },
+    { "unit_id": 101, "character_id": "Loen", "side": "ENEMY", "position": { "row": 0, "depth": 0 }, "costume_loadout": [{ "costume_id": "Loen_2", "enhancement": 5, "burst_level": 0, "costume_link_target": null }], "equipment": {}, "ai_priority": ["Loen_2"] },
+    { "unit_id": 102, "character_id": "Michaela", "side": "ENEMY", "position": { "row": 1, "depth": 0 }, "costume_loadout": [{ "costume_id": "Michaela_1", "enhancement": 5, "burst_level": 0, "costume_link_target": null }], "equipment": {}, "ai_priority": ["Michaela_1"] },
+    { "unit_id": 103, "character_id": "Wilhelmina", "side": "ENEMY", "position": { "row": 2, "depth": 0 }, "costume_loadout": [{ "costume_id": "Wilhelmina_2", "enhancement": 5, "burst_level": 0, "costume_link_target": null }], "equipment": {}, "ai_priority": ["Wilhelmina_2"] }
+  ],
+  "monster_chaser": null,
+  "golden_colosseum": {
+    "season_label": "TRIAL-SEASON-40-2026-09-03",
+    "weekly_attempts": 100,
+    "refill_limit": 3,
+    "starting_rating": 1000,
+    "undeployable_grid_count": 6,
+    "death_time_all_turn": 5,
+    "banned_costume_ids": ["Mamonir_1", "Blade_2", "Levia_2", "Dalvi_2", "Olivier_1"],
+    "banned_blessing_ids": [],
+    "side_blessings": [
+      {
+        "going_first": { "point_limit": 3, "selected": [{ "blessing_id": "blessing_001", "level": 1 }, { "blessing_id": "blessing_011", "level": 2 }] },
+        "going_second": { "point_limit": 4, "selected": [{ "blessing_id": "blessing_028", "level": 1 }] }
+      },
+      {
+        "going_first": { "point_limit": 3, "selected": [{ "blessing_id": "blessing_002", "level": 3 }] },
+        "going_second": { "point_limit": 4, "selected": [{ "blessing_id": "blessing_025", "level": 2 }, { "blessing_id": "blessing_035", "level": 2 }] }
+      }
+    ]
+  }
+}

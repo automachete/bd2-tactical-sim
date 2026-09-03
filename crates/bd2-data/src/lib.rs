@@ -44,6 +44,8 @@ impl Database {
             .execute_batch(include_str!("../migrations/001_init.sql"))?;
         self.connection
             .execute_batch(include_str!("../migrations/002_equipment.sql"))?;
+        self.connection
+            .execute_batch(include_str!("../migrations/003_blessings.sql"))?;
         Ok(())
     }
 
@@ -109,6 +111,18 @@ impl Database {
             )?;
             insert_source(&transaction, &catalog.ruleset_id, &equipment.source)?;
         }
+        for blessing in catalog.blessings.values() {
+            transaction.execute(
+                "INSERT INTO blessings(ruleset_id, blessing_id, category, record_json) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    catalog.ruleset_id,
+                    blessing.id,
+                    format!("{:?}", blessing.category),
+                    serde_json::to_string(blessing)?
+                ],
+            )?;
+            insert_source(&transaction, &catalog.ruleset_id, &blessing.source)?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -152,12 +166,14 @@ impl Database {
         }
         let monsters = load_json_map(&self.connection, "monsters", "monster_id", ruleset_id)?;
         let equipment = load_json_map(&self.connection, "equipment", "equipment_id", ruleset_id)?;
+        let blessings = load_json_map(&self.connection, "blessings", "blessing_id", ruleset_id)?;
         let catalog = Catalog {
             ruleset_id: ruleset_id.into(),
             characters,
             costumes,
             monsters,
             equipment,
+            blessings,
             skills: BTreeMap::new(),
         };
         validate_catalog(&catalog)?;
@@ -192,6 +208,7 @@ impl Database {
             skill_variants: count(&self.connection, "skill_variants", ruleset_id)?,
             monsters: count(&self.connection, "monsters", ruleset_id)?,
             equipment: count(&self.connection, "equipment", ruleset_id)?,
+            blessings: count(&self.connection, "blessings", ruleset_id)?,
             scenarios: count(&self.connection, "scenarios", ruleset_id)?,
         })
     }
@@ -204,6 +221,7 @@ pub struct CatalogCounts {
     pub skill_variants: u64,
     pub monsters: u64,
     pub equipment: u64,
+    pub blessings: u64,
     pub scenarios: u64,
 }
 

@@ -163,6 +163,7 @@ fn every_current_bd2db_equipment_main_stat_case_passes_the_battle_resolver() {
                     },
                 ],
                 monster_chaser: None,
+                golden_colosseum: None,
             },
             1,
         )

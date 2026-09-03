@@ -461,6 +461,51 @@ for (const character of Object.values(catalog.characters)) {
   }
 }
 let variants = 0;
+const blessingIds = Object.keys(catalog.blessings ?? {}).sort();
+if (blessingIds.length !== 47) failures.push(`expected 47 current blessings, got ${blessingIds.length}`);
+for (let index = 0; index < blessingIds.length; index += 1) {
+  const expectedId = `blessing_${String(index + 1).padStart(3, "0")}`;
+  const id = blessingIds[index];
+  const blessing = catalog.blessings[id];
+  if (id !== expectedId || blessing.id !== id) failures.push(`${id}: non-contiguous or mismatched blessing id`);
+  if (!["OFFENCE", "DEFENCE", "UTILITY"].includes(blessing.category)) failures.push(`${id}: unknown blessing category`);
+  if (!Array.isArray(blessing.levels) || !blessing.levels.length) failures.push(`${id}: blessing levels are missing`);
+  for (const locale of ["ja", "ko", "en"]) {
+    if (!blessing.names?.[locale] || !blessing.descriptions?.[locale]?.length) failures.push(`${id}: ${locale} localization is missing`);
+  }
+  const raw = blessing.source?.raw_payload;
+  if (raw?.blessingId !== id || Number(raw?.levelLength) !== blessing.levels.length || raw?.level?.length < blessing.levels.length) {
+    failures.push(`${id}: transformed level structure diverges from the source record`);
+  }
+  for (const [levelIndex, level] of blessing.levels.entries()) {
+    if (level.level !== levelIndex + 1 || level.point_cost !== Number(raw?.level?.[levelIndex]?.cost) || !level.effect?.type) {
+      failures.push(`${id}: level ${levelIndex + 1} is incomplete or diverges from the source cost`);
+    }
+  }
+  if (id === "blessing_045") {
+    const modifiers = blessing.levels[0]?.effect?.effect?.modifiers;
+    if (modifiers?.attack_bp !== 30000 || modifiers?.magic_bp !== 30000 || !raw?.official_override) {
+      failures.push(`${id}: official 2026-08-27 Surprise Preparation 300% override is missing`);
+    }
+    for (const locale of ["zh-TW", "zh-CN", "en", "ja", "ko"]) {
+      const description = blessing.descriptions?.[locale]?.join(" ") ?? "";
+      if (!/300[%％]/.test(description) || /100[%％]/.test(description)) {
+        failures.push(`${id}: ${locale} description does not reflect the official 300% override`);
+      }
+    }
+  }
+  if (id === "blessing_046") {
+    if (blessing.levels[0]?.effect?.amount_bp !== 15000 || !raw?.official_override) {
+      failures.push(`${id}: official 2026-08-27 Quick Decision 150% override is missing`);
+    }
+    for (const locale of ["zh-TW", "zh-CN", "en", "ja", "ko"]) {
+      const description = blessing.descriptions?.[locale]?.join(" ") ?? "";
+      if (!/150[%％]/.test(description) || /100[%％]/.test(description)) {
+        failures.push(`${id}: ${locale} description does not reflect the official 150% override`);
+      }
+    }
+  }
+}
 for (const costume of Object.values(catalog.costumes)) {
   variants += costume.variants.length;
   if (!costume.id.includes(":") && !costume.skill_names?.ja) {
@@ -636,6 +681,7 @@ console.log(JSON.stringify({
   characters: Object.keys(catalog.characters).length,
   costumes: Object.keys(catalog.costumes).length,
   variants,
+  blessings: blessingIds.length,
   lineageChecks,
   status: "ok",
 }, null, 2));

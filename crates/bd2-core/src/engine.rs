@@ -4,8 +4,9 @@ use std::{
 };
 
 use crate::{
-    ActiveEffect, AttackType, BattleError, BattleEvent, BattleEventKind, BattleMode, BattleSetup,
-    BattleState, Catalog, Cell, CostumeDefinition, DamageKind, DurationClock, EffectPolarity,
+    ActionFlow, ActiveEffect, AttackType, BattleError, BattleEvent, BattleEventKind, BattleMode,
+    BattleSetup, BattleState, BlessingDamageCondition, BlessingEffect, BlessingSelection,
+    BlessingTarget, Catalog, Cell, CostumeDefinition, DamageKind, DurationClock, EffectPolarity,
     EffectRecipient, EquipmentKind, EquipmentLoadout, EquipmentSlot, LegalUnitActions, Observation,
     Outcome, Result, Side, SkillOperation, SkillVariant, StatModifiers, StatReference, Stats,
     TargetSelector, TeamState, TeamTurnPlan, TerminalResult, Transition, UnitCommand, UnitId,
@@ -71,9 +72,21 @@ impl BattleEngine {
                     &catalog.costumes[bond_id].bonding_modifiers,
                 );
             }
-            let equipment_modifiers =
-                resolve_equipment_modifiers(&catalog, &unit.character_id, &unit.equipment)?;
-            accumulate_modifiers(&mut loadout_modifiers, &equipment_modifiers);
+            if setup.rules.mode != BattleMode::GoldenColosseum {
+                let equipment_modifiers =
+                    resolve_equipment_modifiers(&catalog, &unit.character_id, &unit.equipment)?;
+                accumulate_modifiers(&mut loadout_modifiers, &equipment_modifiers);
+            }
+            if setup.rules.mode == BattleMode::GoldenColosseum {
+                let own_costume = unit
+                    .costume_loadout
+                    .first()
+                    .expect("validated Golden Colosseum unit must have exactly one costume");
+                accumulate_modifiers(
+                    &mut loadout_modifiers,
+                    &catalog.costumes[&own_costume.costume_id].bonding_modifiers,
+                );
+            }
             apply_permanent_modifiers(&mut stats, &loadout_modifiers);
             let external_energy_guard = unit
                 .build_settings
@@ -156,12 +169,49 @@ impl BattleEngine {
             }
         });
 
+        let mut rng = crate::DeterministicRng::new(seed);
+        let initiative_draw_id = rng.draws();
+        let golden_colosseum = setup.golden_colosseum.as_ref().map(|config| {
+            let initiative = if rng.below(2) == 0 {
+                Side::Player
+            } else {
+                Side::Enemy
+            };
+            let active_blessings = std::array::from_fn(|index| {
+                let side = if index == 0 {
+                    Side::Player
+                } else {
+                    Side::Enemy
+                };
+                let side_setup = &config.side_blessings[index];
+                if side == initiative {
+                    side_setup.going_first.selected.clone()
+                } else {
+                    side_setup.going_second.selected.clone()
+                }
+            });
+            crate::GoldenColosseumState {
+                season_label: config.season_label.clone(),
+                initiative,
+                all_turn: 1,
+                next_action_index: [0, 0],
+                death_time_all_turn: config.death_time_all_turn,
+                death_time_stacks: 0,
+                active_blessings,
+                activated_blessings: std::array::from_fn(|_| Vec::new()),
+            }
+        });
+        let active_side = golden_colosseum
+            .as_ref()
+            .map(|state| state.initiative)
+            .unwrap_or(setup.rules.first_side);
+
         let mut engine = Self {
             catalog: Arc::clone(&catalog),
             state: BattleState {
                 ruleset_id: catalog.ruleset_id.clone(),
                 scenario_id: setup.scenario_id,
-                active_side: setup.rules.first_side,
+                active_side,
                 game_turn: 1,
                 round_no: 1,
                 action_sequence: 0,
@@ -185,9 +235,10 @@ impl BattleEngine {
                 pending_events: Vec::new(),
                 event_log: Vec::new(),
                 damage_by_source: BTreeMap::new(),
-                rng: crate::DeterministicRng::new(seed),
+                rng,
                 terminal: None,
                 monster_chaser,
+                golden_colosseum,
                 next_effect_instance_id: 1,
             },
             reaction_depth: 0,
@@ -200,6 +251,13 @@ impl BattleEngine {
         engine.emit(BattleEventKind::BattleStarted {
             first_side: engine.state.active_side,
         });
+        if engine.state.rules.mode == BattleMode::GoldenColosseum {
+            engine.emit(BattleEventKind::InitiativeRolled {
+                first_side: engine.state.active_side,
+                draw_id: initiative_draw_id,
+            });
+            engine.start_golden_all_turn()?;
+        }
         if let Some(level) = engine
             .state
             .monster_chaser
@@ -209,7 +267,9 @@ impl BattleEngine {
             engine.update_monster_stats(level);
             engine.sync_monster_part_hp();
         }
-        engine.execute_preemptives()?;
+        if engine.state.rules.mode != BattleMode::GoldenColosseum {
+            engine.execute_preemptives()?;
+        }
         validate_state(&catalog, &engine.state)?;
         Ok(engine)
     }
@@ -328,8 +388,24 @@ impl BattleEngine {
                 commands: Vec::new(),
             });
         }
-        let mut commands = vec![UnitCommand::NormalAttack, UnitCommand::Knockback];
-        if !has_tag(unit, "SILENCE") {
+        let golden = self.state.rules.mode == BattleMode::GoldenColosseum;
+        if golden && self.golden_next_actor(unit.side) != Some(unit_id) {
+            return Ok(LegalUnitActions {
+                unit_id,
+                commands: Vec::new(),
+            });
+        }
+        let death_time = self
+            .state
+            .golden_colosseum
+            .as_ref()
+            .is_some_and(|state| state.all_turn >= state.death_time_all_turn);
+        let mut commands = if golden {
+            Vec::new()
+        } else {
+            vec![UnitCommand::NormalAttack, UnitCommand::Knockback]
+        };
+        if !has_tag(unit, "SILENCE") && !death_time {
             let available_sp = self.state.teams[unit.side.index()].sp;
             for loadout in &unit.costume_loadout {
                 let cooldown = unit.cooldowns.get(&loadout.costume_id).ok_or_else(|| {
@@ -338,7 +414,7 @@ impl BattleEngine {
                         unit.id, loadout.costume_id
                     ))
                 })?;
-                if *cooldown > 0 {
+                if !self.state.rules.cooldowns_disabled && *cooldown > 0 {
                     continue;
                 }
                 let costume = self
@@ -363,8 +439,11 @@ impl BattleEngine {
                     if !variant.executable {
                         continue;
                     }
+                    if golden && variant.preemptive {
+                        continue;
+                    }
                     let cost = adjusted_sp_cost(variant.sp_cost, &effective_modifiers(unit));
-                    if available_sp >= cost {
+                    if self.state.rules.sp_costs_bypassed || available_sp >= cost {
                         commands.push(UnitCommand::UseCostume {
                             costume_id: loadout.costume_id.clone(),
                             burst_level,
@@ -374,10 +453,40 @@ impl BattleEngine {
                 }
             }
         }
+        if golden && commands.is_empty() {
+            commands.push(UnitCommand::NormalAttack);
+        }
         Ok(LegalUnitActions { unit_id, commands })
     }
 
     pub fn auto_plan(&self, side: Side) -> TeamTurnPlan {
+        if self.state.rules.action_flow == ActionFlow::AlternatingCostume {
+            let Some(unit_id) = self.golden_next_actor(side) else {
+                return TeamTurnPlan {
+                    side,
+                    order: Vec::new(),
+                    commands: BTreeMap::new(),
+                    formation: BTreeMap::new(),
+                };
+            };
+            let commands = self
+                .legal_actions_for_unit(unit_id)
+                .expect("validated Golden Colosseum actor must expose legal actions")
+                .commands;
+            let selected = commands
+                .iter()
+                .rev()
+                .find(|command| matches!(command, UnitCommand::UseCostume { .. }))
+                .or_else(|| commands.first())
+                .expect("Golden Colosseum actor must have a skill or basic attack")
+                .clone();
+            return TeamTurnPlan {
+                side,
+                order: vec![unit_id],
+                commands: BTreeMap::from([(unit_id, selected)]),
+                formation: BTreeMap::new(),
+            };
+        }
         let order = self.state.teams[side.index()].action_order.clone();
         let mut commands = BTreeMap::new();
         let mut reserved_sp = self.state.teams[side.index()].sp;
@@ -402,7 +511,9 @@ impl BattleEngine {
                 } => self
                     .resolve_variant(unit, costume_id, *burst_level)
                     .map(|variant| {
-                        adjusted_sp_cost(variant.sp_cost, &effective_modifiers(unit)) <= reserved_sp
+                        (self.state.rules.sp_costs_bypassed
+                            || adjusted_sp_cost(variant.sp_cost, &effective_modifiers(unit))
+                                <= reserved_sp)
                             && !(self.state.rules.mode == BattleMode::MonsterChaser
                                 && side == Side::Enemy
                                 && variant.activation_condition.is_some())
@@ -465,7 +576,9 @@ impl BattleEngine {
                 let variant = self
                     .resolve_variant(unit, costume_id, *burst_level)
                     .expect("selected legal costume command must resolve exactly");
-                if variant.consume_remaining_sp {
+                if self.state.rules.sp_costs_bypassed {
+                    // Available SP remains the verified Golden Colosseum baseline of zero.
+                } else if variant.consume_remaining_sp {
                     reserved_sp = 0;
                 } else {
                     reserved_sp -= adjusted_sp_cost(variant.sp_cost, &effective_modifiers(unit));
@@ -555,6 +668,9 @@ impl BattleEngine {
     }
 
     fn step_inner(&mut self, plan: TeamTurnPlan) -> Result<Transition> {
+        if self.state.rules.action_flow == ActionFlow::AlternatingCostume {
+            return self.step_inner_golden(plan);
+        }
         if self.state.terminal.is_some() {
             return Err(BattleError::AlreadyTerminal);
         }
@@ -692,6 +808,408 @@ impl BattleEngine {
         })
     }
 
+    fn step_inner_golden(&mut self, plan: TeamTurnPlan) -> Result<Transition> {
+        if self.state.terminal.is_some() {
+            return Err(BattleError::AlreadyTerminal);
+        }
+        if self.state.rules.mode != BattleMode::GoldenColosseum
+            || self.state.golden_colosseum.is_none()
+        {
+            return Err(BattleError::InvalidScenario(
+                "alternating-costume flow requires Golden Colosseum state".into(),
+            ));
+        }
+        let side = self.state.active_side;
+        if plan.side != side {
+            return Err(BattleError::IllegalAction(format!(
+                "expected {:?} plan, got {:?}",
+                side, plan.side
+            )));
+        }
+        if !plan.formation.is_empty() {
+            return Err(BattleError::IllegalAction(
+                "Golden Colosseum formation cannot change after matching".into(),
+            ));
+        }
+        let actor_id = self.golden_next_actor(side).ok_or_else(|| {
+            BattleError::InvalidScenario(format!(
+                "{side:?} was active without an unused living costume"
+            ))
+        })?;
+        if !plan.order.is_empty() && plan.order != [actor_id] {
+            return Err(BattleError::IllegalAction(
+                "Golden Colosseum plan must contain only the next costume".into(),
+            ));
+        }
+        if plan.commands.len() != 1 || !plan.commands.contains_key(&actor_id) {
+            return Err(BattleError::IllegalAction(
+                "Golden Colosseum plan must contain exactly the next costume action".into(),
+            ));
+        }
+
+        let start_log = self.state.event_log.len();
+        let all_turn = self
+            .state
+            .golden_colosseum
+            .as_ref()
+            .expect("checked Golden Colosseum state")
+            .all_turn;
+        self.emit(BattleEventKind::TurnStarted {
+            side,
+            turn: all_turn,
+            sp: 0,
+        });
+        let command = plan.commands[&actor_id].clone();
+        if !self
+            .legal_actions_for_unit(actor_id)?
+            .commands
+            .contains(&command)
+        {
+            return Err(BattleError::IllegalAction(format!(
+                "unit {actor_id} command is not legal for the current Colosseum action"
+            )));
+        }
+        match self.execute_command(actor_id, command) {
+            Ok(()) => {}
+            Err(BattleError::IllegalAction(reason)) => {
+                self.emit(BattleEventKind::ActionSkipped { actor_id, reason });
+                self.execute_command(actor_id, UnitCommand::NormalAttack)?;
+            }
+            Err(error) => return Err(error),
+        }
+        self.state.action_sequence += 1;
+        self.tick_action_effects(actor_id);
+        self.emit(BattleEventKind::TurnEnded {
+            side,
+            turn: all_turn,
+        });
+        let actor_slot = self.state.teams[side.index()]
+            .action_order
+            .iter()
+            .position(|id| *id == actor_id)
+            .expect("validated actor must be in action order");
+        self.state
+            .golden_colosseum
+            .as_mut()
+            .expect("checked Golden Colosseum state")
+            .next_action_index[side.index()] = actor_slot + 1;
+        self.evaluate_terminal();
+
+        if self.state.terminal.is_none() {
+            let opponent = side.opponent();
+            if self.golden_next_actor(opponent).is_some() {
+                self.state.active_side = opponent;
+            } else if self.golden_next_actor(side).is_some() {
+                self.state.active_side = side;
+            } else {
+                self.finish_golden_all_turn()?;
+            }
+        }
+        self.evaluate_terminal();
+        Ok(Transition {
+            events: self.state.event_log[start_log..].to_vec(),
+            terminal: self.state.terminal.clone(),
+        })
+    }
+
+    fn golden_next_actor(&self, side: Side) -> Option<UnitId> {
+        let progress = self.state.golden_colosseum.as_ref()?;
+        self.state.teams[side.index()]
+            .action_order
+            .iter()
+            .skip(progress.next_action_index[side.index()])
+            .copied()
+            .find(|id| {
+                self.state
+                    .units
+                    .get(id)
+                    .is_some_and(|unit| unit.alive && unit.can_act)
+            })
+    }
+
+    fn finish_golden_all_turn(&mut self) -> Result<()> {
+        let finished = self
+            .state
+            .golden_colosseum
+            .as_ref()
+            .expect("Golden Colosseum state must exist")
+            .all_turn;
+        let initiative = self
+            .state
+            .golden_colosseum
+            .as_ref()
+            .expect("Golden Colosseum state must exist")
+            .initiative;
+        // End-of-ALL-turn effects resolve in the same initiative order used
+        // by costume actions.
+        for side in [initiative, initiative.opponent()] {
+            self.tick_turn_effects(side);
+            let ids: Vec<_> = self
+                .state
+                .units
+                .values()
+                .filter(|unit| unit.side == side)
+                .map(|unit| unit.id)
+                .collect();
+            for id in ids {
+                self.tick_effects(id, DurationClock::AllTurn);
+            }
+        }
+        self.emit(BattleEventKind::AllTurnEnded { all_turn: finished });
+        {
+            let progress = self
+                .state
+                .golden_colosseum
+                .as_mut()
+                .expect("Golden Colosseum state must exist");
+            progress.all_turn += 1;
+            progress.next_action_index = [0, 0];
+            self.state.active_side = progress.initiative;
+            self.state.game_turn = progress.all_turn;
+            self.state.round_no = progress.all_turn;
+        }
+        self.start_golden_all_turn()?;
+        if self.golden_next_actor(self.state.active_side).is_none()
+            && self
+                .golden_next_actor(self.state.active_side.opponent())
+                .is_some()
+        {
+            self.state.active_side = self.state.active_side.opponent();
+        }
+        Ok(())
+    }
+
+    fn start_golden_all_turn(&mut self) -> Result<()> {
+        let all_turn = self
+            .state
+            .golden_colosseum
+            .as_ref()
+            .expect("Golden Colosseum state must exist")
+            .all_turn;
+        self.emit(BattleEventKind::AllTurnStarted { all_turn });
+        let initiative = self
+            .state
+            .golden_colosseum
+            .as_ref()
+            .expect("Golden Colosseum state must exist")
+            .initiative;
+        // Since Trial Season 11, the side that won initiative applies all of
+        // its Blessings first. Selection order within each loadout is also
+        // semantically significant (for example HP increase before a barrier).
+        for side in [initiative, initiative.opponent()] {
+            let selections = self
+                .state
+                .golden_colosseum
+                .as_ref()
+                .expect("Golden Colosseum state must exist")
+                .active_blessings[side.index()]
+            .clone();
+            for selection in selections {
+                self.activate_golden_blessing(side, &selection, all_turn)?;
+            }
+        }
+        let death_turn = self
+            .state
+            .golden_colosseum
+            .as_ref()
+            .expect("Golden Colosseum state must exist")
+            .death_time_all_turn;
+        if all_turn >= death_turn && (all_turn - death_turn).is_multiple_of(2) {
+            let stack = {
+                let progress = self
+                    .state
+                    .golden_colosseum
+                    .as_mut()
+                    .expect("Golden Colosseum state must exist");
+                progress.death_time_stacks += 1;
+                progress.death_time_stacks
+            };
+            let ids: Vec<_> = self.state.units.keys().copied().collect();
+            for id in ids {
+                let mut death_time_effect = permanent_effect(
+                    format!("GOLDEN_DEATH_TIME_{stack}"),
+                    StatModifiers {
+                        attack_bp: 10_000,
+                        magic_bp: 10_000,
+                        defense_bp: -10_000,
+                        magic_resist_bp: -10_000,
+                        incoming_damage_bp: 5_000,
+                        ..StatModifiers::default()
+                    },
+                    BTreeSet::from(["DEATH_TIME".into()]),
+                );
+                // Death Time is a battle rule, not a removable/pressure-reduced buff.
+                death_time_effect.polarity = EffectPolarity::Neutral;
+                self.apply_effect(id, id, death_time_effect);
+            }
+            self.emit(BattleEventKind::DeathTimeAdvanced {
+                all_turn,
+                stacks: stack,
+            });
+        }
+        Ok(())
+    }
+
+    fn activate_golden_blessing(
+        &mut self,
+        side: Side,
+        selection: &BlessingSelection,
+        all_turn: u32,
+    ) -> Result<()> {
+        let level = self.golden_blessing_level(selection)?.clone();
+        let should_emit = match &level.effect {
+            BlessingEffect::TimedEffect {
+                start_all_turn,
+                every_all_turn,
+                ..
+            } => all_turn == *start_all_turn || (*every_all_turn && all_turn >= *start_all_turn),
+            _ => all_turn == 1,
+        };
+        if !should_emit {
+            return Ok(());
+        }
+        self.emit(BattleEventKind::BlessingActivated {
+            side,
+            blessing_id: selection.blessing_id.clone(),
+            level: selection.level,
+        });
+        {
+            let activated = &mut self
+                .state
+                .golden_colosseum
+                .as_mut()
+                .expect("Golden Colosseum state must exist")
+                .activated_blessings[side.index()];
+            if !activated.contains(selection) {
+                activated.push(selection.clone());
+            }
+        }
+        match level.effect {
+            BlessingEffect::TeamStats {
+                modifiers,
+                element,
+                attack_type,
+            } if all_turn == 1 => {
+                let ids: Vec<_> = self
+                    .state
+                    .units
+                    .values()
+                    .filter(|unit| {
+                        unit.side == side
+                            && element.is_none_or(|wanted| {
+                                self.catalog.characters[&unit.character_id].element == wanted
+                            })
+                            && attack_type.is_none_or(|wanted| {
+                                self.catalog.characters[&unit.character_id].attack_type == wanted
+                            })
+                    })
+                    .map(|unit| unit.id)
+                    .collect();
+                for id in ids {
+                    let before_max = effective_stats(&self.state.units[&id]).max_hp;
+                    self.apply_effect(
+                        id,
+                        id,
+                        permanent_effect(
+                            format!("{}[{}]", selection.blessing_id, selection.level),
+                            modifiers.clone(),
+                            BTreeSet::from(["BLESSING".into()]),
+                        ),
+                    );
+                    let after_max = effective_stats(&self.state.units[&id]).max_hp;
+                    if after_max > before_max {
+                        self.state.units.get_mut(&id).expect("recipient exists").hp +=
+                            after_max - before_max;
+                    }
+                }
+            }
+            BlessingEffect::TimedEffect {
+                start_all_turn,
+                every_all_turn,
+                target,
+                effect,
+            } if all_turn == start_all_turn || (every_all_turn && all_turn >= start_all_turn) => {
+                for target_id in self.golden_blessing_targets(side, target) {
+                    self.apply_effect(target_id, target_id, (*effect).clone());
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn golden_blessing_targets(&self, side: Side, target: BlessingTarget) -> Vec<UnitId> {
+        let target_side = match target {
+            BlessingTarget::AllEnemies | BlessingTarget::FirstEnemy => side.opponent(),
+            _ => side,
+        };
+        let order = &self.state.teams[target_side.index()].action_order;
+        match target {
+            BlessingTarget::AllAllies | BlessingTarget::AllEnemies => order.clone(),
+            BlessingTarget::FirstAlly | BlessingTarget::FirstEnemy => {
+                order.first().copied().into_iter().collect()
+            }
+            BlessingTarget::ThirdAlly => order.get(2).copied().into_iter().collect(),
+        }
+    }
+
+    fn golden_blessing_level(
+        &self,
+        selection: &BlessingSelection,
+    ) -> Result<&crate::BlessingLevelDefinition> {
+        self.catalog
+            .blessings
+            .get(&selection.blessing_id)
+            .ok_or_else(|| BattleError::MissingCatalogEntry {
+                kind: "blessing",
+                id: selection.blessing_id.clone(),
+            })?
+            .levels
+            .iter()
+            .find(|level| level.level == selection.level)
+            .ok_or_else(|| BattleError::MissingCatalogEntry {
+                kind: "blessing level",
+                id: format!("{}[{}]", selection.blessing_id, selection.level),
+            })
+    }
+
+    fn golden_effects(&self, side: Side) -> Vec<BlessingEffect> {
+        self.state
+            .golden_colosseum
+            .as_ref()
+            .into_iter()
+            .flat_map(|state| &state.activated_blessings[side.index()])
+            .map(|selection| {
+                self.golden_blessing_level(selection)
+                    .expect("Golden Colosseum active blessings are validated on construction")
+            })
+            .map(|level| level.effect.clone())
+            .collect()
+    }
+
+    fn golden_has_immunity(&self, side: Side, tag: &str) -> bool {
+        self.golden_effects(side)
+            .iter()
+            .any(|effect| matches!(effect, BlessingEffect::Immunity { tags } if tags.contains(tag)))
+    }
+
+    fn golden_buff_removal_immune(&self, side: Side) -> bool {
+        self.golden_effects(side)
+            .iter()
+            .any(|effect| matches!(effect, BlessingEffect::BuffRemovalImmunity))
+    }
+
+    fn golden_pressure_bp(&self, side: Side) -> i32 {
+        self.golden_effects(side.opponent())
+            .iter()
+            .filter_map(|effect| match effect {
+                BlessingEffect::StatBoostPressure { amount_bp } => Some(*amount_bp),
+                _ => None,
+            })
+            .sum::<i32>()
+            .clamp(0, 10_000)
+    }
+
     fn trigger_monster_conditionals(&mut self) -> Result<()> {
         let enemy_ids = self.state.teams[Side::Enemy.index()].action_order.clone();
         for actor_id in enemy_ids {
@@ -822,9 +1340,23 @@ impl BattleEngine {
                         "skill variant is not compiled".into(),
                     ));
                 }
+                if self.state.rules.mode == BattleMode::GoldenColosseum
+                    && (variant.preemptive
+                        || self
+                            .state
+                            .golden_colosseum
+                            .as_ref()
+                            .is_some_and(|state| state.all_turn >= state.death_time_all_turn))
+                {
+                    return Err(BattleError::IllegalAction(
+                        "skill is disabled by Golden Colosseum rules".into(),
+                    ));
+                }
                 let costume = self.catalog.costumes[&costume_id].clone();
                 let base_cost = adjusted_sp_cost(variant.sp_cost, &effective_modifiers(unit));
-                if self.state.teams[unit.side.index()].sp < base_cost {
+                if !self.state.rules.sp_costs_bypassed
+                    && self.state.teams[unit.side.index()].sp < base_cost
+                {
                     return Err(BattleError::IllegalAction("insufficient SP".into()));
                 }
                 let cooldown = unit.cooldowns.get(&costume_id).ok_or_else(|| {
@@ -832,11 +1364,13 @@ impl BattleEngine {
                         "unit {actor_id} is missing cooldown state for '{costume_id}'"
                     ))
                 })?;
-                if *cooldown > 0 {
+                if !self.state.rules.cooldowns_disabled && *cooldown > 0 {
                     return Err(BattleError::IllegalAction("costume is on cooldown".into()));
                 }
                 let side = unit.side;
-                let cost = if variant.consume_remaining_sp {
+                let cost = if self.state.rules.sp_costs_bypassed {
+                    0
+                } else if variant.consume_remaining_sp {
                     self.state.teams[side.index()].sp
                 } else {
                     base_cost
@@ -906,20 +1440,25 @@ impl BattleEngine {
                         ))
                     })?;
                 let modifiers = effective_modifiers(&self.state.units[&actor_id]);
-                let after =
-                    (variant.cooldown as i32 + modifiers.cooldown_delta as i32).max(0) as u16;
+                let after = if self.state.rules.cooldowns_disabled {
+                    0
+                } else {
+                    (variant.cooldown as i32 + modifiers.cooldown_delta as i32).max(0) as u16
+                };
                 self.state
                     .units
                     .get_mut(&actor_id)
                     .unwrap()
                     .cooldowns
                     .insert(costume_id.clone(), after);
-                self.emit(BattleEventKind::CooldownChanged {
-                    unit_id: actor_id,
-                    costume_id,
-                    before,
-                    after,
-                });
+                if !self.state.rules.cooldowns_disabled {
+                    self.emit(BattleEventKind::CooldownChanged {
+                        unit_id: actor_id,
+                        costume_id,
+                        before,
+                        after,
+                    });
+                }
                 Ok(())
             }
         }
@@ -1311,6 +1850,17 @@ impl BattleEngine {
             }
             let actor = self.state.units[&actor_id].clone();
             let target = self.state.units[&target_id].clone();
+            let golden_actor_effects = self.golden_effects(actor.side);
+            let golden_target_effects = self.golden_effects(target.side);
+            let kind = if matches!(kind, DamageKind::Physical | DamageKind::Magical)
+                && golden_actor_effects
+                    .iter()
+                    .any(|effect| matches!(effect, BlessingEffect::ForceFixedDamage))
+            {
+                DamageKind::Fixed
+            } else {
+                kind
+            };
             let actor_stats = effective_stats(&actor);
             let target_stats = effective_stats(&target);
             let base = reference
@@ -1342,8 +1892,17 @@ impl BattleEngine {
 
             let actor_element = self.catalog.characters[&actor.character_id].element;
             let target_element = self.catalog.characters[&target.character_id].element;
+            let golden_property_damage: i32 = golden_actor_effects
+                .iter()
+                .filter_map(|effect| match effect {
+                    BlessingEffect::PropertyBalance {
+                        property_damage_bp, ..
+                    } => Some(*property_damage_bp),
+                    _ => None,
+                })
+                .sum();
             let elemental = if actor_element.is_advantageous_against(target_element) {
-                10_000 + actor_stats.property_damage_bp
+                10_000 + actor_stats.property_damage_bp + golden_property_damage
             } else {
                 actor_element.factor_bp(target_element)
             };
@@ -1352,6 +1911,17 @@ impl BattleEngine {
                 DamageKind::Fixed | DamageKind::HpConsumption | DamageKind::Collision
             ) {
                 amount = mul_floor(amount, elemental);
+                let property_resistance: i32 = golden_target_effects
+                    .iter()
+                    .filter_map(|effect| match effect {
+                        BlessingEffect::PropertyBalance {
+                            property_resistance_bp,
+                            ..
+                        } => Some(*property_resistance_bp),
+                        _ => None,
+                    })
+                    .sum();
+                amount = mul_floor(amount, (10_000 - property_resistance).max(0));
             }
             amount = mul_floor(
                 amount,
@@ -1413,6 +1983,38 @@ impl BattleEngine {
                 })
                 .map(|modifier| modifier.amount_bp)
                 .sum();
+            let target_chain = self.state.teams[actor.side.index()]
+                .chain_by_target
+                .get(&target_id)
+                .copied()
+                .unwrap_or(0);
+            let golden_conditional: i32 = golden_actor_effects
+                .iter()
+                .filter_map(|effect| match effect {
+                    BlessingEffect::ConditionalDamage {
+                        condition,
+                        amount_bp,
+                    } => {
+                        let matches = match condition {
+                            BlessingDamageCondition::TargetHpAtLeast90 => {
+                                target.hp.saturating_mul(10_000)
+                                    >= target_stats.max_hp.saturating_mul(9_000)
+                            }
+                            BlessingDamageCondition::TargetHpAtMost90 => {
+                                target.hp.saturating_mul(10_000)
+                                    <= target_stats.max_hp.saturating_mul(9_000)
+                            }
+                            BlessingDamageCondition::TargetTaunted => has_tag(&target, "TAUNT"),
+                            BlessingDamageCondition::TargetChainAtMost5 => target_chain <= 5,
+                        };
+                        matches.then_some(*amount_bp)
+                    }
+                    BlessingEffect::CounterDamage { amount_bp } if self.reaction_depth > 0 => {
+                        Some(*amount_bp)
+                    }
+                    _ => None,
+                })
+                .sum();
             let amplification = 10_000
                 + actor_stats.outgoing_damage_bp
                 + actor_stats.amplification_bp
@@ -1421,20 +2023,27 @@ impl BattleEngine {
                 + typed_incoming
                 + elemental_incoming
                 + summon_incoming
-                + conditional_outgoing;
+                + conditional_outgoing
+                + golden_conditional;
             amount = mul_floor(amount, amplification.max(0));
-            let chain = self.state.teams[actor.side.index()]
-                .chain_by_target
-                .get(&target_id)
-                .copied()
-                .unwrap_or(0);
+            let chain = target_chain;
+            let golden_chain_damage: i32 = golden_actor_effects
+                .iter()
+                .filter_map(|effect| match effect {
+                    BlessingEffect::ChainDamage {
+                        amount_bp_per_stack,
+                    } => Some(*amount_bp_per_stack),
+                    _ => None,
+                })
+                .sum();
             amount = mul_floor(
                 amount,
                 10_000
                     + chain as i32
                         * (1_000
                             + target_mods.chain_damage_incoming_bp
-                            + effective_modifiers(&actor).chain_damage_outgoing_bp),
+                            + effective_modifiers(&actor).chain_damage_outgoing_bp
+                            + golden_chain_damage),
             );
             if can_evade
                 && target_mods.evasion_bp > 0
@@ -1831,6 +2440,12 @@ impl BattleEngine {
                 amount = mul_floor(amount, 10_000 + stats.crit_damage_bp);
             }
         }
+        let maximum_hp = self
+            .state
+            .units
+            .get(&target_id)
+            .map(|target| effective_stats(target).max_hp)
+            .unwrap_or(0);
         let Some(target) = self.state.units.get_mut(&target_id) else {
             return;
         };
@@ -1838,7 +2453,7 @@ impl BattleEngine {
             return;
         }
         let before = target.hp;
-        target.hp = (target.hp + amount).min(target.base_stats.max_hp);
+        target.hp = (target.hp + amount).min(maximum_hp);
         let applied = target.hp - before;
         let after = target.hp;
         self.emit(BattleEventKind::HealApplied {
@@ -1979,7 +2594,18 @@ impl BattleEngine {
         Ok(())
     }
 
-    fn apply_effect(&mut self, source_id: UnitId, target_id: UnitId, spec: crate::EffectSpec) {
+    fn apply_effect(&mut self, source_id: UnitId, target_id: UnitId, mut spec: crate::EffectSpec) {
+        let target_side = self.state.units[&target_id].side;
+        if spec.polarity == EffectPolarity::Harmful
+            && (spec.tags.contains("SILENCE") && self.golden_has_immunity(target_side, "SILENCE")
+                || spec.tags.contains("WEAKENING")
+                    && self.golden_has_immunity(target_side, "WEAKENING"))
+        {
+            return;
+        }
+        if spec.polarity == EffectPolarity::Beneficial {
+            apply_stat_pressure(&mut spec.modifiers, self.golden_pressure_bp(target_side));
+        }
         let instance_id = self.state.next_effect_instance_id;
         self.state.next_effect_instance_id += 1;
         let target = &mut self.state.units.get_mut(&target_id).unwrap().effects;
@@ -2090,6 +2716,15 @@ impl BattleEngine {
     }
 
     fn remove_effects(&mut self, target_id: UnitId, polarity: EffectPolarity, count: u16) -> u16 {
+        if polarity == EffectPolarity::Beneficial
+            && self
+                .state
+                .units
+                .get(&target_id)
+                .is_some_and(|unit| self.golden_buff_removal_immune(unit.side))
+        {
+            return 0;
+        }
         let Some(unit) = self.state.units.get_mut(&target_id) else {
             return 0;
         };
@@ -2115,12 +2750,19 @@ impl BattleEngine {
     }
 
     fn remove_effects_by_tag(&mut self, target_id: UnitId, tag: &str) {
+        let preserve_buffs = self
+            .state
+            .units
+            .get(&target_id)
+            .is_some_and(|unit| self.golden_buff_removal_immune(unit.side));
         let Some(unit) = self.state.units.get_mut(&target_id) else {
             return;
         };
         let mut removed = Vec::new();
         unit.effects.retain(|active| {
-            if active.spec.tags.contains(tag) {
+            if active.spec.tags.contains(tag)
+                && !(preserve_buffs && active.spec.polarity == EffectPolarity::Beneficial)
+            {
                 removed.push((active.spec.effect_id.clone(), active.instance_id));
                 false
             } else {
@@ -2330,7 +2972,9 @@ impl BattleEngine {
                 "knockback source {source_id} and target {target_id} are allied"
             )));
         }
-        if has_tag(&target, "KNOCKBACK_IMMUNE") {
+        if has_tag(&target, "KNOCKBACK_IMMUNE")
+            || self.golden_has_immunity(target.side, "KNOCKBACK")
+        {
             return Ok(());
         }
         let (dr, dd) = knockback_delta(direction);
@@ -2910,6 +3554,10 @@ impl BattleEngine {
     }
 
     fn change_sp(&mut self, side: Side, delta: i32, reason: &str) {
+        if self.state.rules.sp_costs_bypassed {
+            debug_assert_eq!(self.state.teams[side.index()].sp, 0);
+            return;
+        }
         let before = self.state.teams[side.index()].sp;
         let after = before
             .saturating_add(delta)
@@ -2942,9 +3590,30 @@ impl BattleEngine {
             .get(&actor_id)
             .map(|unit| effective_modifiers(unit).chain_dealt_delta)
             .expect("damage actor must exist");
-        let adjusted =
-            (i32::from(amount) + i32::from(received_delta) + i32::from(dealt_delta)).max(0) as u16;
-        let after = before.saturating_add(adjusted);
+        let golden_effects = self.golden_effects(side);
+        let extra: u16 = golden_effects
+            .iter()
+            .filter_map(|effect| match effect {
+                BlessingEffect::ExtraChain { stacks } => Some(*stacks),
+                _ => None,
+            })
+            .sum();
+        let adjusted = (i32::from(amount)
+            + i32::from(extra)
+            + i32::from(received_delta)
+            + i32::from(dealt_delta))
+        .max(0) as u16;
+        let cap = golden_effects
+            .iter()
+            .filter_map(|effect| match effect {
+                BlessingEffect::ChainCap { maximum } => Some(*maximum),
+                _ => None,
+            })
+            .min();
+        let mut after = before.saturating_add(adjusted);
+        if let Some(cap) = cap {
+            after = after.min(cap);
+        }
         self.state.teams[side.index()]
             .chain_by_target
             .insert(target_id, after);
@@ -3445,6 +4114,61 @@ pub fn validate_catalog(catalog: &Catalog) -> Result<()> {
             )));
         }
     }
+    for (key, blessing) in &catalog.blessings {
+        if key != &blessing.id || blessing.id.trim().is_empty() {
+            return Err(BattleError::InvalidScenario(format!(
+                "blessing map key '{key}' does not match its record id"
+            )));
+        }
+        for locale in ["ja", "ko", "en"] {
+            if blessing
+                .names
+                .get(locale)
+                .is_none_or(|value| value.trim().is_empty())
+                || blessing
+                    .descriptions
+                    .get(locale)
+                    .is_none_or(|lines| lines.is_empty())
+            {
+                return Err(BattleError::InvalidScenario(format!(
+                    "blessing '{}' is missing official {locale} text",
+                    blessing.id
+                )));
+            }
+        }
+        if blessing.levels.is_empty() {
+            return Err(BattleError::InvalidScenario(format!(
+                "blessing '{}' has no levels",
+                blessing.id
+            )));
+        }
+        for (index, level) in blessing.levels.iter().enumerate() {
+            if usize::from(level.level) != index + 1 || level.point_cost == 0 {
+                return Err(BattleError::InvalidScenario(format!(
+                    "blessing '{}' has invalid level metadata",
+                    blessing.id
+                )));
+            }
+            match &level.effect {
+                BlessingEffect::TimedEffect { effect, .. } => {
+                    validate_effect(catalog, effect, &blessing.id)?;
+                }
+                BlessingEffect::ExtraChain { stacks } if *stacks == 0 => {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "blessing '{}' has zero extra chain stacks",
+                        blessing.id
+                    )));
+                }
+                BlessingEffect::ChainCap { maximum } if *maximum == 0 => {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "blessing '{}' has a zero chain cap",
+                        blessing.id
+                    )));
+                }
+                _ => {}
+            }
+        }
+    }
     Ok(())
 }
 
@@ -3747,6 +4471,12 @@ fn validate_setup(catalog: &Catalog, setup: &BattleSetup) -> Result<()> {
                 )));
             }
         }
+        if setup.rules.mode == BattleMode::GoldenColosseum && unit.costume_loadout.len() != 1 {
+            return Err(BattleError::InvalidScenario(format!(
+                "Golden Colosseum unit {} must represent exactly one costume",
+                unit.unit_id
+            )));
+        }
         let bond_targets: BTreeSet<_> = unit
             .costume_loadout
             .iter()
@@ -3791,6 +4521,15 @@ fn validate_setup(catalog: &Catalog, setup: &BattleSetup) -> Result<()> {
     {
         return Err(BattleError::InvalidScenario(
             "player party exceeds deployment limit".into(),
+        ));
+    }
+    if setup.rules.mode == BattleMode::GoldenColosseum
+        && side_unit_counts
+            .iter()
+            .any(|count| *count > setup.rules.grid.deployment_limit)
+    {
+        return Err(BattleError::InvalidScenario(
+            "Golden Colosseum side exceeds the seasonal member limit".into(),
         ));
     }
     match (&setup.rules.mode, &setup.monster_chaser) {
@@ -3895,12 +4634,144 @@ fn validate_setup(catalog: &Catalog, setup: &BattleSetup) -> Result<()> {
         }
         (_, None) => {}
     }
+    match (setup.rules.mode, &setup.golden_colosseum) {
+        (BattleMode::GoldenColosseum, Some(config)) => {
+            validate_golden_colosseum_setup(catalog, setup, config)?;
+        }
+        (BattleMode::GoldenColosseum, None) => {
+            return Err(BattleError::InvalidScenario(
+                "Golden Colosseum setup is required in Golden Colosseum mode".into(),
+            ));
+        }
+        (_, Some(_)) => {
+            return Err(BattleError::InvalidScenario(
+                "Golden Colosseum setup is forbidden outside Golden Colosseum mode".into(),
+            ));
+        }
+        (_, None) => {}
+    }
     if setup.rules.mode != BattleMode::MonsterChaser
         && setup.units.iter().any(|unit| unit.hp_owner.is_some())
     {
         return Err(BattleError::InvalidScenario(
             "shared boss-part HP is only valid in Monster Chaser mode".into(),
         ));
+    }
+    Ok(())
+}
+
+fn validate_golden_colosseum_setup(
+    catalog: &Catalog,
+    setup: &BattleSetup,
+    config: &crate::GoldenColosseumSetup,
+) -> Result<()> {
+    if config.season_label.trim().is_empty()
+        || config.weekly_attempts == 0
+        || config.starting_rating == 0
+        || config.death_time_all_turn == 0
+    {
+        return Err(BattleError::InvalidScenario(
+            "Golden Colosseum season metadata and Death Time turn must be explicit".into(),
+        ));
+    }
+    if usize::from(config.undeployable_grid_count) != setup.rules.grid.blocked.len() {
+        return Err(BattleError::InvalidScenario(format!(
+            "Golden Colosseum rule declares {} undeployable cells but the battle grid materializes {}",
+            config.undeployable_grid_count,
+            setup.rules.grid.blocked.len()
+        )));
+    }
+    for costume_id in &config.banned_costume_ids {
+        if !catalog.costumes.contains_key(costume_id) {
+            return Err(BattleError::MissingCatalogEntry {
+                kind: "banned costume",
+                id: costume_id.clone(),
+            });
+        }
+    }
+    for blessing_id in &config.banned_blessing_ids {
+        if !catalog.blessings.contains_key(blessing_id) {
+            return Err(BattleError::MissingCatalogEntry {
+                kind: "banned blessing",
+                id: blessing_id.clone(),
+            });
+        }
+    }
+    let mut deployed_costumes = [BTreeSet::new(), BTreeSet::new()];
+    for unit in &setup.units {
+        let costume_id = &unit.costume_loadout[0].costume_id;
+        if unit.costume_loadout[0].costume_link_target.is_some() {
+            return Err(BattleError::InvalidScenario(format!(
+                "Golden Colosseum costume '{costume_id}' must use its forced self bond, not a configurable costume link"
+            )));
+        }
+        if !deployed_costumes[unit.side.index()].insert(costume_id) {
+            return Err(BattleError::InvalidScenario(format!(
+                "Golden Colosseum {:?} side deploys costume '{costume_id}' more than once",
+                unit.side
+            )));
+        }
+        if config.banned_costume_ids.contains(costume_id) {
+            return Err(BattleError::InvalidScenario(format!(
+                "banned costume '{costume_id}' is deployed"
+            )));
+        }
+    }
+    for side_index in 0..2 {
+        let loadouts = &config.side_blessings[side_index];
+        for (initiative_name, initiative) in [
+            ("going first", &loadouts.going_first),
+            ("going second", &loadouts.going_second),
+        ] {
+            // Point budgets are rotating season data. Values from 3 through
+            // 15 have appeared in verified official rules; never coerce a
+            // value outside that domain into a historical default.
+            if !(3..=15).contains(&initiative.point_limit) {
+                return Err(BattleError::InvalidScenario(format!(
+                    "Golden Colosseum {initiative_name} blessing limit {} is outside the verified rotating range",
+                    initiative.point_limit
+                )));
+            }
+            let mut seen = BTreeSet::new();
+            let mut spent = 0_u16;
+            for selection in &initiative.selected {
+                if !seen.insert((&selection.blessing_id, selection.level)) {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "blessing '{}[{}]' is selected twice",
+                        selection.blessing_id, selection.level
+                    )));
+                }
+                if config.banned_blessing_ids.contains(&selection.blessing_id) {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "banned blessing '{}' is selected",
+                        selection.blessing_id
+                    )));
+                }
+                let definition =
+                    catalog
+                        .blessings
+                        .get(&selection.blessing_id)
+                        .ok_or_else(|| BattleError::MissingCatalogEntry {
+                            kind: "blessing",
+                            id: selection.blessing_id.clone(),
+                        })?;
+                let level = definition
+                    .levels
+                    .iter()
+                    .find(|level| level.level == selection.level)
+                    .ok_or_else(|| BattleError::MissingCatalogEntry {
+                        kind: "blessing level",
+                        id: format!("{}[{}]", selection.blessing_id, selection.level),
+                    })?;
+                spent = spent.saturating_add(u16::from(level.point_cost));
+            }
+            if spent > u16::from(initiative.point_limit) {
+                return Err(BattleError::InvalidScenario(format!(
+                    "Golden Colosseum blessing selection spends {spent} over its {} point limit",
+                    initiative.point_limit
+                )));
+            }
+        }
     }
     Ok(())
 }
@@ -3933,6 +4804,43 @@ fn validate_rule_structure(rules: &crate::ModeRules) -> Result<()> {
         return Err(BattleError::InvalidScenario(
             "maximum game turns must be positive".into(),
         ));
+    }
+    match rules.mode {
+        BattleMode::GoldenColosseum => {
+            if rules.action_flow != ActionFlow::AlternatingCostume
+                || !rules.sp_costs_bypassed
+                || !rules.cooldowns_disabled
+                || rules.chain_reset_on_team_turn
+                || rules.allow_formation_change
+                || rules.allow_manual_commands != [false, false]
+                || rules.initial_sp != [0, 0]
+                || rules.recovery_after_team_turn != [0, 0]
+            {
+                return Err(BattleError::InvalidScenario(
+                    "Golden Colosseum rules require alternating auto actions, bypassed SP, disabled cooldowns, persistent chains, and a locked formation".into(),
+                ));
+            }
+            if !(3..=5).contains(&grid.rows)
+                || !(3..=5).contains(&grid.depths)
+                || !(3..=11).contains(&grid.deployment_limit)
+                || grid.blocked.len() > 10
+            {
+                return Err(BattleError::InvalidScenario(
+                    "Golden Colosseum formation rule is outside the verified rotating ranges"
+                        .into(),
+                ));
+            }
+        }
+        _ => {
+            if rules.action_flow != ActionFlow::TeamTurn
+                || rules.sp_costs_bypassed
+                || rules.cooldowns_disabled
+            {
+                return Err(BattleError::InvalidScenario(
+                    "standard modes cannot enable Golden Colosseum resource or action rules".into(),
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -4274,6 +5182,93 @@ fn validate_state(catalog: &Catalog, state: &BattleState) -> Result<()> {
             }
         }
     }
+    match (state.rules.mode, &state.golden_colosseum) {
+        (BattleMode::GoldenColosseum, Some(progress)) => {
+            if progress.season_label.trim().is_empty()
+                || progress.all_turn == 0
+                || progress.death_time_all_turn == 0
+                || state.game_turn != progress.all_turn
+                || state.round_no != progress.all_turn
+                || progress
+                    .next_action_index
+                    .iter()
+                    .enumerate()
+                    .any(|(index, cursor)| *cursor > state.teams[index].action_order.len())
+            {
+                return Err(BattleError::InvalidScenario(
+                    "Golden Colosseum progress counters are inconsistent".into(),
+                ));
+            }
+            let expected_stacks = if progress.all_turn < progress.death_time_all_turn {
+                0
+            } else {
+                (progress.all_turn - progress.death_time_all_turn) / 2 + 1
+            };
+            if progress.death_time_stacks != expected_stacks {
+                return Err(BattleError::InvalidScenario(
+                    "Golden Colosseum Death Time stack count is inconsistent".into(),
+                ));
+            }
+            if state.teams.iter().any(|team| team.sp != 0)
+                || state
+                    .units
+                    .values()
+                    .any(|unit| unit.cooldowns.values().any(|cooldown| *cooldown != 0))
+            {
+                return Err(BattleError::InvalidScenario(
+                    "Golden Colosseum SP and cooldown state must remain at zero".into(),
+                ));
+            }
+            for selections in &progress.active_blessings {
+                for selection in selections {
+                    let definition =
+                        catalog
+                            .blessings
+                            .get(&selection.blessing_id)
+                            .ok_or_else(|| BattleError::MissingCatalogEntry {
+                                kind: "active blessing",
+                                id: selection.blessing_id.clone(),
+                            })?;
+                    if !definition
+                        .levels
+                        .iter()
+                        .any(|level| level.level == selection.level)
+                    {
+                        return Err(BattleError::MissingCatalogEntry {
+                            kind: "active blessing level",
+                            id: format!("{}[{}]", selection.blessing_id, selection.level),
+                        });
+                    }
+                }
+            }
+            for side in [Side::Player, Side::Enemy] {
+                let selected = &progress.active_blessings[side.index()];
+                let activated = &progress.activated_blessings[side.index()];
+                let unique: BTreeSet<_> = activated
+                    .iter()
+                    .map(|entry| (&entry.blessing_id, entry.level))
+                    .collect();
+                if unique.len() != activated.len()
+                    || activated.iter().any(|entry| !selected.contains(entry))
+                {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "Golden Colosseum {side:?} activated Blessings are not a unique subset of its selected loadout"
+                    )));
+                }
+            }
+        }
+        (BattleMode::GoldenColosseum, None) => {
+            return Err(BattleError::InvalidScenario(
+                "Golden Colosseum state is required in Golden Colosseum mode".into(),
+            ));
+        }
+        (_, Some(_)) => {
+            return Err(BattleError::InvalidScenario(
+                "Golden Colosseum state is forbidden outside Golden Colosseum mode".into(),
+            ));
+        }
+        (_, None) => {}
+    }
     Ok(())
 }
 
@@ -4592,6 +5587,69 @@ fn select_variant(
 
 fn adjusted_sp_cost(base: i32, modifiers: &StatModifiers) -> i32 {
     (base + modifiers.sp_cost_delta).max(0)
+}
+
+fn permanent_effect(
+    effect_id: String,
+    modifiers: StatModifiers,
+    tags: BTreeSet<String>,
+) -> crate::EffectSpec {
+    crate::EffectSpec {
+        effect_id,
+        polarity: EffectPolarity::Beneficial,
+        recipient: crate::EffectRecipient::ActorSide,
+        duration: 1,
+        duration_clock: DurationClock::Permanent,
+        modifiers,
+        tags,
+        stack_rule: crate::StackRule::Independent,
+        barrier: None,
+        periodic: None,
+        charges: None,
+        evasion_decay_bp: 0,
+        counter: None,
+        revive_hp_bp: None,
+        max_stacks: None,
+        conditional_outgoing: Vec::new(),
+        on_hit_received_allies: None,
+        on_hit_received_operations: Vec::new(),
+        on_turn_end_operations: Vec::new(),
+        aura_allies: None,
+        aura_opponents: None,
+        on_chain_dealt: None,
+    }
+}
+
+fn apply_stat_pressure(modifiers: &mut StatModifiers, pressure_bp: i32) {
+    if pressure_bp <= 0 {
+        return;
+    }
+    let factor = 10_000 - pressure_bp.clamp(0, 10_000);
+    let scale_bp = |value: i32| {
+        if value > 0 {
+            mul_floor(i64::from(value), factor) as i32
+        } else {
+            value
+        }
+    };
+    let scale_flat = |value: i64| {
+        if value > 0 {
+            mul_floor(value, factor)
+        } else {
+            value
+        }
+    };
+    modifiers.max_hp_flat = scale_flat(modifiers.max_hp_flat);
+    modifiers.max_hp_bp = scale_bp(modifiers.max_hp_bp);
+    modifiers.attack_flat = scale_flat(modifiers.attack_flat);
+    modifiers.attack_bp = scale_bp(modifiers.attack_bp);
+    modifiers.magic_flat = scale_flat(modifiers.magic_flat);
+    modifiers.magic_bp = scale_bp(modifiers.magic_bp);
+    modifiers.defense_bp = scale_bp(modifiers.defense_bp);
+    modifiers.magic_resist_bp = scale_bp(modifiers.magic_resist_bp);
+    modifiers.crit_rate_bp = scale_bp(modifiers.crit_rate_bp);
+    modifiers.crit_damage_bp = scale_bp(modifiers.crit_damage_bp);
+    modifiers.property_damage_bp = scale_bp(modifiers.property_damage_bp);
 }
 
 fn effective_modifiers(unit: &UnitState) -> StatModifiers {
@@ -4940,6 +5998,12 @@ mod tests {
             BattleMode::Normal => crate::ModeRules::normal(),
             BattleMode::MirrorWar => crate::ModeRules::mirror_war(),
             BattleMode::MonsterChaser => crate::ModeRules::monster_chaser(),
+            BattleMode::GoldenColosseum => crate::ModeRules::golden_colosseum(GridDefinition {
+                rows: 3,
+                depths: 3,
+                deployment_limit: 3,
+                blocked: BTreeSet::new(),
+            }),
         };
         BattleSetup {
             scenario_id: "test".into(),
@@ -4984,6 +6048,7 @@ mod tests {
                 },
             ],
             monster_chaser: None,
+            golden_colosseum: None,
         }
     }
 

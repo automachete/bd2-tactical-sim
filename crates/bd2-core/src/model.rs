@@ -472,6 +472,7 @@ pub enum EffectPolarity {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DurationClock {
     GameTurn,
+    AllTurn,
     Round,
     Action,
     Permanent,
@@ -882,6 +883,7 @@ pub struct Catalog {
     pub costumes: BTreeMap<String, CostumeDefinition>,
     pub monsters: BTreeMap<String, MonsterDefinition>,
     pub equipment: BTreeMap<String, EquipmentDefinition>,
+    pub blessings: BTreeMap<String, BlessingDefinition>,
     pub skills: BTreeMap<String, CostumeDefinition>,
 }
 
@@ -891,6 +893,14 @@ pub enum BattleMode {
     Normal,
     MirrorWar,
     MonsterChaser,
+    GoldenColosseum,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ActionFlow {
+    TeamTurn,
+    AlternatingCostume,
 }
 
 /// Current maximum shared skill points for every implemented BD2 battle mode.
@@ -907,6 +917,11 @@ pub struct ModeRules {
     pub first_side: Side,
     pub max_game_turns: u32,
     pub chain_reset_on_team_turn: bool,
+    /// Golden Colosseum bypasses payment while keeping available-SP scaling at zero.
+    pub sp_costs_bypassed: bool,
+    /// Golden Colosseum skills never enter or consult the costume cooldown cycle.
+    pub cooldowns_disabled: bool,
+    pub action_flow: ActionFlow,
     pub allow_formation_change: bool,
     pub allow_manual_commands: [bool; 2],
 }
@@ -922,6 +937,9 @@ impl ModeRules {
             first_side: Side::Player,
             max_game_turns: 50,
             chain_reset_on_team_turn: true,
+            sp_costs_bypassed: false,
+            cooldowns_disabled: false,
+            action_flow: ActionFlow::TeamTurn,
             allow_formation_change: true,
             allow_manual_commands: [true, false],
         }
@@ -937,6 +955,9 @@ impl ModeRules {
             first_side: Side::Player,
             max_game_turns: 50,
             chain_reset_on_team_turn: true,
+            sp_costs_bypassed: false,
+            cooldowns_disabled: false,
+            action_flow: ActionFlow::TeamTurn,
             allow_formation_change: false,
             allow_manual_commands: [false, false],
         }
@@ -948,6 +969,120 @@ impl ModeRules {
         rules.max_game_turns = 20;
         rules
     }
+
+    pub fn golden_colosseum(grid: GridDefinition) -> Self {
+        Self {
+            mode: BattleMode::GoldenColosseum,
+            grid,
+            initial_sp: [0, 0],
+            sp_cap: SP_CAP,
+            recovery_after_team_turn: [0, 0],
+            // Replaced by a deterministic initiative roll when the battle is created.
+            first_side: Side::Player,
+            // The public Golden Colosseum rules do not define a draw turn.
+            // Keep the generic engine guard unreachable in practical play
+            // instead of inventing a Colosseum-specific 50-turn limit.
+            max_game_turns: u32::MAX,
+            chain_reset_on_team_turn: false,
+            sp_costs_bypassed: true,
+            cooldowns_disabled: true,
+            action_flow: ActionFlow::AlternatingCostume,
+            allow_formation_change: false,
+            allow_manual_commands: [false, false],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum BlessingCategory {
+    Offence,
+    Defence,
+    Utility,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum BlessingTarget {
+    AllAllies,
+    AllEnemies,
+    FirstAlly,
+    FirstEnemy,
+    ThirdAlly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum BlessingDamageCondition {
+    TargetHpAtLeast90,
+    TargetHpAtMost90,
+    TargetTaunted,
+    TargetChainAtMost5,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
+pub enum BlessingEffect {
+    TeamStats {
+        modifiers: StatModifiers,
+        #[serde(deserialize_with = "required_option")]
+        element: Option<Element>,
+        #[serde(deserialize_with = "required_option")]
+        attack_type: Option<AttackType>,
+    },
+    PropertyBalance {
+        property_damage_bp: BasisPoints,
+        property_resistance_bp: BasisPoints,
+    },
+    CounterDamage {
+        amount_bp: BasisPoints,
+    },
+    ExtraChain {
+        stacks: u16,
+    },
+    ChainDamage {
+        amount_bp_per_stack: BasisPoints,
+    },
+    TimedEffect {
+        start_all_turn: u32,
+        every_all_turn: bool,
+        target: BlessingTarget,
+        effect: Box<EffectSpec>,
+    },
+    Immunity {
+        tags: BTreeSet<String>,
+    },
+    BuffRemovalImmunity,
+    ForceFixedDamage,
+    StatBoostPressure {
+        amount_bp: BasisPoints,
+    },
+    ConditionalDamage {
+        condition: BlessingDamageCondition,
+        amount_bp: BasisPoints,
+    },
+    ChainCap {
+        maximum: u16,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BlessingLevelDefinition {
+    pub level: u8,
+    pub point_cost: u8,
+    pub effect: BlessingEffect,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BlessingDefinition {
+    pub id: String,
+    pub names: BTreeMap<String, String>,
+    pub descriptions: BTreeMap<String, Vec<String>>,
+    pub category: BlessingCategory,
+    pub levels: Vec<BlessingLevelDefinition>,
+    pub source: SourceRecord,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1004,6 +1139,48 @@ pub struct BattleSetup {
     pub units: Vec<UnitSetup>,
     #[serde(default)]
     pub monster_chaser: Option<MonsterChaserSetup>,
+    #[serde(default)]
+    pub golden_colosseum: Option<GoldenColosseumSetup>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BlessingSelection {
+    pub blessing_id: String,
+    pub level: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InitiativeBlessings {
+    pub point_limit: u8,
+    pub selected: Vec<BlessingSelection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GoldenColosseumSideSetup {
+    pub going_first: InitiativeBlessings,
+    pub going_second: InitiativeBlessings,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GoldenColosseumSetup {
+    pub season_label: String,
+    /// Base battle entries granted for one weekly season.
+    pub weekly_attempts: u16,
+    /// Number of full-attempt refills that may be purchased during the season.
+    pub refill_limit: u8,
+    /// Rating assigned when the season begins.
+    pub starting_rating: u16,
+    /// The rotating rule specifies the number, while `rules.grid.blocked`
+    /// stores the concrete cells for this battle/formation realization.
+    pub undeployable_grid_count: u8,
+    pub death_time_all_turn: u32,
+    pub banned_costume_ids: BTreeSet<String>,
+    pub banned_blessing_ids: BTreeSet<String>,
+    pub side_blessings: [GoldenColosseumSideSetup; 2],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1098,6 +1275,24 @@ pub struct MonsterChaserState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct GoldenColosseumState {
+    pub season_label: String,
+    pub initiative: Side,
+    pub all_turn: u32,
+    pub next_action_index: [usize; 2],
+    pub death_time_all_turn: u32,
+    pub death_time_stacks: u32,
+    /// Loadouts selected after the initiative roll. Some timed Blessings are
+    /// selected now but do not activate until a later ALL turn.
+    pub active_blessings: [Vec<BlessingSelection>; 2],
+    /// Blessings whose activation point has been reached, in application
+    /// order. Passive effects must consult this list so the initiative-side
+    /// ordering remains observable.
+    pub activated_blessings: [Vec<BlessingSelection>; 2],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BattleState {
     pub ruleset_id: String,
     pub scenario_id: String,
@@ -1117,6 +1312,8 @@ pub struct BattleState {
     pub terminal: Option<TerminalResult>,
     #[serde(deserialize_with = "required_option")]
     pub monster_chaser: Option<MonsterChaserState>,
+    #[serde(deserialize_with = "required_option")]
+    pub golden_colosseum: Option<GoldenColosseumState>,
     pub next_effect_instance_id: u64,
 }
 
@@ -1166,6 +1363,25 @@ pub struct BattleEvent {
 pub enum BattleEventKind {
     BattleStarted {
         first_side: Side,
+    },
+    InitiativeRolled {
+        first_side: Side,
+        draw_id: u64,
+    },
+    AllTurnStarted {
+        all_turn: u32,
+    },
+    AllTurnEnded {
+        all_turn: u32,
+    },
+    BlessingActivated {
+        side: Side,
+        blessing_id: String,
+        level: u8,
+    },
+    DeathTimeAdvanced {
+        all_turn: u32,
+        stacks: u32,
     },
     TurnStarted {
         side: Side,

@@ -20,6 +20,9 @@
     "first_side": "PLAYER",
     "max_game_turns": 20,
     "chain_reset_on_team_turn": true,
+    "sp_costs_bypassed": false,
+    "cooldowns_disabled": false,
+    "action_flow": "TEAM_TURN",
     "allow_formation_change": true,
     "allow_manual_commands": [
       true,

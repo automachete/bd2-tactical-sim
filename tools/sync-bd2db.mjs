@@ -210,6 +210,139 @@ function findEquipmentStatTables(text) {
   return Object.fromEntries(result.value.map((entry) => [entry.type, entry.list]));
 }
 
+function findBlessingI18n(text) {
+  const result = resolvedStaticCandidates(text).find(({ value }) => {
+    if (!value || Array.isArray(value) || typeof value !== "object") return false;
+    const entries = Object.values(value);
+    return entries.length === 47
+      && entries.every((entry) => entry?.blessingId && entry?.name_ja && entry?.name_ko && Array.isArray(entry?.level));
+  });
+  if (!result) throw new Error("Gladiator's Blessing localization map was not found");
+  return result.value;
+}
+
+const emptyEffectSpec = (effectId, { polarity = "BENEFICIAL", duration = 1, durationClock = "ALL_TURN", modifiers = {}, tags = [], barrier = null, charges = null, operations = [] } = {}) => ({
+  effect_id: effectId,
+  polarity,
+  recipient: "ACTOR_SIDE",
+  duration,
+  duration_clock: durationClock,
+  modifiers,
+  tags,
+  stack_rule: "INDEPENDENT",
+  barrier,
+  periodic: null,
+  charges,
+  evasion_decay_bp: 0,
+  counter: null,
+  revive_hp_bp: null,
+  max_stacks: null,
+  conditional_outgoing: [],
+  on_hit_received_allies: null,
+  on_hit_received_operations: [],
+  on_turn_end_operations: operations,
+  aura_allies: null,
+  aura_opponents: null,
+  on_chain_dealt: null,
+});
+
+const teamStats = (modifiers, element = null, attackType = null) => ({
+  type: "TEAM_STATS", modifiers, element, attack_type: attackType,
+});
+
+function blessingEffect(id, level, values) {
+  const bp = key => Number(values[key]) * 100;
+  const timed = (start, target, effect, every = false) => ({
+    type: "TIMED_EFFECT", start_all_turn: start, every_all_turn: every, target, effect,
+  });
+  const elements = ["FIRE", "WATER", "WIND", "LIGHT", "DARK"];
+  if (id === "blessing_001") return teamStats({ attack_bp: bp("VALUE1") });
+  if (id === "blessing_002") return teamStats({ magic_bp: bp("VALUE1") });
+  if (/^blessing_00[3-7]$/.test(id)) return teamStats({ attack_bp: bp("VALUE1"), magic_bp: bp("VALUE1") }, elements[Number(id.slice(-1)) - 3]);
+  if (id === "blessing_008") return teamStats({ crit_rate_bp: bp("VALUE1") });
+  if (id === "blessing_009") return teamStats({ crit_damage_bp: bp("VALUE1") });
+  if (id === "blessing_010") return { type: "COUNTER_DAMAGE", amount_bp: bp("VALUE1") };
+  if (id === "blessing_011") return { type: "EXTRA_CHAIN", stacks: Number(values.VALUE1) };
+  if (id === "blessing_012") return { type: "CHAIN_DAMAGE", amount_bp_per_stack: bp("VALUE1") };
+  if (/^blessing_01[3-7]$/.test(id)) return teamStats({ max_hp_bp: bp("VALUE1") }, elements[Number(id.slice(-2)) - 13]);
+  if (id === "blessing_018") return teamStats({ max_hp_bp: bp("VALUE1") }, null, "PHYSICAL");
+  if (id === "blessing_019") return teamStats({ max_hp_bp: bp("VALUE1") }, null, "MAGICAL");
+  if (id === "blessing_020") return teamStats({ defense_bp: bp("VALUE1") });
+  if (id === "blessing_021") return teamStats({ magic_resist_bp: bp("VALUE1") });
+  if (id === "blessing_022") return { type: "PROPERTY_BALANCE", property_damage_bp: bp("VALUE1"), property_resistance_bp: bp("VALUE2") };
+  if (id === "blessing_023") return timed(1, "ALL_ALLIES", emptyEffectSpec(`${id}[${level}]`, { durationClock: "PERMANENT", modifiers: { damage_reduction_bp: bp("VALUE1") } }));
+  if (id === "blessing_024") return timed(1, "ALL_ALLIES", emptyEffectSpec(`${id}[${level}]`, { modifiers: { evasion_bp: 10000 }, tags: ["EVASION"], charges: Number(values.VALUE1) }));
+  if (id === "blessing_025") return timed(1, "ALL_ALLIES", emptyEffectSpec(`${id}[${level}]`, { barrier: { coefficient_bp: bp("VALUE1"), reference: "MAX_HP" } }));
+  if (id === "blessing_026") return timed(1, "ALL_ALLIES", emptyEffectSpec(`${id}[${level}]`, {
+    duration: Number(values.VALUE2),
+    operations: [{ op: "HEAL", coefficient_bp: bp("VALUE1"), reference: "MAX_HP", can_crit: false, recipient: "ACTOR_SIDE" }],
+  }));
+  if (id === "blessing_027") return { type: "IMMUNITY", tags: ["SILENCE", "KNOCKBACK", "WEAKENING"] };
+  if (id === "blessing_028") return { type: "BUFF_REMOVAL_IMMUNITY" };
+  if (id === "blessing_029") return { type: "FORCE_FIXED_DAMAGE" };
+  if (id === "blessing_030") return timed(1, "FIRST_ALLY", emptyEffectSpec(`${id}[${level}]`, { tags: ["TAUNT"] }));
+  if (id === "blessing_031") return timed(1, "ALL_ALLIES", emptyEffectSpec(`${id}[${level}]`, { modifiers: { damage_reduction_bp: bp("VALUE1") } }));
+  if (id === "blessing_032") return timed(2, "ALL_ENEMIES", emptyEffectSpec(`${id}[${level}]`, { polarity: "HARMFUL", duration: Number(values.VALUE2), modifiers: { incoming_damage_bp: bp("VALUE1") }, tags: ["WEAKENING"] }));
+  if (id === "blessing_033") return { type: "CONDITIONAL_DAMAGE", condition: "TARGET_HP_AT_LEAST90", amount_bp: bp("VALUE2") };
+  if (id === "blessing_034") return { type: "CONDITIONAL_DAMAGE", condition: "TARGET_HP_AT_MOST90", amount_bp: bp("VALUE2") };
+  if (id === "blessing_035") return { type: "STAT_BOOST_PRESSURE", amount_bp: bp("VALUE1") };
+  if (id === "blessing_036") return timed(1, "ALL_ENEMIES", emptyEffectSpec(`${id}[${level}]`, { polarity: "HARMFUL", duration: Number(values.VALUE2), modifiers: { physical_incoming_damage_bp: bp("VALUE1") }, tags: ["WEAKENING"] }));
+  if (id === "blessing_037") return timed(1, "ALL_ENEMIES", emptyEffectSpec(`${id}[${level}]`, { polarity: "HARMFUL", duration: Number(values.VALUE2), modifiers: { magical_incoming_damage_bp: bp("VALUE1") }, tags: ["WEAKENING"] }));
+  if (id === "blessing_038" || id === "blessing_039") return timed(2, "ALL_ALLIES", emptyEffectSpec(`${id}[${level}]`, { durationClock: "PERMANENT", modifiers: { attack_bp: bp("VALUE1"), magic_bp: bp("VALUE1") } }));
+  if (id === "blessing_040") return timed(1, "FIRST_ENEMY", emptyEffectSpec(`${id}[${level}]`, { polarity: "HARMFUL", duration: Number(values.VALUE1), tags: ["SILENCE"] }));
+  if (id === "blessing_041") return timed(1, "ALL_ALLIES", emptyEffectSpec(`${id}[${level}]`, { modifiers: { attack_bp: bp("VALUE1") } }));
+  if (id === "blessing_042") return timed(1, "ALL_ALLIES", emptyEffectSpec(`${id}[${level}]`, { modifiers: { magic_bp: bp("VALUE1") } }));
+  if (id === "blessing_043") return { type: "CONDITIONAL_DAMAGE", condition: "TARGET_TAUNTED", amount_bp: bp("VALUE1") };
+  if (id === "blessing_044") return timed(1, "FIRST_ENEMY", emptyEffectSpec(`${id}[${level}]`, { polarity: "HARMFUL", modifiers: { incoming_damage_bp: bp("VALUE1") }, tags: ["FOCUS", "WEAKENING"] }), true);
+  // The official August 27, 2026 balance notice supersedes the still-stale
+  // percentages in BD2DB's blessing bundle. Keep the upstream raw payload in
+  // SourceRecord and fail a regression test if these overrides disappear.
+  if (id === "blessing_045") return timed(1, "THIRD_ALLY", emptyEffectSpec(`${id}[${level}]`, { duration: 4, modifiers: { attack_bp: 30000, magic_bp: 30000 }, tags: ["EVADE_TARGET"] }));
+  if (id === "blessing_046") return { type: "CONDITIONAL_DAMAGE", condition: "TARGET_CHAIN_AT_MOST5", amount_bp: 15000 };
+  if (id === "blessing_047") return { type: "CHAIN_CAP", maximum: 2 };
+  throw new Error(`unmapped Gladiator's Blessing: ${id}`);
+}
+
+function transformBlessings(rawBlessings, source) {
+  return Object.fromEntries(Object.values(rawBlessings).map((raw) => {
+    const id = raw.blessingId;
+    const levels = raw.level.slice(0, Number(raw.levelLength)).map((values, index) => ({
+      level: index + 1,
+      point_cost: Number(values.cost),
+      effect: blessingEffect(id, index + 1, values),
+    }));
+    if (levels.some((entry) => !Number.isInteger(entry.point_cost) || entry.point_cost <= 0)) throw new Error(`${id} has invalid point cost`);
+    const officialOverride = id === "blessing_045" || id === "blessing_046" ? {
+      announced_at: "2026-08-25T08:00:15Z",
+      effective_at: "2026-08-27T00:00:00Z",
+      source_url: "https://www.browndust2.com/ko-kr/news/view?id=01M0VS18PHZJ35515STZGQ56YJ",
+      rule_image_url: "https://www.browndust2.com/web-assets/2026-08/01M0VS10706JR29DNZ7M304GBW/%ED%99%A9%EA%B8%88%20%ED%88%AC%EA%B8%B0%EC%9E%A5%20%EA%B7%9C%EC%B9%99.png",
+    } : null;
+    const currentDescriptions = {
+      "zh-TW": raw.desc,
+      "zh-CN": raw.desc_CN,
+      en: raw.desc_en,
+      ja: raw.desc_ja,
+      ko: raw.desc_ko,
+    };
+    if (officialOverride) {
+      const replacement = id === "blessing_045" ? "300%" : "150%";
+      for (const [locale, lines] of Object.entries(currentDescriptions)) {
+        currentDescriptions[locale] = lines.map(line => String(line).replace(/100[%％]/g, replacement));
+      }
+    }
+    const record = {
+      id,
+      names: { "zh-TW": raw.name, "zh-CN": raw.name_CN, en: raw.name_en, ja: raw.name_ja, ko: raw.name_ko },
+      descriptions: currentDescriptions,
+      category: raw.category,
+      levels,
+      source: { ...source, raw_payload: officialOverride ? { ...raw, official_override: officialOverride } : raw },
+    };
+    return [id, record];
+  }));
+}
+
 const EQUIPMENT_STAT_KEYS = {
   HP: "MAX_HP_FLAT",
   "HP%": "MAX_HP_PERCENT",
@@ -1775,17 +1908,23 @@ const fiendAsset = main.match(/assets\/frcFiendTemplateConfigs-[A-Za-z0-9_-]+\.j
 const summonAsset = main.match(/assets\/db-summons-[A-Za-z0-9_-]+\.js/)?.[0];
 const equipmentAsset = main.match(/assets\/db-weapons-[A-Za-z0-9_-]+\.js/)?.[0];
 const equipmentCoreAsset = main.match(/assets\/core-[A-Za-z0-9_-]+\.js/)?.[0];
-if (!characterAsset || !rangeAsset || !summonAsset || !equipmentAsset || !equipmentCoreAsset) {
+const blessingDetailAsset = main.match(/assets\/BlessingDetail[^"']+\.js/)?.[0];
+if (!characterAsset || !rangeAsset || !summonAsset || !equipmentAsset || !equipmentCoreAsset || !blessingDetailAsset) {
   throw new Error("required data assets were not found");
 }
 
-const [characterText, rangeText, fiendText, summonText, equipmentText, equipmentCoreText] = await Promise.all([
+const blessingDetailText = await getText(`${ORIGIN}/${blessingDetailAsset}`);
+const blessingAsset = blessingDetailText.match(/assets\/blessings_i18n-[A-Za-z0-9_-]+\.js/)?.[0]
+  ?? blessingDetailText.match(/\.\/blessings_i18n-[A-Za-z0-9_-]+\.js/)?.[0]?.replace("./", "assets/");
+if (!blessingAsset) throw new Error("Gladiator's Blessing data asset was not found");
+const [characterText, rangeText, fiendText, summonText, equipmentText, equipmentCoreText, blessingText] = await Promise.all([
   getText(`${ORIGIN}/${characterAsset}`),
   getText(`${ORIGIN}/${rangeAsset}`),
   fiendAsset ? getText(`${ORIGIN}/${fiendAsset}`) : Promise.resolve(""),
   getText(`${ORIGIN}/${summonAsset}`),
   getText(`${ORIGIN}/${equipmentAsset}`),
   getText(`${ORIGIN}/${equipmentCoreAsset}`),
+  getText(`${ORIGIN}/${blessingAsset}`),
 ]);
 const observedAt = new Date().toISOString();
 const characterSource = {
@@ -1807,6 +1946,12 @@ const equipmentSource = {
   observed_at: observedAt,
   source_digest: sha256(`${equipmentText}\n${equipmentCoreText}`),
 };
+const blessingSource = {
+  source_id: "BD2DB_GLADIATORS_BLESSINGS_STATIC_BUNDLE",
+  source_url: `${ORIGIN}/${blessingAsset}`,
+  observed_at: observedAt,
+  source_digest: sha256(blessingText),
+};
 const rawCharacters = findCharacterData(characterText);
 const transformed = transformCharacters(rawCharacters, findCostumeI18n(characterText), findRangeData(rangeText), characterSource);
 const transformedFiend = transformFiend(findFiendData(fiendText), fiendSource);
@@ -1818,6 +1963,7 @@ const transformedEquipment = transformEquipment(
   equipmentSource,
   new Set(rawCharacters.filter((character) => Number(character.star) === 5).map((character) => character.characterId)),
 );
+const transformedBlessings = transformBlessings(findBlessingI18n(blessingText), blessingSource);
 Object.assign(transformed.characters, transformedFiend.characters);
 Object.assign(transformed.costumes, transformedFiend.costumes);
 Object.assign(transformed.characters, transformedSummons.characters);
@@ -1828,6 +1974,7 @@ const catalog = {
   costumes: transformed.costumes,
   monsters: transformedFiend.monsters,
   equipment: transformedEquipment.definitions,
+  blessings: transformedBlessings,
   skills: {},
 };
 
@@ -1911,6 +2058,7 @@ const report = {
   reviewRequiredCostumes: costumeValues.filter((costume) => !costume.executable).length,
   monsters: Object.keys(catalog.monsters).length,
   equipment: Object.keys(catalog.equipment).length,
+  blessings: Object.keys(catalog.blessings).length,
   craftedLegendaryEquipment: Object.values(catalog.equipment)
     .filter((entry) => entry.kind === "CRAFTED_LEGENDARY").length,
   exclusiveEquipment: Object.values(catalog.equipment)

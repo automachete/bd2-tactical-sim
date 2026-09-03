@@ -173,18 +173,24 @@ impl PyBatchSimulator {
                 slot.last_damage = 0;
             }
             let side = slot.engine.state().active_side;
-            let order = slot.engine.state().teams[side.index()].action_order.clone();
-            let mut commands = BTreeMap::new();
-            for (position, unit_id) in order.iter().enumerate() {
-                let legal = slot.engine.legal_actions_for_unit(*unit_id).map_err(|error| error.to_string())?.commands;
-                if legal.is_empty() {
-                    continue;
+            if slot.engine.state().rules.action_flow == bd2_core::ActionFlow::AlternatingCostume {
+                // Golden Colosseum combat is fully automatic; an environment
+                // step advances the single authoritative costume action.
+                slot.engine.step_auto().map_err(|error| error.to_string())?;
+            } else {
+                let order = slot.engine.state().teams[side.index()].action_order.clone();
+                let mut commands = BTreeMap::new();
+                for (position, unit_id) in order.iter().enumerate() {
+                    let legal = slot.engine.legal_actions_for_unit(*unit_id).map_err(|error| error.to_string())?.commands;
+                    if legal.is_empty() {
+                        continue;
+                    }
+                    let selected = indices.get(position).copied().ok_or_else(|| format!("missing action at slot {position}"))?;
+                    let command = legal.get(selected).cloned().ok_or_else(|| format!("masked action selected at slot {position}: {selected}"))?;
+                    commands.insert(*unit_id, command);
                 }
-                let selected = indices.get(position).copied().ok_or_else(|| format!("missing action at slot {position}"))?;
-                let command = legal.get(selected).cloned().ok_or_else(|| format!("masked action selected at slot {position}: {selected}"))?;
-                commands.insert(*unit_id, command);
+                slot.engine.step(TeamTurnPlan { side, order, commands, formation: BTreeMap::new() }).map_err(|error| error.to_string())?;
             }
-            slot.engine.step(TeamTurnPlan { side, order, commands, formation: BTreeMap::new() }).map_err(|error| error.to_string())?;
             while slot.engine.state().terminal.is_none() && slot.engine.state().active_side != Side::Player {
                 slot.engine.step_auto().map_err(|error| error.to_string())?;
             }
@@ -216,7 +222,7 @@ fn episode_seed(base: u64, index: usize, episode: u64) -> u64 {
 fn training_frame(engine: &BattleEngine, side: Side) -> serde_json::Value {
     const MAX_UNITS: usize = 32;
     const FEATURES: usize = 56;
-    const MAX_TEAM: usize = 5;
+    const MAX_TEAM: usize = 11;
     const MAX_ACTIONS: usize = 32;
     let state = engine.state();
     let mut units = vec![vec![0.0_f32; FEATURES]; MAX_UNITS];
@@ -370,26 +376,35 @@ fn training_frame(engine: &BattleEngine, side: Side) -> serde_json::Value {
         unit_index_by_id.insert(unit.id, index);
     }
     let mut action_mask = vec![vec![false; MAX_ACTIONS]; MAX_TEAM];
-    for (slot, unit_id) in state.teams[side.index()]
-        .action_order
-        .iter()
-        .take(MAX_TEAM)
-        .enumerate()
-    {
-        if let Ok(legal) = engine.legal_actions_for_unit(*unit_id) {
-            for action in action_mask[slot]
-                .iter_mut()
-                .take(legal.commands.len().min(MAX_ACTIONS))
-            {
-                *action = true;
+    if state.rules.action_flow == bd2_core::ActionFlow::AlternatingCostume {
+        // This mask represents the only legal environment decision: advance
+        // the mode's automatic action. It is intentionally not a battle WAIT
+        // command and is consumed by the Python/batch facades before planning.
+        for slot_mask in &mut action_mask {
+            slot_mask[0] = true;
+        }
+    } else {
+        for (slot, unit_id) in state.teams[side.index()]
+            .action_order
+            .iter()
+            .take(MAX_TEAM)
+            .enumerate()
+        {
+            if let Ok(legal) = engine.legal_actions_for_unit(*unit_id) {
+                for action in action_mask[slot]
+                    .iter_mut()
+                    .take(legal.commands.len().min(MAX_ACTIONS))
+                {
+                    *action = true;
+                }
             }
         }
-    }
-    for slot_mask in action_mask
-        .iter_mut()
-        .skip(state.teams[side.index()].action_order.len().min(MAX_TEAM))
-    {
-        slot_mask[0] = true;
+        for slot_mask in action_mask
+            .iter_mut()
+            .skip(state.teams[side.index()].action_order.len().min(MAX_TEAM))
+        {
+            slot_mask[0] = true;
+        }
     }
     let mut actor_indices = vec![MAX_UNITS; MAX_TEAM];
     for (slot, unit_id) in state.teams[side.index()]
@@ -434,6 +449,11 @@ fn training_frame(engine: &BattleEngine, side: Side) -> serde_json::Value {
             0.0
         },
         if state.rules.mode == bd2_core::BattleMode::MonsterChaser {
+            1.0
+        } else {
+            0.0
+        },
+        if state.rules.mode == bd2_core::BattleMode::GoldenColosseum {
             1.0
         } else {
             0.0
