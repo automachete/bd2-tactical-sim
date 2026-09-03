@@ -3,11 +3,218 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#202020" />
-    <title>ブラウンダスト2 戦闘シミュレーター</title>
+    <title data-i18n="app.title">ブラウンダスト2 戦闘シミュレーター</title>
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
+    <main class="simulator-shell normal" id="game-shell" data-testid="simulator-shell">
+      <header class="battle-header">
+        <section class="selected-summary" id="selected-summary" aria-live="polite">
+          <span class="unit-emblem neutral" id="selected-emblem" aria-hidden="true">—</span>
+          <div class="selected-copy">
+            <div class="eyebrow"><span id="selected-element">—</span><span id="selected-upgrade"></span></div>
+            <strong id="selected-name" data-i18n="selection.none">ユニットを選択</strong>
+          </div>
+          <div class="selected-skill-detail">
+            <strong id="selected-skill-name" data-i18n="selection.hint">盤面または行動順から選択してください</strong>
+            <p id="selected-skill-summary" lang="ja"></p>
+          </div>
+          <div class="selected-numbers">
+            <span>SP <b id="selected-sp">0</b></span>
+            <span>CT <b id="selected-cooldown">0</b></span>
+            <span class="selected-damage"><small data-i18n="selection.predictedDamage">予測ダメージ</small><b id="selected-damage">—</b></span>
+            <em id="reserved-badge" data-i18n="selection.unreserved">未予約</em>
+          </div>
+          <div class="range-preview" id="range-preview" aria-label="選択スキルの3×4範囲" data-i18n-aria="selection.rangeAria"></div>
+        </section>
+
+        <nav class="system-controls" aria-label="戦闘補助操作" data-i18n-aria="controls.assistAria">
+          <button id="auto-reserve" class="control-button" type="button" aria-pressed="false" data-testid="auto-reserve"><span>✦</span><span data-i18n="controls.autoReserve">スキル自動予約</span></button>
+          <button id="auto-turn" class="control-button" type="button" aria-pressed="false" data-testid="auto-turn"><span>▶</span><span data-i18n="controls.autoTurn">ターン自動開始</span></button>
+          <button id="speed" class="square-control" type="button" aria-label="演出速度 1倍" data-testid="speed">×1</button>
+          <button id="open-log" class="square-control" type="button" aria-label="戦闘記録" data-i18n-aria="controls.logAria">☷</button>
+          <button id="open-help" class="square-control" type="button" aria-label="操作説明" data-i18n-aria="controls.helpAria">?</button>
+          <button id="open-pause" class="square-control" type="button" aria-label="一時停止メニュー" data-i18n-aria="controls.pauseAria" data-testid="pause">Ⅱ</button>
+        </nav>
+      </header>
+
+      <section class="battle-workspace">
+        <aside class="reservation-workbench" aria-label="行動予約" data-i18n-aria="reservation.workbenchAria">
+          <section class="order-panel" aria-labelledby="order-heading">
+            <div class="panel-heading"><span><small data-i18n="order.caption">攻撃予約</small><b id="order-heading" data-i18n="order.title">行動順</b></span><span class="drag-hint" data-i18n="order.dragHint">カードをドラッグ</span></div>
+            <div class="ally-order" id="ally-rail" role="list" aria-label="味方の行動順" data-testid="ally-order"></div>
+          </section>
+
+          <section class="command-panel" id="action-dock" aria-labelledby="command-heading">
+            <div class="command-heading">
+              <span><small id="reservation-unit-name" data-i18n="selection.none">ユニットを選択</small><b id="command-heading" data-i18n="reservation.title">行動予約</b></span>
+              <span class="reservation-sp"><small data-i18n="reservation.remainingSp">予約後SP</small><b id="reservation-sp">0</b></span>
+            </div>
+            <div class="costume-strip" id="costume-strip" role="listbox" aria-label="選択ユニットの行動" data-i18n-aria="reservation.optionsAria"></div>
+          </section>
+        </aside>
+
+        <section class="battle-center">
+          <div class="turn-banner">
+            <span id="mode-label">通常戦闘</span>
+            <strong id="turn-label" data-i18n="battle.initialTurn">ターン 1</strong>
+            <span id="team-label">チーム 1</span>
+          </div>
+
+          <div class="topdown-stage" data-testid="topdown-stage">
+            <section class="board-side player-side" aria-labelledby="player-board-heading">
+              <div class="board-label"><b id="player-board-heading" data-i18n="board.ally">味方</b><span id="formation-state">配置変更可</span></div>
+              <div class="battle-grid player-grid" id="player-field" role="grid" aria-label="味方3×4配置盤" data-i18n-aria="board.playerAria"></div>
+            </section>
+            <div class="frontline" aria-hidden="true"><span data-i18n="board.front">前方</span><b data-i18n="board.versus">対</b><span data-i18n="board.front">前方</span></div>
+            <section class="board-side enemy-side" aria-labelledby="enemy-board-heading">
+              <div class="board-label"><b id="enemy-board-heading" data-i18n="board.enemy">敵</b><span data-i18n="board.previewHint">黄色は攻撃範囲</span></div>
+              <div class="battle-grid enemy-grid" id="enemy-field" role="grid" aria-label="敵3×4配置盤" data-i18n-aria="board.enemyAria"></div>
+            </section>
+            <svg class="target-line hidden" id="target-line" aria-hidden="true"><line x1="0" y1="0" x2="0" y2="0"></line></svg>
+            <div class="battle-cue hidden" id="battle-cue" role="status" aria-live="assertive"><small id="cue-turn"></small><strong id="cue-title"></strong><span id="cue-detail"></span></div>
+            <div class="floating-layer" id="floating-layer" aria-hidden="true"></div>
+          </div>
+
+          <div class="interaction-message" id="tip-banner" role="status" aria-live="polite" data-i18n="board.initialTip">味方をドラッグして配置を変更できます。</div>
+
+        </section>
+
+        <aside class="opponent-panel" aria-labelledby="opponent-heading">
+          <div class="panel-heading"><span><small data-i18n="opponent.caption">対戦相手</small><b id="opponent-heading" data-i18n="opponent.title">敵情報</b></span><span id="controller-label">MCTS</span></div>
+          <div class="enemy-list" id="enemy-rail"></div>
+          <section class="fiend-panel hidden" id="fiend-zone">
+            <div class="boss-summary"><span class="boss-emblem">魔</span><div><small id="fiend-level">レベル 1</small><b data-i18n="fiend.title">モンスターチェイサー</b></div><strong id="fiend-percent">100%</strong></div>
+            <div class="hp-track boss-hp"><i id="fiend-hp-bar"></i></div>
+            <span class="fiend-hp-text" id="fiend-hp-text">—</span>
+            <div class="forecast-title"><b data-i18n="fiend.forecast">魔物行動予告</b><span data-i18n="fiend.ruleBased">ルール制御</span></div>
+            <ol class="forecast-list" id="forecast-list"></ol>
+          </section>
+          <p class="ai-report" id="ai-report" data-i18n="ai.idle">敵AIはまだ行動していません。</p>
+        </aside>
+      </section>
+
+      <footer class="battle-footer">
+        <div class="footer-tools">
+          <button class="hud-button" id="open-formation" type="button"><span>▦</span><span data-i18n="footer.preparation">戦闘準備</span></button>
+          <button class="hud-button" id="open-character-profiles" type="button" data-testid="open-character-profiles"><span>◇</span><span data-i18n="footer.characterProfiles">キャラクター設定</span></button>
+          <button class="hud-button" id="screen-toggle" type="button"><span>□</span><span data-i18n="footer.fullscreen">全画面</span></button>
+        </div>
+        <section class="sp-panel" aria-label="スキルポイント残量" data-i18n-aria="footer.spAria" aria-live="polite" aria-atomic="true">
+          <div class="sp-readout">
+            <span class="sp-total"><small data-i18n="footer.skillPoint">SP</small><strong id="sp-text">0 / 0</strong></span>
+          </div>
+          <span class="sr-only" id="sp-status"></span>
+          <div class="sp-pips" id="sp-pips" aria-hidden="true"></div>
+        </section>
+        <button class="battle-button" id="execute" type="button" data-testid="battle-start"><span id="battle-turn">ターン 1</span><b data-i18n="footer.battle">BATTLE</b><i data-i18n="footer.start">開始 ›</i></button>
+      </footer>
+
+      <section class="terminal hidden" id="terminal" role="alertdialog" aria-modal="true">
+        <small data-i18n="battle.result">戦闘結果</small><strong id="terminal-outcome">—</strong><span id="terminal-reason">—</span><div class="terminal-actions"><button id="terminal-rollback" type="button" data-i18n="battle.previousTurn">前のターンへ戻す</button><button id="terminal-log" class="secondary" type="button" data-testid="terminal-log" data-i18n="battle.viewLog">戦闘記録を見る</button><button id="terminal-reset" type="button" data-i18n="battle.retry">再戦</button></div>
+      </section>
+    </main>
+
+    <dialog class="sim-dialog formation-dialog" id="formation-dialog" data-testid="formation-dialog">
+      <form method="dialog" class="dialog-frame">
+        <header class="dialog-title"><div><small data-i18n="preparation.caption">戦闘設定</small><h1 data-i18n="preparation.title">戦闘準備</h1></div><button class="dialog-close" value="cancel" aria-label="戦闘準備を閉じる" data-i18n-aria="preparation.closeAria">×</button></header>
+        <nav class="content-tabs" id="content-tabs" aria-label="コンテンツ選択" data-i18n-aria="preparation.contentAria">
+          <button data-mode="NORMAL" type="button" class="active" data-i18n="mode.NORMAL">通常戦闘</button>
+          <button data-mode="MIRROR_WAR" type="button" data-i18n="mode.MIRROR_WAR">鏡戦争</button>
+          <button data-mode="MONSTER_CHASER" type="button" data-i18n="mode.MONSTER_CHASER">モンスターチェイサー</button>
+          <button data-mode="GOLDEN_COLOSSEUM" type="button" data-i18n="mode.GOLDEN_COLOSSEUM">ゴールデンコロシアム</button>
+        </nav>
+        <div class="formation-toolbar">
+          <label><span data-i18n="preparation.seed">乱数シード</span><input id="setup-seed" type="number" step="1" required value="42" /></label>
+          <label class="mcts-option"><span data-i18n="preparation.mcts">MCTS探索回数</span><input id="mcts-simulations" type="number" min="1" max="2048" step="1" required value="48" /></label>
+          <label class="monster-option hidden"><span data-i18n="preparation.monsterLevel">魔物レベル</span><input id="monster-level" type="number" min="1" max="25" step="1" required value="6" /></label>
+          <span class="ruleset" id="ruleset">—</span>
+          <button class="secondary-button" id="restore-preset" type="button" data-i18n="preparation.restore">初期編成へ戻す</button>
+        </div>
+        <div class="saved-setup-toolbar" aria-label="保存済み編成" data-i18n-aria="saved.aria">
+          <label><span data-i18n="saved.name">編成名</span><input id="saved-setup-name" type="text" maxlength="80" autocomplete="off" /></label>
+          <label><span data-i18n="saved.list">保存済み編成</span><select id="saved-setup-list"><option value="" data-i18n="saved.none">未選択</option></select></label>
+          <button class="secondary-button" id="save-setup" type="button" data-testid="save-setup" data-i18n="saved.save">編成を保存</button>
+          <button class="secondary-button" id="load-setup" type="button" data-testid="load-setup" data-i18n="saved.load">編成を読込</button>
+          <small id="saved-setup-path" aria-live="polite"></small>
+        </div>
+        <p class="mode-help" id="mode-help"></p>
+        <section class="golden-settings hidden" id="golden-settings" data-testid="golden-settings">
+          <header><div><small data-i18n="golden.caption">シーズンルール</small><b id="golden-season">—</b></div><span id="golden-rule-summary">—</span></header>
+          <div class="golden-loadouts" id="golden-loadouts"></div>
+        </section>
+        <div class="party-switch hidden" id="party-switch"><button data-party="1" type="button" class="active">チーム 1</button><button data-party="2" type="button">チーム 2</button></div>
+        <div class="formation-content">
+          <section class="formation-side" aria-labelledby="player-formation-heading">
+            <div class="formation-heading"><b id="player-formation-heading" data-i18n="preparation.player">味方</b><button class="secondary-button" data-add-side="PLAYER" type="button" data-i18n="preparation.addUnit">＋ ユニット追加</button></div>
+            <div class="formation-board player-editor-board" id="player-formation" role="grid" aria-label="味方編成3×4盤" data-i18n-aria="preparation.playerBoardAria"></div>
+            <div class="formation-roster" id="player-roster" aria-label="味方編成メンバー" data-i18n-aria="preparation.playerRosterAria"></div>
+          </section>
+          <div class="formation-vs" aria-hidden="true" data-i18n="board.versus">対</div>
+          <section class="formation-side" id="enemy-editor" aria-labelledby="enemy-formation-heading">
+            <div class="formation-heading"><b id="enemy-formation-heading" data-i18n="preparation.enemyMcts">敵 · MCTS</b><button class="secondary-button" data-add-side="ENEMY" type="button" data-i18n="preparation.addUnit">＋ ユニット追加</button></div>
+            <div class="formation-board enemy-editor-board" id="enemy-formation" role="grid" aria-label="敵編成3×4盤" data-i18n-aria="preparation.enemyBoardAria"></div>
+            <div class="formation-roster" id="enemy-roster" aria-label="敵編成メンバー" data-i18n-aria="preparation.enemyRosterAria"></div>
+          </section>
+          <section class="monster-card hidden" id="monster-info"><span class="boss-emblem large">魔</span><small data-i18n="preparation.ruleBoss">ルール制御ボス</small><h2 data-i18n="preparation.monsterChaser">モンスターチェイサー</h2><p data-i18n="preparation.monsterHelp">魔物の部位、スキル順、条件行動は外部データ定義から読み込みます。</p></section>
+        </div>
+        <footer class="dialog-actions"><button class="start-button" id="start-battle" type="button" data-testid="start-battle"><span data-i18n="preparation.start">この編成で戦闘開始</span> <span>›</span></button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="sim-dialog profile-dialog" id="character-profile-dialog" data-testid="character-profile-dialog">
+      <section class="dialog-frame profile-frame">
+        <header class="dialog-title profile-title"><div><small data-i18n="profiles.caption">キャラクターデータベース</small><h1 data-i18n="profiles.title">キャラクター設定</h1></div><button class="dialog-close" data-close="character-profile-dialog" aria-label="キャラクター設定を閉じる" data-i18n-aria="profiles.closeAria">×</button></header>
+        <div class="profile-layout">
+          <section class="profile-library" aria-labelledby="profile-library-heading">
+            <header><div><h2 id="profile-library-heading" data-i18n="profiles.libraryTitle">★5キャラクター一覧</h2><p data-i18n="profiles.libraryHelp">ここで保存した育成・装備は、編成やコンテンツをまたいで味方キャラクターへ適用されます。</p></div><strong id="profile-count">0</strong></header>
+            <div class="profile-filters">
+              <label class="profile-search"><span data-i18n="profiles.search">キャラクター検索</span><input id="profile-search" type="search" autocomplete="off" placeholder="名前またはID" data-i18n-placeholder="profiles.searchPlaceholder" /></label>
+              <div class="profile-element-filters" id="profile-element-filters" role="group" aria-label="属性で絞り込み" data-i18n-aria="profiles.elementFilterAria">
+                <button type="button" data-element="ALL" class="active" data-i18n="profiles.allElements">すべて</button>
+                <button type="button" data-element="FIRE" data-i18n="element.FIRE">火</button>
+                <button type="button" data-element="WATER" data-i18n="element.WATER">水</button>
+                <button type="button" data-element="WIND" data-i18n="element.WIND">風</button>
+                <button type="button" data-element="LIGHT" data-i18n="element.LIGHT">光</button>
+                <button type="button" data-element="DARK" data-i18n="element.DARK">闇</button>
+              </div>
+            </div>
+            <div class="profile-character-grid" id="profile-character-grid" role="list" aria-label="★5キャラクター一覧" data-i18n-aria="profiles.gridAria"></div>
+          </section>
+          <aside class="profile-detail" id="profile-detail" aria-live="polite"></aside>
+        </div>
+      </section>
+    </dialog>
+
+    <dialog class="sim-dialog character-picker" id="character-picker" data-testid="character-picker">
+      <section class="dialog-frame picker-frame">
+        <header class="dialog-title"><div><small id="character-picker-side">味方 · チーム 1</small><h1 data-i18n="picker.title">★5キャラクターを選択</h1></div><button class="dialog-close" data-close="character-picker" aria-label="キャラクター選択を閉じる" data-i18n-aria="picker.closeAria">×</button></header>
+        <label class="character-search"><span data-i18n="picker.search">名前またはIDで検索</span><input id="character-search" type="search" autocomplete="off" /></label>
+        <div class="character-options" id="character-options" role="list"></div>
+      </section>
+    </dialog>
+
+    <dialog class="sim-dialog pause-dialog" id="pause-dialog" data-testid="pause-dialog">
+      <section class="dialog-frame compact-dialog">
+        <header class="dialog-title"><div><small data-i18n="pause.caption">一時停止中</small><h1 data-i18n="pause.title">戦闘メニュー</h1></div><button class="dialog-close" data-close="pause-dialog" aria-label="戦闘へ戻る" data-i18n-aria="pause.closeAria">×</button></header>
+        <div class="menu-list">
+          <button id="resume" type="button"><b data-i18n="pause.resume">戦闘へ戻る</b><small data-i18n="pause.resumeHelp">現在の予約内容を保持して再開</small></button>
+          <button id="rollback" type="button" data-testid="rollback"><b data-i18n="pause.rollback">前のターンへ戻す</b><small data-i18n="pause.rollbackHelp">直前のプレイヤー手番開始時点を復元</small></button>
+          <button id="ai-step" type="button"><b data-i18n="pause.ai">MCTSに任せる</b><small data-i18n="pause.aiHelp">現在のプレイヤー手番を探索して実行</small></button>
+          <button id="reset" type="button"><b data-i18n="pause.reset">最初からやり直す</b><small data-i18n="pause.resetHelp">同じ編成とシードで再開</small></button>
+          <button id="pause-formation" type="button"><b data-i18n="pause.preparation">戦闘準備へ戻る</b><small data-i18n="pause.preparationHelp">モード・編成・コスチュームを変更</small></button>
+        </div>
+        <p class="ai-report" id="pause-ai-report" data-i18n="ai.idle">敵AIはまだ行動していません。</p>
+      </section>
+    </dialog>
+
+    <dialog class="sim-dialog log-dialog" id="log-dialog"><section class="dialog-frame compact-dialog"><header class="dialog-title"><div><small data-i18n="log.caption">戦闘履歴</small><h1><span data-i18n="log.title">戦闘記録</span> <span id="event-count">0</span></h1></div><button class="dialog-close" data-close="log-dialog" aria-label="戦闘記録を閉じる" data-i18n-aria="log.closeAria">×</button></header><ol class="event-list" id="events"></ol></section></dialog>
+    <dialog class="sim-dialog help-dialog" id="help-dialog"><section class="dialog-frame compact-dialog"><header class="dialog-title"><div><small data-i18n="help.caption">基本操作</small><h1 data-i18n="help.title">操作方法</h1></div><button class="dialog-close" data-close="help-dialog" aria-label="操作説明を閉じる" data-i18n-aria="help.closeAria">×</button></header><div class="help-flow"><span>1</span><p><b data-i18n="help.formationTitle">配置</b><span data-i18n="help.formationBody">味方駒をドラッグ。味方の上へ落とすと入れ替わります。</span></p><span>2</span><p><b data-i18n="help.reserveTitle">予約</b><span data-i18n="help.reserveBody">味方を選び、通常攻撃・ノックバック・コスチュームスキルを選びます。</span></p><span>3</span><p><b data-i18n="help.orderTitle">順番</b><span data-i18n="help.orderBody">左の行動順カードをドラッグ、または矢印で並べ替えます。</span></p><span>4</span><p><b data-i18n="help.keyboardTitle">キーボード</b><span data-i18n="help.keyboardBody">駒でSpace、矢印で移動先、Enterで確定、Escで取消です。</span></p><span>5</span><p><b data-i18n="help.executeTitle">実行</b><span data-i18n="help.executeBody">SP・範囲・順番を確認して戦闘開始を押します。</span></p></div></section></dialog>
+    <dialog class="sim-dialog inspect-dialog" id="inspect-dialog"><section class="dialog-frame compact-dialog"><button class="dialog-close floating-close" data-close="inspect-dialog" aria-label="ユニット詳細を閉じる" data-i18n-aria="inspect.closeAria">×</button><div id="inspect-content"></div></section></dialog>
+
+    <div class="toast hidden" id="toast" role="alert"></div>
+    <div class="busy hidden" id="busy" role="status" aria-live="assertive"><span></span><b id="busy-label" data-i18n="status.busy">処理中…</b></div>
+    <div class="sr-only" id="drag-announcer" aria-live="assertive"></div>
+    <script type="module" src="app.js"></script>
   </body>
 </html>

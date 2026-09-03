@@ -6,7 +6,7 @@ import { inflateSync } from "node:zlib";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceDirectory = resolve(repositoryRoot, "assets/character-icons/source");
-const runtimeDirectory = resolve(repositoryRoot, "ui/public/assets/character-icons/64");
+const runtimeDirectory = resolve(repositoryRoot, "ui/assets/character-icons/64");
 const qa32Directory = resolve(repositoryRoot, "assets/character-icons/qa/thumbnails/32");
 const catalogPath = resolve(repositoryRoot, "data/generated/catalog.json");
 

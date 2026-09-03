@@ -49,11 +49,6 @@ py -3.13 -m venv .venv
 cd tools
 npm install --ignore-scripts
 cd ..
-
-cd ui
-npm install --ignore-scripts
-npm run build
-cd ..
 ```
 
 ### 2. ゲームデータの生成
@@ -83,14 +78,6 @@ cargo run -p bd2-data --bin bd2-data -- inspect data/generated/bd2.sqlite
 ```
 
 既定では`http://127.0.0.1:8765/`を開きます。ブラウザを自動で開かない場合は`--no-open`、ポートを変更する場合は`--port`を指定できます。`bd2-gui.exe`も同じ画面を起動します。
-
-GUIはTypeScript + Svelte 5をViteで本番ビルドした`ui/dist`だけを配信します。ビルドが存在しない場合は旧JavaScriptへフォールバックせず、起動時にエラーで停止します。UI開発時はAPIサーバーを8766番で起動してから、別ターミナルの`ui`で`npm run dev`を実行します。
-
-```powershell
-.\.venv\Scripts\bd2-play.exe --no-open --port 8766
-cd ui
-npm run dev
-```
 
 ### 戦闘操作
 
@@ -143,7 +130,7 @@ GPUの認識、学習、評価は個別のコマンドで実行します。
 .\.venv\Scripts\bd2-evaluate.exe --database data/generated/bd2.sqlite --scenario data/scenarios/monster-chaser-current.json --checkpoint checkpoints/monster-chaser.pt
 ```
 
-学習環境はRustの並列シミュレータを直接使用します。GUIを起動しない学習経路には、Svelte、Vite、Node.js、HTTP配信、画面描画、MCTSは含まれません。`bd2rl.train`のimportがGUIサーバーを読み込まないことも回帰テストで固定しています。WindowsではCUDA Graph、対応環境ではInductorを選択し、CUDA上でbf16またはfp16の混合精度を使用します。
+学習環境はRustの並列シミュレータを直接使用します。GUIを起動しない学習経路には、HTTP配信、画面描画、MCTSは含まれません。WindowsではCUDA Graph、対応環境ではInductorを選択し、CUDA上でbf16またはfp16の混合精度を使用します。
 
 観測はユニット、装備・成長を反映した能力値、コスチューム別CTと使用回数、全状態効果、両陣営のSP・チェイン・行動順、盤面占有、合法手の意味情報、モンスターチェイサーの全HP区間とパーティ進行、ゴールデンコロシアムのALLターン・デスタイム・加護発動順を独立テンソルとして保持します。方策は最大80候補の意味特徴を採点し、行動順に共有SPを予約するため、個別には合法でも同一ターン内でSPを超過する組合せを生成しません。固定形状の上限を超えた状態は切り捨てず例外で停止します。詳細は[強化学習観測スキーマ](docs/rl-observation-schema.md)を参照してください。チェックポイントには観測スキーマとモデル構造IDが保存され、互換性のないモデルは読み込み時に拒否されます。
 
@@ -156,7 +143,7 @@ GPUの認識、学習、評価は個別のコマンドで実行します。
 | `crates/bd2-py` | RustコアのPython拡張 |
 | `python/bd2rl` | Gymnasium環境、並列環境、PPO、評価、MCTS、GUIサーバー |
 | `tools` | データ同期、検証、シナリオ生成、ブラウザテスト |
-| `ui` | TypeScript + Svelte 5 + Vite戦闘GUI、ローカル素材、UIテスト |
+| `ui` | 戦闘GUIとUIテスト |
 | `assets/character-icons` | キャラクタートークンの原寸データと識別性QA資料 |
 | `docs` | 設計書、調査記録、検証資料 |
 
@@ -168,7 +155,7 @@ GPUの認識、学習、評価は個別のコマンドで実行します。
 
 - 原寸画像: `assets/character-icons/source`
 - 識別性QA資料: `assets/character-icons/qa`
-- GUI用64px画像: `ui/public/assets/character-icons/64`
+- GUI用64px画像: `ui/assets/character-icons/64`
 
 ## テスト
 
@@ -201,9 +188,8 @@ node --check tools/sync-bd2db.mjs
 node --check tools/build-current-scenarios.mjs
 node --check tools/validate-catalog.mjs
 node --check tools/validate-character-icons.mjs
-cd ui
-npm run verify
-cd ..
+node --check ui/app.js
+node --test ui/tests/*.test.mjs
 node tools/validate-catalog.mjs data/generated/catalog.json
 node tools/validate-bd2db-equipment.mjs data/generated/catalog.json data/generated/equipment-oracle.json
 node tools/validate-character-icons.mjs
@@ -249,7 +235,6 @@ GUI検証は`BD2_GUI_QUALITY_OFFSET`でseed範囲をずらし、`BD2_PLAYWRIGHT_
 - [ゴールデンコロシアム現行仕様](docs/research/golden-colosseum-specification.md)
 - [BD2DB装備照合データ](docs/validation/bd2db-current-equipment-oracle.json)
 - [収束型品質検証記録](docs/validation/convergence-quality-2026-09-03.md)
-- [Svelte 5完全置換の非回帰検証](docs/validation/svelte-migration-2026-09-03.md)
 
 ## ライセンス
 

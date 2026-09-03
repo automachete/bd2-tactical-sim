@@ -22,20 +22,20 @@ import {
   selectCommand,
   serializeFormation,
   spBreakdown,
-} from "./battle-ui-model";
-import { DEFAULT_LOCALE, applyTranslations, setLocale, t } from "./i18n";
+} from "./battle-ui-model.mjs";
+import { DEFAULT_LOCALE, applyTranslations, setLocale, t } from "./i18n.mjs";
 
 setLocale(DEFAULT_LOCALE);
 applyTranslations();
 
-let snapshot: any = null;
-let catalog: any = null;
-let draft: any = null;
-let selectedUnitId: number | null = null;
-let plannedOrder: number[] = [];
-let plannedCommands = new Map<number, number>();
-let plannedBurstLevels = new Map<string, number>();
-let plannedFormation: Record<string, { row: number; depth: number }> = {};
+let snapshot = null;
+let catalog = null;
+let draft = null;
+let selectedUnitId = null;
+let plannedOrder = [];
+let plannedCommands = new Map();
+let plannedBurstLevels = new Map();
+let plannedFormation = {};
 let orderDragId = null;
 let orderPointerDrag = null;
 let suppressOrderClick = false;
@@ -58,14 +58,13 @@ let previewGeneration = 0;
 let previewTimer = null;
 let previewController = null;
 let characterPickerTarget = null;
-let profileDocument: any = null;
+let profileDocument = null;
 let selectedProfileId = null;
 let profileElementFilter = "ALL";
-let profileDrafts = new Map<string, any>();
+let profileDrafts = new Map();
 
-const $ = (selector: string): any => document.querySelector(selector);
-const $$ = (selector: string): any[] => Array.from(document.querySelectorAll(selector));
-const objectValues = (value: any): any[] => Object.values(value ?? {});
+const $ = selector => document.querySelector(selector);
+const $$ = selector => Array.from(document.querySelectorAll(selector));
 const clone = value => structuredClone(value);
 const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
 const characterById = id => catalog?.characters.find(character => character.id === id);
@@ -119,15 +118,14 @@ const announce = message => {
 
 const setTip = message => { $("#tip-banner").textContent = message; };
 
-let showErrorTimer = 0;
 const showError = error => {
   const message = error instanceof Error ? error.message : String(error);
   const toast = $("#toast");
   toast.textContent = message;
   toast.classList.remove("hidden");
   announce(message);
-  window.clearTimeout(showErrorTimer);
-  showErrorTimer = window.setTimeout(() => toast.classList.add("hidden"), 5000);
+  window.clearTimeout(showError.timer);
+  showError.timer = window.setTimeout(() => toast.classList.add("hidden"), 5000);
 };
 
 const setBusy = (enabled, label = t("status.busy")) => {
@@ -166,11 +164,11 @@ const silentApi = async (path, body, signal = undefined) => {
 
 const openDialog = id => {
   window.clearTimeout(autoTurnTimer);
-  const dialog = document.getElementById(id) as HTMLDialogElement;
+  const dialog = document.getElementById(id);
   if (!dialog.open) dialog.showModal();
 };
 const closeDialog = id => {
-  const dialog = document.getElementById(id) as HTMLDialogElement;
+  const dialog = document.getElementById(id);
   if (dialog.open) dialog.close();
   if (id === "formation-dialog") document.querySelector(".advanced-popover")?.remove();
 };
@@ -185,7 +183,7 @@ const goldenBannedCostumeIds = () => new Set(draft?.golden_colosseum?.banned_cos
 const defaultCostumes = (character, single = false, excluded = new Set(), profile = null) => {
   const unavailable = new Set([...excluded, ...(single ? goldenBannedCostumeIds() : [])]);
   const firstAvailable = character.costumes.findIndex(item => !unavailable.has(item.id));
-  const fixedById = new Map<string, any>((profile?.costumes || []).map(item => [item.costume_id, item]));
+  const fixedById = new Map((profile?.costumes || []).map(item => [item.costume_id, item]));
   return character.costumes.map((costume, index) => ({
     costume_id: costume.id,
     enhancement: Number(fixedById.get(costume.id)?.enhancement ?? costume.max_enhancement),
@@ -200,7 +198,7 @@ const applyProfileToPlayerUnit = unit => {
   const character = characterById(unit.character_id);
   const profile = profileByCharacterId(unit.character_id);
   if (!character) throw new Error(`catalog character is missing for ${unit.character_id}`);
-  const existing = new Map<string, any>((unit.costumes || []).map(item => [item.costume_id, item]));
+  const existing = new Map((unit.costumes || []).map(item => [item.costume_id, item]));
   unit.costumes = profile.costumes.map(fixed => {
     const previous = existing.get(fixed.costume_id);
     return {
@@ -398,7 +396,7 @@ const renderFormationBoard = (selector, sideKey) => {
         event.dataTransfer.dropEffect = "move";
         markEditorDrop(cell, sideKey, row, depth);
       });
-      cell.addEventListener("dragleave", event => { if (!cell.contains(event.relatedTarget as Node | null)) clearEditorDrop(); });
+      cell.addEventListener("dragleave", event => { if (!cell.contains(event.relatedTarget)) clearEditorDrop(); });
       cell.addEventListener("drop", event => {
         event.preventDefault();
         const active = editorDrag;
@@ -925,7 +923,7 @@ const renderEquipmentEditor = (root, unit, reopen) => {
     section.append(row);
   }
   const total = {};
-  for (const loadout of objectValues(unit.equipment)) {
+  for (const loadout of Object.values(unit.equipment || {})) {
     for (const [key, value] of Object.entries(equipmentBonus(loadout))) total[key] = Number(total[key] || 0) + Number(value);
   }
   const summary = document.createElement("p");
@@ -1449,8 +1447,8 @@ const validateSetupControls = () => {
 
 const currentPlayerTeam = () => snapshot.state.teams.find(team => team.side === "PLAYER");
 const activeParty = () => snapshot.state.monster_chaser?.current_party || 1;
-const visiblePlayerUnits = () => objectValues(snapshot.state.units).filter(unit => unit.side === "PLAYER" && Number(unit.party_no || 1) === Number(activeParty()));
-const enemyUnits = () => objectValues(snapshot.state.units).filter(unit => unit.side === "ENEMY");
+const visiblePlayerUnits = () => Object.values(snapshot.state.units).filter(unit => unit.side === "PLAYER" && Number(unit.party_no || 1) === Number(activeParty()));
+const enemyUnits = () => Object.values(snapshot.state.units).filter(unit => unit.side === "ENEMY");
 const legalFor = unitId => snapshot.legal.find(entry => Number(entry.unit_id) === Number(unitId));
 const selectedCommandIndex = unitId => plannedCommands.get(Number(unitId)) ?? 0;
 const selectedCommand = unitId => legalFor(unitId)?.commands[selectedCommandIndex(unitId)];
@@ -1531,7 +1529,7 @@ const renderOrder = () => {
     root.classList.add("drop-at-end");
   };
   root.ondragleave = event => {
-    if (!root.contains(event.relatedTarget as Node | null)) root.classList.remove("drop-at-end");
+    if (!root.contains(event.relatedTarget)) root.classList.remove("drop-at-end");
   };
   root.ondrop = event => {
     if (event.target !== root || orderDragId === null) return;
@@ -1625,7 +1623,7 @@ const renderOrder = () => {
       }
       if (!orderPointerDrag.active) return;
       $$(".order-card").forEach(item => item.classList.remove("drop-before", "drop-after"));
-      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".order-card") as HTMLElement | null;
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".order-card");
       if (!target || target === card) return;
       const after = event.clientY > target.getBoundingClientRect().top + target.getBoundingClientRect().height / 2;
       target.classList.add(after ? "drop-after" : "drop-before");
@@ -1634,7 +1632,7 @@ const renderOrder = () => {
     card.addEventListener("pointerup", event => {
       if (!orderPointerDrag || orderPointerDrag.pointerId !== event.pointerId) return;
       const drag = orderPointerDrag;
-      const target = drag.active ? document.elementFromPoint(event.clientX, event.clientY)?.closest(".order-card") as HTMLElement | null : null;
+      const target = drag.active ? document.elementFromPoint(event.clientX, event.clientY)?.closest(".order-card") : null;
       orderPointerDrag = null;
       card.classList.remove("dragging");
       if (drag.active) {
@@ -1843,7 +1841,7 @@ const wireBattleTokenDrag = (token, unit) => {
   token.addEventListener("pointerup", event => {
     if (!pointerDrag || pointerDrag.pointerId !== event.pointerId) return;
     const active = pointerDrag.active;
-    const cell = active ? document.elementFromPoint(event.clientX, event.clientY)?.closest("#player-field .field-cell") as HTMLElement | null : null;
+    const cell = active ? document.elementFromPoint(event.clientX, event.clientY)?.closest("#player-field .field-cell") : null;
     token.classList.remove("pointer-dragging");
     token.setAttribute("aria-grabbed", "false");
     pointerDrag = null;
@@ -1897,7 +1895,7 @@ const renderField = (selector, side) => {
           event.dataTransfer.dropEffect = "move";
           markBattleDrop(cell, battleDragId);
         });
-        cell.addEventListener("dragleave", event => { if (!cell.contains(event.relatedTarget as Node | null)) clearBattleDrop(); });
+        cell.addEventListener("dragleave", event => { if (!cell.contains(event.relatedTarget)) clearBattleDrop(); });
         cell.addEventListener("drop", event => {
           event.preventDefault();
           const moving = battleDragId ?? Number(event.dataTransfer.getData("text/plain"));
@@ -1958,7 +1956,7 @@ const selectCommandForUnit = (unitId, index) => {
   if (selected?.type === "USE_COSTUME") {
     plannedBurstLevels.set(`${Number(unitId)}:${selected.costume_id}`, Number(selected.burst_level ?? 0));
   }
-  plannedCommands = result.selections as Map<number, number>;
+  plannedCommands = result.selections;
   renderBattleSurface();
 };
 
@@ -2074,7 +2072,7 @@ const renderActionDock = () => {
     card.dataset.burstLevel = String(Number(command.burst_level ?? 0));
     card.innerHTML = `<span class="command-glyph">${escapeHtml(meta.glyph)}</span><span class="command-name"><b>${escapeHtml(meta.name)}</b><small>${escapeHtml(selector)} · ${escapeHtml(meta.operation_summary || "")}</small><em class="command-prediction" hidden></em></span><span class="command-cost"><b>SP ${displayedSp}</b>${cooldown && snapshot.state.rules.mode !== "GOLDEN_COLOSSEUM" ? `<small>CT ${cooldown}</small>` : ""}</span><span class="command-range ${command.type === "KNOCKBACK" ? "knockback-range" : ""}" aria-hidden="true">${miniMarkup}</span><span class="command-state">${escapeHtml(stateLabel)}</span>`;
     if (command.type !== "KNOCKBACK") {
-      const rangeNode = card.querySelector(".command-range") as HTMLElement;
+      const rangeNode = card.querySelector(".command-range");
       rangeNode.style.gridTemplateColumns = `repeat(${grid.depths}, 8px)`;
       rangeNode.style.gridTemplateRows = `repeat(${grid.rows}, 8px)`;
     }
@@ -2190,7 +2188,7 @@ const renderDamageForecast = preview => {
   }
 };
 
-const renderRange = (range, preview: any = null, meta: any = {}) => {
+const renderRange = (range, preview = null, meta = {}) => {
   clearDamageForecast();
   const root = $("#range-preview");
   root.innerHTML = "";
@@ -2216,7 +2214,7 @@ const renderRange = (range, preview: any = null, meta: any = {}) => {
     const key = cellKey(cell.dataset.row, cell.dataset.depth);
     cell.classList.toggle("target-preview", projected.has(key));
     cell.classList.toggle("target-anchor", key === cellKey(preview.anchor.row, preview.anchor.depth));
-    const occupant = (cell.querySelector(".battle-token") as HTMLElement | null)?.dataset.unitId;
+    const occupant = cell.querySelector(".battle-token")?.dataset.unitId;
     cell.classList.toggle("target-occupied", preview.affected_unit_ids?.includes(Number(occupant)) || false);
   });
   renderDamageForecast(preview);
@@ -2828,9 +2826,9 @@ const renderBattle = data => {
   // they may be revived later in the same turn. Only command selection and UI
   // focus are filtered by legal actions; the submitted order remains complete.
   plannedOrder = (data.state.teams.find(team => team.side === planSide)?.action_order || []).map(Number);
-  plannedCommands = new Map<number, number>(plannedOrder.map(id => [id, 0]));
+  plannedCommands = new Map(plannedOrder.map(id => [id, 0]));
   if (golden && data.auto_plan) {
-    for (const [rawId, command] of Object.entries(data.auto_plan.commands || {}) as [string, any][]) {
+    for (const [rawId, command] of Object.entries(data.auto_plan.commands || {})) {
       const entry = (data.legal || []).find(item => Number(item.unit_id) === Number(rawId));
       const index = entry?.commands?.findIndex(item => (
         item.type === command.type
@@ -2840,11 +2838,11 @@ const renderBattle = data => {
       if (index >= 0) plannedCommands.set(Number(rawId), index);
     }
   }
-  plannedBurstLevels = new Map<string, number>();
-  plannedFormation = normalizeFormation(objectValues(data.state.units).filter(unit => unit.alive && unit.side === "PLAYER" && Number(unit.party_no || 1) === Number(data.state.monster_chaser?.current_party || 1)));
+  plannedBurstLevels = new Map();
+  plannedFormation = normalizeFormation(Object.values(data.state.units).filter(unit => unit.alive && unit.side === "PLAYER" && Number(unit.party_no || 1) === Number(data.state.monster_chaser?.current_party || 1)));
   selectedUnitId = plannedOrder.find(id => legalFor(id)?.commands?.length) ?? null;
   keyboardDrag = null;
-  if (autoReserveEnabled && !golden) plannedCommands = chooseAutoReserve({ order: actionablePlannedOrder(), selections: plannedCommands, legalById: legalFor, costumeLookup: costumeById, sp: currentPlayerTeam().sp }) as Map<number, number>;
+  if (autoReserveEnabled && !golden) plannedCommands = chooseAutoReserve({ order: actionablePlannedOrder(), selections: plannedCommands, legalById: legalFor, costumeLookup: costumeById, sp: currentPlayerTeam().sp });
   let report = t("ai.idle");
   if (data.last_ai?.controller === "MCTS") report = t("ai.mctsReport", {
     simulations: data.last_ai.simulations,
@@ -3031,7 +3029,7 @@ $("#screen-toggle").addEventListener("click", async () => {
 $("#auto-reserve").addEventListener("click", () => {
   autoReserveEnabled = !autoReserveEnabled;
   $("#auto-reserve").setAttribute("aria-pressed", String(autoReserveEnabled));
-  if (autoReserveEnabled) plannedCommands = chooseAutoReserve({ order: actionablePlannedOrder(), selections: plannedCommands, legalById: legalFor, costumeLookup: costumeById, sp: currentPlayerTeam().sp }) as Map<number, number>;
+  if (autoReserveEnabled) plannedCommands = chooseAutoReserve({ order: actionablePlannedOrder(), selections: plannedCommands, legalById: legalFor, costumeLookup: costumeById, sp: currentPlayerTeam().sp });
   renderBattleSurface();
 });
 $("#auto-turn").addEventListener("click", () => {
@@ -3057,7 +3055,7 @@ $("#speed").addEventListener("click", () => {
 
 document.addEventListener("keydown", event => {
   if (!keyboardDrag) return;
-  if (event.key === " " && (event.target as Element | null)?.closest?.(".battle-token")) return;
+  if (event.key === " " && event.target.closest?.(".battle-token")) return;
   handleCellKeyboard(event);
 });
 
