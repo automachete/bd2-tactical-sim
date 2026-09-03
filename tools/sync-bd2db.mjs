@@ -716,13 +716,15 @@ function applyScalarSwitches(level, switches, label) {
 }
 
 function effect(effectId, polarity, recipient, duration, modifiers = {}, tags = [], extra = {}) {
+  const normalizedDuration = integer(duration);
+  if (normalizedDuration < 1) throw new Error(`${effectId}: effect duration must be positive`);
   return {
     op: "APPLY_EFFECT",
     effect: {
       effect_id: effectId,
       polarity,
       recipient,
-      duration: Math.max(1, integer(duration)),
+      duration: normalizedDuration,
       duration_clock: "GAME_TURN",
       modifiers,
       tags,
@@ -767,12 +769,15 @@ function statReference(label) {
   if (label.includes("最大生命力") || label.includes("最大生命")) return "MAX_HP";
   if (label.includes("目前生命力")) return "CURRENT_HP";
   if (label.includes("魔法力")) return "MAGIC";
-  return "ATTACK";
+  if (label.includes("攻擊力")) return "ATTACK";
+  throw new Error(`unsupported stat reference: ${label}`);
 }
 
-function durationFrom(sentence, level, fallback = 1) {
+function durationFrom(sentence, level, fallback) {
   const match = sentence.match(/(\{VALUE\d+\}|\d+)回合期間/);
-  return match ? scalar(level, match[1]) : fallback;
+  if (match) return scalar(level, match[1]);
+  if (fallback !== undefined) return fallback;
+  throw new Error(`missing effect duration: ${sentence}`);
 }
 
 function directDamage(sentence, character, costume, level) {
@@ -946,7 +951,7 @@ function compileOperations(character, costume, level, burstExtras = [], enhancem
     const applicationCount = Math.max(1, integer(scalar(level, applicationCountMatch?.[1] ?? 1)));
     for (let application = 0; application < applicationCount; application += 1) {
       queueAtSourcePosition(
-        effect(`${costume.costumeId}:STAT:${sentenceIndex}`, sign > 0 ? "BENEFICIAL" : "HARMFUL", recipient, durationFrom(sentence, level), modifiers, [sign > 0 ? "STAT_REINFORCEMENT" : "STAT_WEAKENING"], extra),
+        effect(`${costume.costumeId}:STAT:${sentenceIndex}`, sign > 0 ? "BENEFICIAL" : "HARMFUL", recipient, durationFrom(sentence, level, receivedHitCharge ? 1 : undefined), modifiers, [sign > 0 ? "STAT_REINFORCEMENT" : "STAT_WEAKENING"], extra),
         sentenceIndex,
       );
     }
@@ -1660,15 +1665,22 @@ function transformFiend(raw, source) {
     let operationSequence = 0;
     const diagnostics = [];
     const sourceBuffIds = (skill.source?.buffIds ?? []).map(Number);
-    const sourceOrder = (identifier, fallback = sourceBuffIds.length) => {
-      const match = String(identifier ?? "").match(/buff-(\d+)/);
-      if (!match) return fallback;
-      const rawId = Number(match[1]);
+    const sourceOrder = (identifier, fallback) => {
+      if (identifier === null || identifier === undefined || identifier === "") {
+        if (fallback === undefined) throw new Error("monster operation is missing its source order identifier");
+        return fallback;
+      }
+      const match = String(identifier).match(/buff-(\d+)/);
+      const rawId = Number.isSafeInteger(Number(identifier)) ? Number(identifier)
+        : match ? Number(match[1])
+          : null;
+      if (rawId === null) throw new Error(`unsupported monster operation order identifier: ${identifier}`);
       const direct = sourceBuffIds.indexOf(rawId);
       if (direct >= 0) return direct;
       // Conditional custom states use an xx011 derivative for the source xx002 buff.
       const conditionalParent = sourceBuffIds.indexOf(rawId - 9);
-      return conditionalParent >= 0 ? conditionalParent : fallback;
+      if (conditionalParent >= 0) return conditionalParent;
+      throw new Error(`monster operation order identifier ${identifier} is absent from source buff order`);
     };
     const schedule = (operation, identifier, fallback) => {
       timedOperations.push({ order: sourceOrder(identifier, fallback), sequence: operationSequence, operation });
