@@ -1,4 +1,4 @@
-import type { BattleMode, Cell, Formation, ModeCapabilities } from "./types";
+import type { BattleMode, Cell, Formation, KnockbackDirection, ModeCapabilities } from "./types";
 
 export const GRID_ROWS = 3;
 export const GRID_DEPTHS = 4;
@@ -277,54 +277,32 @@ export const rangePreviewCells = (
   return cells;
 };
 
-export const projectRangeCells = (
-  range: readonly CellInput[] | null | undefined,
-  anchor: CellInput | null | undefined,
-  options: { targetAll?: boolean; rows?: number; depths?: number } = {},
-): Set<string> => {
-  const { targetAll = false, rows = GRID_ROWS, depths = GRID_DEPTHS } = options;
-  const cells = new Set<string>();
-  if (targetAll) {
-    for (let row = 0; row < rows; row += 1) {
-      for (let depth = 0; depth < depths; depth += 1) cells.add(cellKey(row, depth));
-    }
-    return cells;
-  }
-  if (!anchor || !isValidCell(anchor.row, anchor.depth, rows, depths)) throw new RangeError("range projection anchor is outside the board");
-  if (!Array.isArray(range)) throw new TypeError("skill range must be an array");
-  const offsets: readonly CellInput[] = range.length ? range : [{ row: 0, depth: 0 }];
-  for (const offset of offsets) {
-    if (!Number.isInteger(Number(offset.row)) || !Number.isInteger(Number(offset.depth))) throw new TypeError("skill range offsets must be integer cells");
-    const row = Number(anchor.row) + Number(offset.row);
-    const depth = Number(anchor.depth) + Number(offset.depth);
-    if (isValidCell(row, depth, rows, depths)) cells.add(cellKey(row, depth));
-  }
-  return cells;
+const KNOCKBACK_DIRECTIONS = new Set<KnockbackDirection>([
+  "BACK", "FRONT", "UP", "DOWN", "UP_BACK", "DOWN_BACK", "UP_FRONT", "DOWN_FRONT",
+]);
+const KNOCKBACK_ARROWS: Record<string, string> = {
+  "-1,-1": "↖", "-1,0": "↑", "-1,1": "↗",
+  "0,-1": "←", "0,1": "→",
+  "1,-1": "↙", "1,0": "↓", "1,1": "↘",
 };
-
-const KNOCKBACK_PRESENTATIONS = {
-  BACK: { arrow: "↑", row: -1, depth: 0 },
-  FRONT: { arrow: "↓", row: 1, depth: 0 },
-  UP: { arrow: "→", row: 0, depth: 1 },
-  DOWN: { arrow: "←", row: 0, depth: -1 },
-  UP_BACK: { arrow: "↗", row: -1, depth: 1 },
-  DOWN_BACK: { arrow: "↖", row: -1, depth: -1 },
-  UP_FRONT: { arrow: "↘", row: 1, depth: 1 },
-  DOWN_FRONT: { arrow: "↙", row: 1, depth: -1 },
-} as const;
-export type KnockbackDirection = keyof typeof KNOCKBACK_PRESENTATIONS;
-export const knockbackPresentation = (direction: unknown): {
+export const knockbackPresentation = (direction: unknown, offset: unknown): {
   direction: KnockbackDirection; arrow: string; row: number; depth: number; distance: 1;
 } => {
   const displayDirection = typeof direction === "string" || typeof direction === "number" ? String(direction) : "";
   const normalized = displayDirection.toUpperCase();
-  if (!(normalized in KNOCKBACK_PRESENTATIONS)) throw new Error(`Unsupported knockback direction: ${displayDirection}`);
+  if (!KNOCKBACK_DIRECTIONS.has(normalized as KnockbackDirection)) throw new Error(`Unsupported knockback direction: ${displayDirection}`);
+  if (typeof offset !== "object" || offset === null) throw new Error(`Missing authoritative knockback offset for ${normalized}`);
+  const candidate = offset as Partial<Cell>;
+  const row = Number(candidate.row);
+  const depth = Number(candidate.depth);
+  const arrow = KNOCKBACK_ARROWS[cellKey(row, depth)];
+  if (!arrow) throw new Error(`Unsupported knockback offset for ${normalized}: ${row},${depth}`);
   const key = normalized as KnockbackDirection;
-  return { direction: key, ...KNOCKBACK_PRESENTATIONS[key], distance: 1 };
+  return { direction: key, arrow, row, depth, distance: 1 };
 };
 
-export const knockbackPreviewCells = (direction: unknown, rows = GRID_ROWS, depths = GRID_ROWS) => {
-  const presentation = knockbackPresentation(direction);
+export const knockbackPreviewCells = (direction: unknown, offset: unknown, rows = GRID_ROWS, depths = GRID_ROWS) => {
+  const presentation = knockbackPresentation(direction, offset);
   const origin = { row: Math.floor(rows / 2), depth: Math.floor(depths / 2) };
   const destination = { row: origin.row + presentation.row, depth: origin.depth + presentation.depth };
   return { ...presentation, origin, destination: isValidCell(destination.row, destination.depth, rows, depths) ? destination : origin };

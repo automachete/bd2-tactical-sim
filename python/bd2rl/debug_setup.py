@@ -6,6 +6,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from . import _native
+
 MODE_SCENARIOS = {
     "NORMAL": "normal-demo.json",
     "MIRROR_WAR": "mirror-war-demo.json",
@@ -91,6 +93,10 @@ class DebugSetupCatalog:
     def __init__(self, database: Path, scenario_directory: Path) -> None:
         self.database = database.resolve()
         self.scenario_directory = scenario_directory.resolve()
+        self.knockback_offsets = {
+            str(item["direction"]): copy.deepcopy(item["offset"])
+            for item in json.loads(_native.knockback_offsets_json())
+        }
         self.templates = {
             mode: json.loads((self.scenario_directory / filename).read_text(encoding="utf-8"))
             for mode, filename in MODE_SCENARIOS.items()
@@ -288,8 +294,22 @@ class DebugSetupCatalog:
         self, unit: dict[str, Any], command: dict[str, Any]
     ) -> dict[str, Any] | None:
         command_type = command["type"]
-        if command_type in {"NORMAL_ATTACK", "KNOCKBACK"}:
+        if command_type == "NORMAL_ATTACK":
             return None
+        if command_type == "KNOCKBACK":
+            character_id = str(unit["character_id"])
+            character = self.entities.get(character_id)
+            if character is None:
+                raise ValueError(f"knockback command references missing character {character_id}")
+            direction = str(character["knockback_direction"])
+            offset = self.knockback_offsets.get(direction)
+            if offset is None:
+                raise ValueError(f"unsupported knockback direction: {direction}")
+            return {
+                "knockback_direction": direction,
+                "knockback_offset": copy.deepcopy(offset),
+                "knockback_distance": 1,
+            }
         if command_type != "USE_COSTUME":
             raise ValueError(f"unsupported battle command: {command_type}")
         costume_id = str(command["costume_id"])

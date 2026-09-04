@@ -1,6 +1,7 @@
 export type BattleMode = "NORMAL" | "MIRROR_WAR" | "MONSTER_CHASER" | "GOLDEN_COLOSSEUM";
 export type Side = "PLAYER" | "ENEMY";
 export type Element = "FIRE" | "WATER" | "WIND" | "LIGHT" | "DARK";
+export type KnockbackDirection = "BACK" | "FRONT" | "UP" | "DOWN" | "UP_BACK" | "DOWN_BACK" | "UP_FRONT" | "DOWN_FRONT";
 export type SetupSide = "player_units" | "enemy_units";
 
 export type Cell = { row: number; depth: number };
@@ -200,15 +201,18 @@ export type CharacterProfileDocument = {
 };
 
 export type CommandUi = {
-  sp_cost: number;
-  base_sp_cost: number;
-  burst_sp_cost: number;
-  cooldown: number;
-  selector: string;
-  target_all: boolean;
-  range: Cell[];
-  operation_summary: string;
-  description_ja: string;
+  sp_cost?: number;
+  base_sp_cost?: number;
+  burst_sp_cost?: number;
+  cooldown?: number;
+  selector?: string;
+  target_all?: boolean;
+  range?: Cell[];
+  operation_summary?: string;
+  description_ja?: string;
+  knockback_direction?: KnockbackDirection;
+  knockback_offset?: Cell;
+  knockback_distance?: number;
 };
 export type BattleCommand = {
   type: string;
@@ -339,17 +343,26 @@ export type BattleSnapshot = {
 };
 
 export type PreviewResult = {
+  actor_id: number;
+  action_index: number;
+  command: BattleCommand;
+  resolved_command: BattleCommand | null;
+  target_id: number | null;
   anchor: Cell | null;
-  target_side: Side;
+  target_side: Side | null;
   affected_cells: Cell[];
   affected_unit_ids: number[];
-  resolved_target?: { unit_id: number; position: Cell } | null;
+  movements: Array<{ unit_id: number; from: Cell; to: Cell }>;
+  actor_events: BattleEvent[];
+  resolved_action_order: number[];
   damage_by_target: Array<{
     target_id: number;
     amount: number;
     absorbed: number;
+    hits: number;
     critical_hits: number;
     evaded_hits: number;
+    collision_damage: number;
   }>;
   total_damage: number;
 };

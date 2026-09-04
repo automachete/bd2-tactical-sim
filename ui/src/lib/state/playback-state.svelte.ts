@@ -141,6 +141,10 @@ export class PlaybackState {
         this.playbackActorId = actorId;
         this.cue = { title: unitName(actorId), detail: eventString(event, "skill_name") || eventString(event, "action_type"), turn };
         return this.animationSleep(260, generation);
+      case "ACTION_ENDED":
+        return generation === this.generation && !this.disposed;
+      case "TARGET_AREA_RESOLVED":
+        return generation === this.generation && !this.disposed;
       case "TARGET_LOCKED":
         this.playbackTargetCell = null;
         this.playbackTargetId = targetId;

@@ -7,13 +7,16 @@ import threading
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
+from itertools import permutations
 from pathlib import Path
 
 import pytest
-from bd2rl._native import Simulator
+from bd2rl._native import Simulator, knockback_offsets_json
 from bd2rl.debug_setup import DebugSetupCatalog
-from bd2rl.gui import GuiSession, _preview_footprint, _production_ui_root, handler_factory
+from bd2rl.gui import GuiSession, _production_ui_root, handler_factory
 from bd2rl.mcts import MctsConfig, MctsPlanner
+from hypothesis import given, settings
+from hypothesis.strategies import integers, sampled_from
 
 ROOT = Path(__file__).resolve().parents[2]
 DATABASE = ROOT / "data/generated/bd2.sqlite"
@@ -44,6 +47,144 @@ def maximum_loadout(catalog: DebugSetupCatalog, character_id: str) -> list[dict[
             "permanent_potential_enabled": True,
         }
         for costume in catalog.characters[character_id]["costumes"]
+    ]
+
+
+def action_events(events: list[dict[str, object]], actor_id: int) -> list[dict[str, object]]:
+    result: list[dict[str, object]] = []
+    active = False
+    for event in events:
+        kind = event["kind"]
+        if kind["type"] == "ACTION_STARTED" and int(kind["actor_id"]) == actor_id:
+            active = True
+        if active:
+            result.append(event)
+        if kind["type"] == "ACTION_ENDED" and int(kind["actor_id"]) == actor_id:
+            return result
+    return result
+
+
+def assert_preview_matches_events(
+    preview: dict[str, object], events: list[dict[str, object]], actor_id: int
+) -> None:
+    actual = action_events(events, actor_id)
+    assert preview["actor_events"] == actual
+    starts = [
+        event["kind"]["command"] for event in actual if event["kind"]["type"] == "ACTION_STARTED"
+    ]
+    resolved = preview["resolved_command"]
+    assert (
+        {key: value for key, value in resolved.items() if key != "ui"}
+        if resolved is not None
+        else None
+    ) == (starts[-1] if starts else None)
+
+    locks = [
+        event["kind"]
+        for event in actual
+        if event["kind"]["type"] in {"TARGET_LOCKED", "TARGET_CELL_LOCKED"}
+    ]
+    expected_target = (
+        int(locks[-1]["target_id"]) if locks and locks[-1]["type"] == "TARGET_LOCKED" else None
+    )
+    assert preview["target_id"] == expected_target
+
+    areas = [event["kind"] for event in actual if event["kind"]["type"] == "TARGET_AREA_RESOLVED"]
+    if areas:
+        area = areas[-1]
+        assert preview["target_side"] == area["target_side"]
+        assert preview["anchor"] == area["anchor"]
+        assert preview["affected_cells"] == area["cells"]
+        assert preview["affected_unit_ids"] == area["target_ids"]
+    else:
+        assert preview["target_side"] is None
+        assert preview["anchor"] is None
+        assert preview["affected_cells"] == []
+        assert preview["affected_unit_ids"] == []
+
+    expected_movements = [
+        {
+            "unit_id": event["kind"]["unit_id"],
+            "from": event["kind"]["from"],
+            "to": event["kind"]["to"],
+        }
+        for event in actual
+        if event["kind"]["type"] == "UNIT_MOVED"
+    ]
+    assert preview["movements"] == expected_movements
+
+    damage: dict[int, dict[str, int]] = {}
+
+    def forecast(target_id: int) -> dict[str, int]:
+        return damage.setdefault(
+            target_id,
+            {
+                "target_id": target_id,
+                "amount": 0,
+                "hits": 0,
+                "critical_hits": 0,
+                "evaded_hits": 0,
+                "absorbed": 0,
+                "collision_damage": 0,
+            },
+        )
+
+    for event in actual:
+        kind = event["kind"]
+        if kind["type"] == "DAMAGE_APPLIED" and int(kind["actor_id"]) == actor_id:
+            item = forecast(int(kind["target_id"]))
+            item["amount"] += int(kind["amount"])
+            item["hits"] += 1
+            item["critical_hits"] += int(bool(kind["critical"]))
+        elif kind["type"] == "DAMAGE_EVADED" and int(kind["actor_id"]) == actor_id:
+            forecast(int(kind["target_id"]))["evaded_hits"] += 1
+        elif kind["type"] == "BARRIER_ABSORBED":
+            forecast(int(kind["target_id"]))["absorbed"] += int(kind["amount"])
+        elif kind["type"] == "COLLISION_DAMAGE":
+            forecast(int(kind["occupant_id"]))["collision_damage"] += int(kind["amount"])
+    assert preview["damage_by_target"] == [damage[target_id] for target_id in sorted(damage)]
+    assert preview["total_damage"] == sum(item["amount"] for item in damage.values())
+
+
+def assert_costume_card_range_matches_resolved_area(
+    preview: dict[str, object], state: dict[str, object]
+) -> None:
+    command = preview["command"]
+    resolved = preview["resolved_command"]
+    if (
+        command["type"] != "USE_COSTUME"
+        or resolved is None
+        or {key: value for key, value in resolved.items() if key != "ui"}
+        != {key: value for key, value in command.items() if key != "ui"}
+    ):
+        return
+    metadata = command["ui"]
+    anchor = preview["anchor"]
+    assert anchor is not None
+    grid = state["rules"]["grid"]
+    blocked = {tuple(cell) for cell in grid["blocked"]}
+    if metadata["target_all"]:
+        coordinates = {
+            (row, depth)
+            for row in range(int(grid["rows"]))
+            for depth in range(int(grid["depths"]))
+            if (row, depth) not in blocked
+        }
+    else:
+        offsets = metadata["range"] or [{"row": 0, "depth": 0}]
+        coordinates = {
+            (int(anchor["row"]) + int(offset["row"]), int(anchor["depth"]) + int(offset["depth"]))
+            for offset in offsets
+        }
+        coordinates = {
+            (row, depth)
+            for row, depth in coordinates
+            if 0 <= row < int(grid["rows"])
+            and 0 <= depth < int(grid["depths"])
+            and (row, depth) not in blocked
+        }
+    assert preview["affected_cells"] == [
+        {"row": row, "depth": depth} for row, depth in sorted(coordinates)
     ]
 
 
@@ -128,6 +269,91 @@ def test_debug_catalog_builds_all_four_modes_from_external_data() -> None:
     parties = {unit["party_no"] for unit in monster["units"] if unit["side"] == "PLAYER"}
     assert parties == {1, 2}
     assert len([unit for unit in monster["units"] if unit["side"] == "ENEMY"]) == 8
+
+
+def test_native_knockback_offsets_cover_every_direction_in_local_grid_coordinates() -> None:
+    assert {item["direction"]: item["offset"] for item in json.loads(knockback_offsets_json())} == {
+        "BACK": {"row": 0, "depth": 1},
+        "FRONT": {"row": 0, "depth": -1},
+        "UP": {"row": -1, "depth": 0},
+        "DOWN": {"row": 1, "depth": 0},
+        "UP_BACK": {"row": -1, "depth": 1},
+        "DOWN_BACK": {"row": 1, "depth": 1},
+        "UP_FRONT": {"row": -1, "depth": -1},
+        "DOWN_FRONT": {"row": 1, "depth": -1},
+    }
+
+
+def test_knockback_metadata_preview_and_execution_match_for_every_catalog_direction() -> None:
+    session = GuiSession(DATABASE, SCENARIOS, 89, FAST_MCTS)
+    public = session.catalog.public_payload()
+    representatives: dict[str, dict[str, object]] = {}
+    for character in public["characters"]:
+        representatives.setdefault(character["knockback_direction"], character)
+    assert set(representatives) == set(session.catalog.knockback_offsets) - {"UP_FRONT"}
+
+    for direction, character in representatives.items():
+        request = copy.deepcopy(public["presets"]["NORMAL"])
+        request["player_units"] = [
+            {
+                **request["player_units"][0],
+                "character_id": character["id"],
+                "costumes": maximum_loadout(session.catalog, str(character["id"])),
+                "row": 1,
+                "depth": 1,
+            }
+        ]
+        request["enemy_units"] = [{**request["enemy_units"][0], "row": 1, "depth": 1}]
+        payload = session.start(request)
+        actor = int(payload["state"]["teams"][0]["action_order"][0])
+        legal_entry = next(entry for entry in payload["legal"] if entry["unit_id"] == actor)
+        knockback_index, knockback_command = next(
+            (index, command)
+            for index, command in enumerate(legal_entry["commands"])
+            if command["type"] == "KNOCKBACK"
+        )
+        offset = session.catalog.knockback_offsets[direction]
+        assert knockback_command["ui"] == {
+            "knockback_direction": direction,
+            "knockback_offset": offset,
+            "knockback_distance": 1,
+        }
+
+        preview = session.preview(actor, knockback_index, [actor], {})
+        assert len(preview["movements"]) == 1, direction
+        movement = preview["movements"][0]
+        assert {
+            "row": movement["to"]["row"] - movement["from"]["row"],
+            "depth": movement["to"]["depth"] - movement["from"]["depth"],
+        } == offset, direction
+
+        live_json = session.simulator.state_json()
+        before_count = len(json.loads(live_json)["event_log"])
+        direct = session.simulator.new_battle(session.setup_json, session.seed)
+        direct.restore_json(live_json)
+        raw_commands = json.loads(direct.legal_actions_json("PLAYER"))[0]["commands"]
+        direct.step_json(
+            json.dumps(
+                {
+                    "side": "PLAYER",
+                    "order": [actor],
+                    "commands": {str(actor): raw_commands[knockback_index]},
+                    "formation": {},
+                }
+            )
+        )
+        events = json.loads(direct.state_json())["event_log"][before_count:]
+        actual_actor_events = action_events(events, actor)
+        area = next(
+            event["kind"]
+            for event in actual_actor_events
+            if event["kind"]["type"] == "TARGET_AREA_RESOLVED"
+        )
+        assert preview["actor_events"] == actual_actor_events, direction
+        assert preview["anchor"] == area["anchor"], direction
+        assert preview["target_side"] == area["target_side"], direction
+        assert preview["affected_cells"] == area["cells"], direction
+        assert preview["affected_unit_ids"] == area["target_ids"], direction
 
 
 def test_player_legal_actions_have_no_wait_and_japanese_skill_text_is_materialized() -> None:
@@ -487,92 +713,6 @@ def test_exclusive_equipment_rejects_wrong_owner_and_missing_main_ability() -> N
     unit["equipment"][definition["slot"]]["primary_stat"] = None
     with pytest.raises(ValueError, match="primary_stat"):
         catalog.build_setup(request)
-
-
-def test_preview_footprint_clips_deduplicates_and_tracks_only_occupied_targets() -> None:
-    state = {
-        "rules": {"grid": {"rows": 3, "depths": 4}},
-        "units": {
-            "1": {"alive": True, "side": "PLAYER"},
-            "101": {"alive": True, "side": "ENEMY"},
-            "102": {"alive": True, "side": "ENEMY"},
-            "103": {"alive": False, "side": "ENEMY"},
-        },
-    }
-    positions = {
-        1: {"row": 2, "depth": 3},
-        101: {"row": 0, "depth": 0},
-        102: {"row": 1, "depth": 1},
-        103: {"row": 1, "depth": 0},
-    }
-    command = {
-        "type": "USE_COSTUME",
-        "ui": {
-            "target_all": False,
-            "range": [
-                {"row": -1, "depth": 0},
-                {"row": 0, "depth": 0},
-                {"row": 0, "depth": 0},
-                {"row": 0, "depth": 1},
-                {"row": 1, "depth": 0},
-            ],
-        },
-    }
-
-    cells, targets = _preview_footprint(
-        state, 1, command, "ENEMY", {"row": 0, "depth": 0}, positions
-    )
-
-    assert cells == [{"row": 0, "depth": 0}, {"row": 0, "depth": 1}, {"row": 1, "depth": 0}]
-    assert targets == [101]
-
-
-def test_preview_footprint_handles_normal_and_target_all_without_guessing() -> None:
-    state = {
-        "rules": {"grid": {"rows": 3, "depths": 4}},
-        "units": {
-            "1": {"alive": True, "side": "PLAYER"},
-            "2": {"alive": True, "side": "PLAYER"},
-            "101": {"alive": True, "side": "ENEMY"},
-        },
-    }
-    positions = {
-        1: {"row": 0, "depth": 0},
-        2: {"row": 2, "depth": 3},
-        101: {"row": 1, "depth": 2},
-    }
-
-    normal_cells, normal_targets = _preview_footprint(
-        state,
-        1,
-        {"type": "NORMAL_ATTACK"},
-        "ENEMY",
-        {"row": 1, "depth": 2},
-        positions,
-    )
-    all_cells, all_targets = _preview_footprint(
-        state,
-        1,
-        {"type": "USE_COSTUME", "ui": {"target_all": True, "range": []}},
-        "PLAYER",
-        {"row": 0, "depth": 0},
-        positions,
-    )
-
-    assert normal_cells == [{"row": 1, "depth": 2}]
-    assert normal_targets == [101]
-    assert len(all_cells) == 12
-    assert all_targets == [1, 2]
-
-    with pytest.raises(KeyError, match="target_all"):
-        _preview_footprint(
-            state,
-            1,
-            {"type": "USE_COSTUME", "ui": {"range": []}},
-            "ENEMY",
-            {"row": 1, "depth": 2},
-            positions,
-        )
 
 
 def test_builder_rejects_duplicate_character_in_the_same_party() -> None:
@@ -1083,7 +1223,7 @@ def test_gui_target_preview_uses_rust_rules_without_mutating_live_state() -> Non
     assert id(session.preview_simulator) == preview_simulator_id
 
 
-def test_every_five_star_legal_action_preview_matches_engine_target_lock() -> None:
+def test_every_five_star_legal_action_preview_matches_engine_execution() -> None:
     session = GuiSession(DATABASE, SCENARIOS, 83, FAST_MCTS)
     public = session.catalog.public_payload()
     checked = 0
@@ -1134,28 +1274,13 @@ def test_every_five_star_legal_action_preview_matches_engine_target_lock() -> No
                 )
             )
             events = json.loads(direct.state_json())["event_log"][before_count:]
-            target_event = next(
-                (
-                    event["kind"]
-                    for event in events
-                    if event["kind"].get("actor_id") == actor
-                    and event["kind"]["type"] in {"TARGET_LOCKED", "TARGET_CELL_LOCKED"}
-                ),
-                None,
-            )
-            actual_target = (
-                int(target_event["target_id"])
-                if target_event and target_event["type"] == "TARGET_LOCKED"
-                else None
-            )
-            actual_anchor = None
-            if target_event and target_event["type"] == "TARGET_CELL_LOCKED":
-                actual_anchor = target_event["cell"]
-            elif actual_target is not None:
-                actual_anchor = live_state["units"][str(actual_target)]["position"]
-
-            assert preview["target_id"] == actual_target, (character["id"], command)
-            assert preview["anchor"] == actual_anchor, (character["id"], command)
+            assert_preview_matches_events(preview, events, actor)
+            assert_costume_card_range_matches_resolved_area(preview, live_state)
+            assert preview["resolved_action_order"] == [
+                int(event["kind"]["actor_id"])
+                for event in events
+                if event["kind"]["type"] == "ACTION_ENDED"
+            ], (character["id"], command)
             coordinates = {(cell["row"], cell["depth"]) for cell in preview["affected_cells"]}
             assert len(coordinates) == len(preview["affected_cells"])
             assert all(0 <= row < 3 and 0 <= depth < 4 for row, depth in coordinates)
@@ -1166,6 +1291,186 @@ def test_every_five_star_legal_action_preview_matches_engine_target_lock() -> No
             checked += 1
 
     assert checked >= 250
+
+
+@settings(max_examples=30, deadline=None, derandomize=True)
+@given(
+    seed=integers(min_value=1, max_value=2**31 - 1),
+    order_indices=sampled_from(tuple(permutations(range(3)))),
+    formation_cells=sampled_from(
+        (
+            ((0, 0), (1, 1), (2, 2)),
+            ((2, 3), (1, 2), (0, 1)),
+            ((0, 3), (2, 0), (1, 1)),
+        )
+    ),
+    actor_slot=integers(min_value=0, max_value=2),
+    action_ordinal=integers(min_value=0, max_value=127),
+)
+def test_preview_matches_execution_across_seed_order_formation_and_action(
+    seed: int,
+    order_indices: tuple[int, ...],
+    formation_cells: tuple[tuple[int, int], ...],
+    actor_slot: int,
+    action_ordinal: int,
+) -> None:
+    session = GuiSession(DATABASE, SCENARIOS, seed, FAST_MCTS)
+    payload = session.payload()
+    base_order = [int(value) for value in payload["state"]["teams"][0]["action_order"]]
+    order = [base_order[index] for index in order_indices]
+    formation = {
+        str(unit_id): {"row": row, "depth": depth}
+        for unit_id, (row, depth) in zip(base_order, formation_cells, strict=True)
+    }
+    raw_legal = json.loads(session.simulator.legal_actions_json("PLAYER"))
+    legal_by_id = {int(entry["unit_id"]): entry["commands"] for entry in raw_legal}
+    actor = order[actor_slot]
+    selected = action_ordinal % len(legal_by_id[actor])
+    actions = [
+        selected
+        if unit_id == actor
+        else next(
+            index
+            for index, command in enumerate(legal_by_id[unit_id])
+            if command["type"] == "NORMAL_ATTACK"
+        )
+        for unit_id in order
+    ]
+
+    live_json = session.simulator.state_json()
+    before_count = len(json.loads(live_json)["event_log"])
+    preview = session.preview(actor, selected, order, formation, actions)
+    direct = session.simulator.new_battle(session.setup_json, session.seed)
+    direct.restore_json(live_json)
+    direct.step_json(
+        json.dumps(
+            {
+                "side": "PLAYER",
+                "order": order,
+                "commands": {
+                    str(unit_id): {
+                        key: value
+                        for key, value in legal_by_id[unit_id][actions[slot]].items()
+                        if key != "ui"
+                    }
+                    for slot, unit_id in enumerate(order)
+                },
+                "formation": formation,
+            },
+            separators=(",", ":"),
+        )
+    )
+    events = json.loads(direct.state_json())["event_log"][before_count:]
+
+    assert_preview_matches_events(preview, events, actor)
+    assert_costume_card_range_matches_resolved_area(preview, payload["state"])
+    assert preview["resolved_action_order"] == [
+        int(event["kind"]["actor_id"])
+        for event in events
+        if event["kind"]["type"] == "ACTION_ENDED"
+    ]
+
+
+def test_reserved_skill_still_executes_after_an_earlier_action_reduces_live_sp() -> None:
+    session = GuiSession(DATABASE, SCENARIOS, 97, FAST_MCTS)
+    request = copy.deepcopy(session.catalog.public_payload()["presets"]["NORMAL"])
+    for unit, character_id in zip(
+        request["player_units"], ("Michaela", "Lathel", "Loen"), strict=True
+    ):
+        unit["character_id"] = character_id
+        unit["costumes"] = maximum_loadout(session.catalog, character_id)
+    payload = session.start(request)
+    order = [int(value) for value in payload["state"]["teams"][0]["action_order"]]
+    legal_by_id = {int(entry["unit_id"]): entry["commands"] for entry in payload["legal"]}
+
+    def costume_index(unit_id: int, costume_id: str, sp_cost: int) -> int:
+        return next(
+            index
+            for index, command in enumerate(legal_by_id[unit_id])
+            if command.get("costume_id") == costume_id and int(command["ui"]["sp_cost"]) == sp_cost
+        )
+
+    actions = [
+        costume_index(order[0], "Michaela_2", 2),
+        costume_index(order[1], "Lathel_3", 5),
+        costume_index(order[2], "Loen_3", 6),
+    ]
+    actor = order[2]
+    live_json = session.simulator.state_json()
+    before_count = len(json.loads(live_json)["event_log"])
+
+    preview = session.preview(actor, actions[2], order, {}, actions)
+    direct = session.simulator.new_battle(session.setup_json, session.seed)
+    direct.restore_json(live_json)
+    direct.step_json(
+        json.dumps(
+            {
+                "side": "PLAYER",
+                "order": order,
+                "commands": {
+                    str(unit_id): {
+                        key: value
+                        for key, value in legal_by_id[unit_id][actions[slot]].items()
+                        if key != "ui"
+                    }
+                    for slot, unit_id in enumerate(order)
+                },
+                "formation": {},
+            },
+            separators=(",", ":"),
+        )
+    )
+    events = json.loads(direct.state_json())["event_log"][before_count:]
+
+    assert preview["command"]["costume_id"] == "Loen_3"
+    assert preview["resolved_command"]["costume_id"] == "Loen_3"
+    actor_kinds = [event["kind"] for event in action_events(events, actor)]
+    assert [kind["type"] for kind in actor_kinds].count("ACTION_STARTED") == 1
+    assert not any(kind["type"] == "ACTION_SKIPPED" for kind in actor_kinds)
+    assert_preview_matches_events(preview, events, actor)
+
+
+def test_preview_exposes_later_action_skipped_after_battle_ends() -> None:
+    session = GuiSession(DATABASE, SCENARIOS, 101, FAST_MCTS)
+    request = copy.deepcopy(session.catalog.public_payload()["presets"]["NORMAL"])
+    request["enemy_units"] = [request["enemy_units"][0]]
+    request["player_units"][0]["character_id"] = "Loen"
+    request["player_units"][0]["costumes"] = maximum_loadout(session.catalog, "Loen")
+    payload = session.start(request)
+    order = [int(value) for value in payload["state"]["teams"][0]["action_order"]]
+    raw_legal = json.loads(session.simulator.legal_actions_json("PLAYER"))
+    legal_by_id = {int(entry["unit_id"]): entry["commands"] for entry in raw_legal}
+    first_skill = next(
+        index
+        for index, command in enumerate(legal_by_id[order[0]])
+        if command.get("costume_id") == "Loen_1"
+    )
+    actions = [first_skill, 0, 0]
+    actor = order[1]
+    live_json = session.simulator.state_json()
+    before_count = len(json.loads(live_json)["event_log"])
+
+    preview = session.preview(actor, 0, order, {}, actions)
+    direct = session.simulator.new_battle(session.setup_json, session.seed)
+    direct.restore_json(live_json)
+    direct.step_json(
+        json.dumps(
+            {
+                "side": "PLAYER",
+                "order": order,
+                "commands": {
+                    str(unit_id): legal_by_id[unit_id][actions[slot]]
+                    for slot, unit_id in enumerate(order)
+                },
+                "formation": {},
+            },
+            separators=(",", ":"),
+        )
+    )
+    events = json.loads(direct.state_json())["event_log"][before_count:]
+
+    assert preview["resolved_command"] is None
+    assert_preview_matches_events(preview, events, actor)
 
 
 def test_preview_matches_real_damage_after_formation_order_and_multi_action_planning() -> None:

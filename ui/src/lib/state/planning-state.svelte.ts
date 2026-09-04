@@ -8,7 +8,6 @@ import {
   moveFormation,
   plannedBurstSpCost,
   plannedSpCost,
-  projectRangeCells,
   reorder,
   selectCommand,
   serializeFormation,
@@ -16,7 +15,6 @@ import {
 } from "../battle-ui-model";
 import type { SpBreakdown } from "../battle-ui-model";
 import { t } from "../i18n";
-import { commandPresentation } from "../presentation";
 import type {
   BattleCommand,
   BattleSnapshot,
@@ -60,6 +58,13 @@ export class PlanningState {
     return unitId === null ? undefined : this.session.legalFor(unitId)?.commands[this.selectedCommandIndex(unitId)];
   }
 
+  get previewActionSkipped(): boolean {
+    return this.preview !== null && (
+      this.preview.resolved_command === null
+      || this.preview.actor_events.some((event) => event.kind.type === "ACTION_SKIPPED")
+    );
+  }
+
   get actionableOrder(): number[] {
     return this.plannedOrder.filter((unitId) => this.session.legalFor(unitId) !== undefined);
   }
@@ -91,17 +96,9 @@ export class PlanningState {
   }
 
   get previewCells(): Set<string> {
-    const grid = this.session.snapshot?.state.rules.grid;
-    const meta = this.selectedUnit && this.catalog.catalog
-      ? commandPresentation(this.catalog.catalog, this.selectedUnit, this.selectedCommand)
-      : null;
-    if (!this.preview?.anchor || !grid || !meta) return new SvelteSet();
-    if (this.preview.affected_cells) {
-      return new SvelteSet(this.preview.affected_cells.map((cell) => cellKey(cell.row, cell.depth)));
-    }
-    return projectRangeCells(meta.range, this.preview.anchor, {
-      targetAll: Boolean(meta.target_all), rows: grid.rows, depths: grid.depths,
-    });
+    return new SvelteSet(
+      (this.preview?.affected_cells ?? []).map((cell) => cellKey(cell.row, cell.depth)),
+    );
   }
 
   get previewTargetIds(): Set<number> {

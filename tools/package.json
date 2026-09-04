@@ -10,8 +10,10 @@
   },
   "scripts": {
     "sync": "node sync-bd2db.mjs",
+    "validate:catalog": "node validate-catalog.mjs",
     "validate:equipment": "node validate-bd2db-equipment.mjs",
     "validate:icons": "node validate-character-icons.mjs",
+    "verify": "npm run validate:catalog && npm run validate:equipment && npm run validate:icons",
     "test:ui": "playwright test -c playwright.config.mjs",
     "test:ui:quality": "playwright test -c playwright.config.mjs model-based-quality.spec.mjs"
   },

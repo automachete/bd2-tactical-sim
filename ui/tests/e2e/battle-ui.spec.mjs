@@ -69,6 +69,24 @@ const startWithCharacter = async (request, characterId) => {
   expect(response.ok()).toBeTruthy();
 };
 
+const startKnockbackScenario = async (request, characterId) => {
+  const catalog = await (await request.get("/api/catalog")).json();
+  const setup = structuredClone(catalog.presets.NORMAL);
+  const character = catalog.characters.find(item => item.id === characterId);
+  setup.player_units = [{
+    ...setup.player_units[0],
+    character_id: character.id,
+    costumes: maximumLoadout(character),
+    row: 1,
+    depth: 1,
+  }];
+  setup.enemy_units = [{ ...setup.enemy_units[0], row: 1, depth: 1 }];
+  setup.mcts_simulations = 3;
+  const response = await request.post("/api/start", { data: setup });
+  expect(response.ok()).toBeTruthy();
+  return response.json();
+};
+
 test.beforeEach(async ({ page, request }) => {
   await openBattle(page, request, "NORMAL");
 });
@@ -85,7 +103,8 @@ test("loads generated token portraits only from local 64px PNG assets", async ({
   expect(await portraits.count()).toBeGreaterThan(0);
   await expect.poll(() => portraits.evaluateAll(images => images.every(image => image.complete && image.naturalWidth === 64 && image.naturalHeight === 64))).toBeTruthy();
   const resources = await page.locator("link, script, img").evaluateAll(nodes => nodes.map(node => node.href || node.src));
-  expect(resources.every(url => new URL(url).origin === "http://127.0.0.1:8771")).toBeTruthy();
+  const appOrigin = new URL(page.url()).origin;
+  expect(resources.every(url => new URL(url).origin === appOrigin)).toBeTruthy();
   expect(resources.filter(url => url.endsWith(".png")).every(url => new URL(url).pathname.startsWith("/assets/character-icons/64/"))).toBeTruthy();
   const response = await request.get("/assets/character-icons/64/Lathel.png");
   expect(response.ok()).toBeTruthy();
@@ -216,18 +235,104 @@ test("selection accents follow all five character elements while global chrome r
   expect(baseAccent).not.toBe(waterAccent);
 });
 
-test("knockback card exposes each character's unique direction and one-cell vector", async ({ page, request }) => {
-  for (const [characterId, arrow] of [["Loen", "↗"], ["Liberta", "↓"], ["Lathel", "↖"]]) {
-    await startWithCharacter(request, characterId);
+test("knockback card vector, authoritative preview, and combat movement stay identical", async ({ page, request }) => {
+  for (const [characterId, arrow] of [["Loen", "↗"], ["Liberta", "←"], ["Lathel", "↘"]]) {
+    const started = await startKnockbackScenario(request, characterId);
+    const actorId = started.state.teams[0].action_order[0];
+    const legal = started.legal.find(entry => entry.unit_id === actorId).commands;
+    const knockbackIndex = legal.findIndex(command => command.type === "KNOCKBACK");
+    const offset = legal[knockbackIndex].ui.knockback_offset;
     await page.reload();
-    await expect(page.getByTestId("player-token-1")).toBeVisible();
-    await page.getByTestId("player-token-1").click();
+    await expect(page.getByTestId(`player-token-${actorId}`)).toBeVisible();
+    await page.getByTestId(`player-token-${actorId}`).click();
     const knockback = page.locator("#costume-strip [data-command-type='KNOCKBACK']");
     await expect(knockback).toContainText(arrow);
     await expect(knockback.locator(".knockback-value em")).toHaveText("1");
     await expect(knockback.locator(".knockback-grid .origin")).toHaveCount(1);
     await expect(knockback.locator(".knockback-grid .destination")).toHaveCount(1);
+    await expect(knockback.locator(".knockback-grid")).toHaveAttribute("data-knockback-row", String(offset.row));
+    await expect(knockback.locator(".knockback-grid")).toHaveAttribute("data-knockback-depth", String(offset.depth));
+    await knockback.click();
+    await expect(knockback).toHaveAttribute("aria-selected", "true");
+
+    const preview = await (await request.post("/api/preview", { data: {
+      unit_id: actorId,
+      action_index: knockbackIndex,
+      order: [actorId],
+    } })).json();
+    const previewedCells = page.locator(`.${preview.target_side.toLowerCase()}-grid .field-cell.target-preview`);
+    await expect(previewedCells).toHaveCount(preview.affected_cells.length);
+    for (const cell of preview.affected_cells) {
+      await expect(page.getByTestId(`${preview.target_side.toLowerCase()}-cell-${cell.row}-${cell.depth}`)).toHaveClass(/target-preview/);
+    }
+    const advanced = await (await request.post("/api/step", { data: {
+      actions: [knockbackIndex],
+      order: [actorId],
+    } })).json();
+    const actorEvents = [];
+    let active = false;
+    for (const event of advanced.state.event_log.slice(started.state.event_log.length)) {
+      if (event.kind.type === "ACTION_STARTED" && Number(event.kind.actor_id) === actorId) active = true;
+      if (active) actorEvents.push(event);
+      if (event.kind.type === "ACTION_ENDED" && Number(event.kind.actor_id) === actorId) break;
+    }
+    const actualMovements = actorEvents
+      .filter(event => event.kind.type === "UNIT_MOVED")
+      .map(event => ({ unit_id: event.kind.unit_id, from: event.kind.from, to: event.kind.to }));
+    const targetArea = actorEvents.find(event => event.kind.type === "TARGET_AREA_RESOLVED").kind;
+    expect(preview.actor_events).toEqual(actorEvents);
+    expect(preview.target_side).toBe(targetArea.target_side);
+    expect(preview.anchor).toEqual(targetArea.anchor);
+    expect(preview.affected_cells).toEqual(targetArea.cells);
+    expect(preview.affected_unit_ids).toEqual(targetArea.target_ids);
+    expect(preview.movements).toEqual(actualMovements);
+    expect(actualMovements).toHaveLength(1);
+    expect({
+      row: actualMovements[0].to.row - actualMovements[0].from.row,
+      depth: actualMovements[0].to.depth - actualMovements[0].from.depth,
+    }).toEqual(offset);
   }
+});
+
+test("reserved skill remains selected and executes after earlier team SP loss", async ({ page, request }) => {
+  const catalog = await (await request.get("/api/catalog")).json();
+  const setup = structuredClone(catalog.presets.NORMAL);
+  for (const [unit, characterId] of setup.player_units.map((unit, index) => [unit, ["Michaela", "Lathel", "Loen"][index]])) {
+    const character = catalog.characters.find(item => item.id === characterId);
+    unit.character_id = character.id;
+    unit.costumes = maximumLoadout(character);
+  }
+  const started = await (await request.post("/api/start", { data: setup })).json();
+  const order = started.state.teams[0].action_order;
+  await page.reload();
+
+  await page.getByTestId(`player-token-${order[0]}`).click();
+  await page.locator("#costume-strip [data-costume-id='Michaela_2']").click();
+  await page.getByTestId(`player-token-${order[1]}`).click();
+  const lathel = page.locator("#costume-strip [data-costume-id='Lathel_3']");
+  await lathel.click();
+  for (let level = 1; level <= 3; level += 1) {
+    await page.locator("#costume-strip [data-costume-id='Lathel_3'] + .burst-stepper .burst-up").click();
+  }
+  await expect(lathel).toHaveAttribute("data-burst-level", "3");
+  await page.getByTestId(`player-token-${order[2]}`).click();
+  const loen = page.locator("#costume-strip [data-costume-id='Loen_3']");
+  await loen.click();
+
+  const selectedSkillName = await loen.locator(".command-name b").textContent();
+  await expect(loen.locator(".command-prediction")).toContainText("予測");
+  await expect(page.locator("#selected-skill-name")).toHaveText(selectedSkillName);
+
+  await page.getByTestId("battle-start").click();
+  await expect.poll(async () => {
+    const state = await (await request.get("/api/state")).json();
+    return state.state.event_log.some(event => event.kind.type === "ACTION_STARTED"
+      && Number(event.kind.actor_id) === Number(order[2])
+      && event.kind.command?.costume_id === "Loen_3");
+  }).toBe(true);
+  const state = await (await request.get("/api/state")).json();
+  expect(state.state.event_log.some(event => event.kind.type === "ACTION_SKIPPED"
+    && Number(event.kind.actor_id) === Number(order[2]))).toBe(false);
 });
 
 test("selected attack shows authoritative total and per-target predicted damage", async ({ page }) => {

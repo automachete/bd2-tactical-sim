@@ -119,62 +119,6 @@ def _normalize_formation(value: Any) -> dict[str, dict[str, int]]:
     return normalized
 
 
-def _preview_footprint(
-    state: dict[str, Any],
-    actor_id: int,
-    command: dict[str, Any],
-    target_side: str | None,
-    anchor: dict[str, int] | None,
-    positions: dict[int, dict[str, int]],
-) -> tuple[list[dict[str, int]], list[int]]:
-    """Project the exact resolved command footprint onto the current mode grid."""
-    if anchor is None or target_side is None:
-        return [], []
-
-    grid = state["rules"]["grid"]
-    rows = int(grid["rows"])
-    depths = int(grid["depths"])
-    command_type = command["type"]
-    if command_type not in {"NORMAL_ATTACK", "KNOCKBACK", "USE_COSTUME"}:
-        raise ValueError(f"unsupported preview command: {command_type}")
-    metadata = command.get("ui")
-    if command_type == "USE_COSTUME" and not isinstance(metadata, dict):
-        raise ValueError("costume preview is missing authoritative UI metadata")
-    target_all = bool(metadata["target_all"]) if metadata is not None else False
-    if target_all:
-        cells = [{"row": row, "depth": depth} for row in range(rows) for depth in range(depths)]
-    else:
-        offsets = metadata["range"] if command_type == "USE_COSTUME" else None
-        if offsets is None or offsets == []:
-            offsets = [{"row": 0, "depth": 0}]
-        coordinates = {
-            (
-                int(anchor["row"]) + int(offset["row"]),
-                int(anchor["depth"]) + int(offset["depth"]),
-            )
-            for offset in offsets
-        }
-        cells = [
-            {"row": row, "depth": depth}
-            for row, depth in sorted(coordinates)
-            if 0 <= row < rows and 0 <= depth < depths
-        ]
-
-    occupied = {(cell["row"], cell["depth"]) for cell in cells}
-    affected = sorted(
-        int(raw_id)
-        for raw_id, unit in state["units"].items()
-        if unit["alive"]
-        and unit["side"] == target_side
-        and (
-            int(positions[int(raw_id)]["row"]),
-            int(positions[int(raw_id)]["depth"]),
-        )
-        in occupied
-    )
-    return cells, affected
-
-
 class GuiSession:
     """Simulator-only debug session. No policy checkpoint or training runtime is loaded."""
 
@@ -445,17 +389,6 @@ class GuiSession:
                 command["ui"] = metadata
 
             normalized_formation = {} if golden else _normalize_formation(formation)
-            positions = {
-                int(raw_id): {
-                    "row": int(unit["position"]["row"]),
-                    "depth": int(unit["position"]["depth"]),
-                }
-                for raw_id, unit in state["units"].items()
-            }
-            for raw_id, cell in normalized_formation.items():
-                if int(raw_id) in positions:
-                    positions[int(raw_id)] = dict(cell)
-
             planned_indices = (
                 _strict_int_list(actions, "preview actions") if actions is not None else None
             )
@@ -493,68 +426,68 @@ class GuiSession:
             preview_state = json.loads(temporary.state_json())
             events = preview_state["event_log"][before_count:]
             target_id: int | None = None
+            target_side: str | None = None
             anchor: dict[str, int] | None = None
+            affected_cells: list[dict[str, int]] = []
+            affected_unit_ids: list[int] = []
+            resolved_command: dict[str, Any] | None = None
             actor_action_active = False
             actor_action_finished = False
+            active_event_actor: int | None = None
+            actor_events: list[dict[str, Any]] = []
+            movements: list[dict[str, Any]] = []
+            resolved_action_order: list[int] = []
             damage_by_target: dict[int, dict[str, int]] = {}
-            alive_at_actor = {
-                int(raw_id) for raw_id, unit in state["units"].items() if unit["alive"]
-            }
-            units_at_actor = copy.deepcopy(state["units"])
-            positions_at_lock: dict[int, dict[str, int]] | None = None
-            alive_at_lock: set[int] | None = None
-            units_at_lock: dict[str, Any] | None = None
             for event in events:
                 kind = event["kind"]
                 if kind["type"] == "ACTION_STARTED":
                     event_actor = int(kind["actor_id"])
-                    if actor_action_active and event_actor != actor_id:
-                        actor_action_active = False
-                        actor_action_finished = True
-                    elif event_actor == actor_id and not actor_action_finished:
+                    if active_event_actor is None:
+                        resolved_action_order.append(event_actor)
+                        active_event_actor = event_actor
+                    elif active_event_actor != event_actor:
+                        raise RuntimeError(
+                            "preview event stream started an action before ending one"
+                        )
+                    if event_actor == actor_id and not actor_action_finished:
                         actor_action_active = True
-                if kind["type"] in {"FORMATION_CHANGED", "UNIT_MOVED"}:
-                    positions[int(kind["unit_id"])] = {
-                        "row": int(kind["to"]["row"]),
-                        "depth": int(kind["to"]["depth"]),
-                    }
-                elif kind["type"] == "UNIT_DIED":
-                    alive_at_actor.discard(int(kind["unit_id"]))
-                elif kind["type"] == "UNIT_REVIVED":
-                    alive_at_actor.add(int(kind["unit_id"]))
-                elif kind["type"] == "UNIT_SUMMONED":
-                    summoned_id = int(kind["unit_id"])
-                    summoned = preview_state["units"].get(str(summoned_id))
-                    if summoned is not None:
-                        units_at_actor[str(summoned_id)] = copy.deepcopy(summoned)
-                        positions[summoned_id] = {
-                            "row": int(kind["position"]["row"]),
-                            "depth": int(kind["position"]["depth"]),
-                        }
-                        alive_at_actor.add(summoned_id)
-                if (
-                    anchor is None
-                    and kind.get("actor_id") == actor_id
-                    and kind["type"] == "TARGET_CELL_LOCKED"
-                ):
-                    anchor = {
-                        "row": int(kind["cell"]["row"]),
-                        "depth": int(kind["cell"]["depth"]),
-                    }
-                    positions_at_lock = copy.deepcopy(positions)
-                    alive_at_lock = set(alive_at_actor)
-                    units_at_lock = copy.deepcopy(units_at_actor)
-                elif (
-                    anchor is None
-                    and kind.get("actor_id") == actor_id
-                    and kind["type"] == "TARGET_LOCKED"
-                ):
+                        resolved_command = copy.deepcopy(kind["command"])
+                        resolved_metadata = self.catalog.command_metadata(
+                            state["units"][str(actor_id)], resolved_command
+                        )
+                        if resolved_metadata is not None:
+                            resolved_command["ui"] = resolved_metadata
+                if kind.get("actor_id") == actor_id and kind["type"] == "TARGET_LOCKED":
                     target_id = int(kind["target_id"])
-                    anchor = copy.deepcopy(positions.get(target_id))
-                    positions_at_lock = copy.deepcopy(positions)
-                    alive_at_lock = set(alive_at_actor)
-                    units_at_lock = copy.deepcopy(units_at_actor)
+                elif kind.get("actor_id") == actor_id and kind["type"] == "TARGET_AREA_RESOLVED":
+                    target_side = str(kind["target_side"])
+                    anchor = {
+                        "row": int(kind["anchor"]["row"]),
+                        "depth": int(kind["anchor"]["depth"]),
+                    }
+                    affected_cells = [
+                        {"row": int(cell["row"]), "depth": int(cell["depth"])}
+                        for cell in kind["cells"]
+                    ]
+                    affected_unit_ids = [int(value) for value in kind["target_ids"]]
 
+                if actor_action_active:
+                    actor_events.append(copy.deepcopy(event))
+                    if kind["type"] == "UNIT_MOVED":
+                        movements.append(
+                            {
+                                "unit_id": int(kind["unit_id"]),
+                                "from": copy.deepcopy(kind["from"]),
+                                "to": copy.deepcopy(kind["to"]),
+                            }
+                        )
+                if kind["type"] == "ACTION_ENDED" and int(kind["actor_id"]) == actor_id:
+                    actor_action_active = False
+                    actor_action_finished = True
+                    active_event_actor = None
+                    continue
+                if kind["type"] == "ACTION_ENDED":
+                    active_event_actor = None
                 if not actor_action_active:
                     continue
                 damage_target: int | None = None
@@ -600,40 +533,20 @@ class GuiSession:
                 if evaded:
                     forecast["evaded_hits"] += 1
 
-            footprint_positions = positions_at_lock or positions
-            footprint_alive = alive_at_lock or alive_at_actor
-            footprint_units = units_at_lock or units_at_actor
-            target_side = None
-            if target_id is not None:
-                target_side = footprint_units[str(target_id)]["side"]
-            elif anchor is not None:
-                actor_side = state["units"][str(actor_id)]["side"]
-                target_side = "ENEMY" if actor_side == "PLAYER" else "PLAYER"
-            footprint_state = {
-                **state,
-                "units": {
-                    raw_id: {**unit, "alive": int(raw_id) in footprint_alive}
-                    for raw_id, unit in footprint_units.items()
-                },
-            }
-            affected_cells, affected_unit_ids = _preview_footprint(
-                footprint_state,
-                actor_id,
-                command,
-                target_side,
-                anchor,
-                footprint_positions,
-            )
             damage_forecast = [damage_by_target[unit_id] for unit_id in sorted(damage_by_target)]
             return {
                 "actor_id": actor_id,
                 "action_index": selected,
                 "command": command,
+                "resolved_command": resolved_command,
                 "target_id": target_id,
                 "target_side": target_side,
                 "anchor": anchor,
                 "affected_cells": affected_cells,
                 "affected_unit_ids": affected_unit_ids,
+                "movements": movements,
+                "actor_events": actor_events,
+                "resolved_action_order": resolved_action_order,
                 "damage_by_target": damage_forecast,
                 "total_damage": sum(item["amount"] for item in damage_forecast),
             }

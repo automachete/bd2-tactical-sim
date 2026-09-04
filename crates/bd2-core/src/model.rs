@@ -460,6 +460,34 @@ pub enum KnockbackDirection {
     DownFront,
 }
 
+impl KnockbackDirection {
+    pub const ALL: [Self; 8] = [
+        Self::Back,
+        Self::Front,
+        Self::Up,
+        Self::Down,
+        Self::UpBack,
+        Self::DownBack,
+        Self::UpFront,
+        Self::DownFront,
+    ];
+
+    /// Displacement in the same local `(row, depth)` coordinates used by the
+    /// battle grid. Both sides keep their front edge at depth zero.
+    pub const fn offset(self) -> Offset {
+        match self {
+            Self::Back => Offset { row: 0, depth: 1 },
+            Self::Front => Offset { row: 0, depth: -1 },
+            Self::Up => Offset { row: -1, depth: 0 },
+            Self::Down => Offset { row: 1, depth: 0 },
+            Self::UpBack => Offset { row: -1, depth: 1 },
+            Self::DownBack => Offset { row: 1, depth: 1 },
+            Self::UpFront => Offset { row: -1, depth: -1 },
+            Self::DownFront => Offset { row: 1, depth: -1 },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EffectPolarity {
@@ -1396,6 +1424,9 @@ pub enum BattleEventKind {
         actor_id: UnitId,
         command: UnitCommand,
     },
+    ActionEnded {
+        actor_id: UnitId,
+    },
     TargetLocked {
         actor_id: UnitId,
         target_id: UnitId,
@@ -1403,6 +1434,13 @@ pub enum BattleEventKind {
     TargetCellLocked {
         actor_id: UnitId,
         cell: Cell,
+    },
+    TargetAreaResolved {
+        actor_id: UnitId,
+        target_side: Side,
+        anchor: Cell,
+        cells: Vec<Cell>,
+        target_ids: Vec<UnitId>,
     },
     RngRolled {
         draw_id: u64,

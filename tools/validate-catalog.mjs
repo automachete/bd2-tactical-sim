@@ -5,9 +5,13 @@
  * corresponding typed evidence in every costume's fully unlocked variant.
  */
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const catalogPath = resolve(process.argv[2] ?? "data/generated/catalog.json");
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const catalogPath = process.argv[2]
+  ? resolve(process.argv[2])
+  : resolve(repositoryRoot, "data/generated/catalog.json");
 const catalog = JSON.parse(await readFile(catalogPath, "utf8"));
 
 function fullVariant(costume) {
@@ -69,6 +73,29 @@ function collectEvidence(variant) {
   };
   visitOperations(variant.operations);
   return evidence;
+}
+
+function collectLocalOperations(variant) {
+  const operations = [];
+  const visitEffect = (effect) => {
+    if (!effect) return;
+    visitOperations(effect.on_hit_received_operations ?? []);
+    visitOperations(effect.on_turn_end_operations ?? []);
+    visitEffect(effect.on_hit_received_allies);
+    visitEffect(effect.aura_allies);
+    visitEffect(effect.aura_opponents);
+    visitEffect(effect.on_chain_dealt?.stack_effect);
+    visitEffect(effect.on_chain_dealt?.threshold_effect);
+  };
+  const visitOperations = (entries) => {
+    for (const entry of entries) {
+      operations.push(entry);
+      visitEffect(entry.effect);
+      visitOperations(entry.operations ?? []);
+    }
+  };
+  visitOperations(variant.operations);
+  return operations;
 }
 
 function modifier(evidence, key, predicate = (value) => value !== 0) {
@@ -461,6 +488,7 @@ for (const character of Object.values(catalog.characters)) {
   }
 }
 let variants = 0;
+const operationKinds = {};
 const blessingIds = Object.keys(catalog.blessings ?? {}).sort();
 if (blessingIds.length !== 47) failures.push(`expected 47 current blessings, got ${blessingIds.length}`);
 for (let index = 0; index < blessingIds.length; index += 1) {
@@ -515,6 +543,9 @@ for (const costume of Object.values(catalog.costumes)) {
     failures.push(`${costume.id}: costume compilation failed: ${costume.compile_diagnostics.join("; ")}`);
   }
   for (const variant of costume.variants) {
+    for (const operation of collectLocalOperations(variant)) {
+      operationKinds[operation.op] = (operationKinds[operation.op] ?? 0) + 1;
+    }
     if (!variant.executable || variant.compile_diagnostics.length) {
       failures.push(`${costume.id}/${variant.enhancement}/${variant.burst_level}/${variant.potential_mask}: variant compilation failed`);
     }
@@ -681,6 +712,8 @@ console.log(JSON.stringify({
   characters: Object.keys(catalog.characters).length,
   costumes: Object.keys(catalog.costumes).length,
   variants,
+  operationInstances: Object.values(operationKinds).reduce((total, count) => total + count, 0),
+  operationKinds: Object.fromEntries(Object.entries(operationKinds).sort(([left], [right]) => left.localeCompare(right))),
   blessings: blessingIds.length,
   lineageChecks,
   status: "ok",

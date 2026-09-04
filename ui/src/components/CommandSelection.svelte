@@ -118,7 +118,7 @@
             <span class="command-name">
               <b>{meta.name}</b>
               <small>{meta.selector ? t(`selector.${meta.selector}`) : t("action.primaryTarget")} · {meta.operation_summary}</small>
-              <em class="command-prediction" hidden={!isSelected || !planning.preview}>{isSelected && planning.preview ? t("selection.predictedDamageInline", { damage: planning.selectedDamage.toLocaleString("ja-JP") }) : ""}</em>
+              <em class="command-prediction" hidden={!isSelected || !planning.preview}>{isSelected && planning.preview ? (planning.previewActionSkipped ? t("selection.resolvedSkipped") : t("selection.predictedDamageInline", { damage: planning.selectedDamage.toLocaleString("ja-JP") })) : ""}</em>
             </span>
             <span class="command-cost"><b>SP {session.mode === "GOLDEN_COLOSSEUM" ? "∞" : meta.sp_cost}</b>{#if cooldown && session.mode !== "GOLDEN_COLOSSEUM"}<small>CT {cooldown}</small>{/if}</span>
             <span
@@ -128,7 +128,7 @@
               style:grid-template-columns={command.type === "KNOCKBACK" ? undefined : `repeat(${grid.depths}, 8px)`}
               style:grid-template-rows={command.type === "KNOCKBACK" ? undefined : `repeat(${grid.rows}, 8px)`}
             >
-              <MiniRange range={meta.range} rows={grid.rows} depths={grid.depths} knockbackDirection={meta.knockback_direction} />
+              <MiniRange range={meta.range} rows={grid.rows} depths={grid.depths} knockbackDirection={meta.knockback_direction} knockbackOffset={meta.knockback_offset} />
             </span>
             <span class="command-state">{isSelected ? t("action.reserved") : isOnCooldown ? t("action.cooldownState", { cooldown }) : isUnaffordable ? t("action.unaffordable") : !option.available ? t("action.unavailable") : ""}</span>
           </button>

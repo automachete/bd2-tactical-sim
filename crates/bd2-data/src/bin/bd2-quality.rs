@@ -9,8 +9,8 @@ use std::{
 
 use bd2_core::{
     BattleEngine, BattleEventKind, BattleMode, BattleSetup, BattleState, Catalog, Cell,
-    CostumeLoadout, ModeRules, Side, Stats, TeamTurnPlan, UnitBuildSettings, UnitCommand,
-    UnitSetup,
+    CostumeLoadout, EffectSpec, ModeRules, Side, SkillOperation, Stats, TeamTurnPlan,
+    UnitBuildSettings, UnitCommand, UnitSetup,
 };
 use rayon::prelude::*;
 use serde::Serialize;
@@ -55,6 +55,9 @@ struct VariantReport {
     executed_variants: usize,
     preemptive_variants: usize,
     action_variants: usize,
+    source_records: usize,
+    operation_instances: usize,
+    operation_kinds: BTreeMap<&'static str, usize>,
     elapsed_seconds: f64,
     failures: Vec<String>,
 }
@@ -624,14 +627,86 @@ fn execute_every_variant(catalog: Arc<Catalog>) -> Result<VariantReport, String>
         .iter()
         .filter(|(_, _, variant)| variant.preemptive)
         .count();
+    let source_records = catalog
+        .costumes
+        .values()
+        .map(|costume| costume.source.source_id.as_str())
+        .filter(|source_id| !source_id.is_empty())
+        .collect::<BTreeSet<_>>()
+        .len();
+    let mut operation_kinds = BTreeMap::new();
+    for (_, _, variant) in &tasks {
+        count_operations(&variant.operations, &mut operation_kinds);
+    }
+    let operation_instances = operation_kinds.values().sum();
     Ok(VariantReport {
         catalog_variants: tasks.len(),
         executed_variants: tasks.len() - failures.len(),
         preemptive_variants,
         action_variants: tasks.len() - preemptive_variants,
+        source_records,
+        operation_instances,
+        operation_kinds,
         elapsed_seconds: started.elapsed().as_secs_f64(),
         failures,
     })
+}
+
+fn count_effect_operations(effect: &EffectSpec, counts: &mut BTreeMap<&'static str, usize>) {
+    count_operations(&effect.on_hit_received_operations, counts);
+    count_operations(&effect.on_turn_end_operations, counts);
+    for nested in [
+        effect.on_hit_received_allies.as_deref(),
+        effect.aura_allies.as_deref(),
+        effect.aura_opponents.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        count_effect_operations(nested, counts);
+    }
+    if let Some(trigger) = effect.on_chain_dealt.as_deref() {
+        count_effect_operations(&trigger.stack_effect, counts);
+        count_effect_operations(&trigger.threshold_effect, counts);
+    }
+}
+
+fn count_operations(operations: &[SkillOperation], counts: &mut BTreeMap<&'static str, usize>) {
+    for operation in operations {
+        let name = match operation {
+            SkillOperation::DealDamage { .. } => "DEAL_DAMAGE",
+            SkillOperation::Heal { .. } => "HEAL",
+            SkillOperation::ConsumeHp { .. } => "CONSUME_HP",
+            SkillOperation::ApplyEffect { effect } => {
+                count_effect_operations(effect, counts);
+                "APPLY_EFFECT"
+            }
+            SkillOperation::RemoveEffects { .. } => "REMOVE_EFFECTS",
+            SkillOperation::RemoveEffectsByTag { .. } => "REMOVE_EFFECTS_BY_TAG",
+            SkillOperation::AbsorbEffectsAndApplyStacks { effect, .. } => {
+                count_effect_operations(effect, counts);
+                "ABSORB_EFFECTS_AND_APPLY_STACKS"
+            }
+            SkillOperation::ExtendEffects { .. } => "EXTEND_EFFECTS",
+            SkillOperation::ChangeCooldown { .. } => "CHANGE_COOLDOWN",
+            SkillOperation::ChangeCostumeCooldown { .. } => "CHANGE_COSTUME_COOLDOWN",
+            SkillOperation::ChangeSp { .. } => "CHANGE_SP",
+            SkillOperation::ChangeSpPerSuccessfulHit { .. } => "CHANGE_SP_PER_SUCCESSFUL_HIT",
+            SkillOperation::Knockback { .. } => "KNOCKBACK",
+            SkillOperation::Conditional { operations, .. } => {
+                count_operations(operations, counts);
+                "CONDITIONAL"
+            }
+            SkillOperation::InstantDeath { .. } => "INSTANT_DEATH",
+            SkillOperation::Summon { .. } => "SUMMON",
+            SkillOperation::SelfDestruct => "SELF_DESTRUCT",
+            SkillOperation::ApplyEffectPerMatchingEnemy { effect, .. } => {
+                count_effect_operations(effect, counts);
+                "APPLY_EFFECT_PER_MATCHING_ENEMY"
+            }
+        };
+        *counts.entry(name).or_default() += 1;
+    }
 }
 
 fn execute_variant(
@@ -762,24 +837,43 @@ fn require_executed<'a>(
     actor_id: u32,
     costume_id: &str,
 ) -> Result<(), String> {
-    let mut started = false;
-    let mut skipped = false;
+    let mut matching_starts = 0;
+    let mut actor_starts = 0;
+    let mut skipped = 0;
+    let mut ended = 0;
     for event in events {
         match event {
             BattleEventKind::ActionStarted {
                 actor_id: actor,
                 command: UnitCommand::UseCostume { costume_id: id, .. },
-            } if *actor == actor_id && id == costume_id => started = true,
+            } if *actor == actor_id && id == costume_id => {
+                matching_starts += 1;
+                actor_starts += 1;
+            }
+            BattleEventKind::ActionStarted {
+                actor_id: actor, ..
+            } if *actor == actor_id => actor_starts += 1,
             BattleEventKind::ActionSkipped {
                 actor_id: actor, ..
-            } if *actor == actor_id => skipped = true,
+            } if *actor == actor_id => skipped += 1,
+            BattleEventKind::ActionEnded { actor_id: actor } if *actor == actor_id => ended += 1,
             _ => {}
         }
     }
-    if !started {
-        Err("no matching ACTION_STARTED event".into())
-    } else if skipped {
-        Err("skill execution fell back after ACTION_SKIPPED".into())
+    if matching_starts != 1 {
+        Err(format!(
+            "expected one matching ACTION_STARTED event, got {matching_starts}"
+        ))
+    } else if actor_starts != 1 {
+        Err(format!(
+            "selected action was substituted or executed more than once ({actor_starts} starts)"
+        ))
+    } else if skipped != 0 {
+        Err(format!(
+            "selected action emitted {skipped} ACTION_SKIPPED event(s)"
+        ))
+    } else if ended != 1 {
+        Err(format!("expected one ACTION_ENDED event, got {ended}"))
     } else {
         Ok(())
     }

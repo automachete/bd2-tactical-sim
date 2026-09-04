@@ -6,10 +6,16 @@
  */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const catalogPath = resolve(process.argv[2] || "data/generated/catalog.json");
-const oraclePath = resolve(process.argv[3] || "docs/validation/bd2db-current-equipment-oracle.json");
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const catalogPath = process.argv[2]
+  ? resolve(process.argv[2])
+  : resolve(repositoryRoot, "data/generated/catalog.json");
+const oraclePath = process.argv[3]
+  ? resolve(process.argv[3])
+  : resolve(repositoryRoot, "docs/validation/bd2db-current-equipment-oracle.json");
 const catalog = JSON.parse(await readFile(catalogPath, "utf8"));
 const oracle = JSON.parse(await readFile(oraclePath, "utf8"));
 
@@ -70,6 +76,15 @@ function abilityStats(text) {
 function add(target, source) {
   for (const [key, value] of Object.entries(source)) target[key] = (target[key] || 0) + value;
   return target;
+}
+
+function withoutFetchMetadata(equipment) {
+  return Object.fromEntries(Object.entries(equipment).map(([id, definition]) => {
+    const clone = structuredClone(definition);
+    delete clone.source?.observed_at;
+    delete clone.source?.source_digest;
+    return [id, clone];
+  }));
 }
 
 function sorted(value) {
@@ -202,7 +217,11 @@ for (const definition of definitions) {
 }
 
 assert.equal(computedCases.length, 3626, "equipment/refinement/main-ability case count");
-equal(oracle.equipment, catalog.equipment, "oracle and imported catalog definitions differ");
+equal(
+  withoutFetchMetadata(oracle.equipment),
+  withoutFetchMetadata(catalog.equipment),
+  "oracle and imported catalog definitions differ",
+);
 equal(oracle.cases, computedCases, "exhaustive BD2DB equipment cases differ");
 assert.equal(oracle.scope.equipment_count, definitions.length);
 assert.equal(oracle.scope.case_count, computedCases.length);

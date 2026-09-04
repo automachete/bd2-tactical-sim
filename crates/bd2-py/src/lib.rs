@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use std::collections::BTreeMap;
 
-use bd2_core::{BattleEngine, BattleSetup, Side, TeamTurnPlan, TerminalResult};
+use bd2_core::{
+    BattleEngine, BattleSetup, KnockbackDirection, Offset, Side, TeamTurnPlan, TerminalResult,
+};
 use bd2_data::Database;
 use numpy::{IntoPyArray, ndarray::Array1, ndarray::Array2, ndarray::Array3, ndarray::Array4};
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyDict};
@@ -44,6 +46,21 @@ struct BatchStepOutput {
     reward: f32,
     done: bool,
     terminal: Option<TerminalResult>,
+}
+
+#[derive(Serialize)]
+struct KnockbackOffsetMetadata {
+    direction: KnockbackDirection,
+    offset: Offset,
+}
+
+#[pyfunction]
+fn knockback_offsets_json() -> PyResult<String> {
+    let metadata = KnockbackDirection::ALL.map(|direction| KnockbackOffsetMetadata {
+        direction,
+        offset: direction.offset(),
+    });
+    serde_json::to_string(&metadata).map_err(py_error)
 }
 
 #[pyclass(name = "BatchSimulator")]
@@ -536,6 +553,7 @@ fn parse_side(value: &str) -> PyResult<Side> {
 
 #[pymodule]
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_function(wrap_pyfunction!(knockback_offsets_json, module)?)?;
     module.add_class::<PySimulator>()?;
     module.add_class::<PyBatchSimulator>()?;
     module.add("CORE_VERSION", env!("CARGO_PKG_VERSION"))?;

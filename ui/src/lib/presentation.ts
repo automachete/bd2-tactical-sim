@@ -22,6 +22,7 @@ export type CommandPresentation = {
   selector?: string;
   target_all?: boolean;
   knockback_direction?: string;
+  knockback_offset?: { row: number; depth: number };
   knockback_arrow?: string;
   knockback_distance?: number;
 };
@@ -75,7 +76,10 @@ export const commandPresentation = (catalog: Catalog, unit: BattleUnit, command:
     return { name: t("action.normal"), sp_cost: 0, cooldown: 0, range: [{ row: 0, depth: 0 }], operation_summary: t("action.normalSummary"), description_ja: "", glyph: "⚔" };
   }
   if (command.type === "KNOCKBACK") {
-    const presentation = knockbackPresentation(entityById(catalog, unit.character_id)?.knockback_direction);
+    const presentation = knockbackPresentation(
+      command.ui?.knockback_direction,
+      command.ui?.knockback_offset,
+    );
     return {
       name: t("action.knockback"),
       sp_cost: 0,
@@ -89,6 +93,7 @@ export const commandPresentation = (catalog: Catalog, unit: BattleUnit, command:
       }),
       glyph: presentation.arrow,
       knockback_direction: presentation.direction,
+      knockback_offset: { row: presentation.row, depth: presentation.depth },
       knockback_arrow: presentation.arrow,
       knockback_distance: presentation.distance,
     };
@@ -138,8 +143,10 @@ export const humanEvent = (event: BattleEvent, unitName: (unitId: number) => str
     case "FORMATION_CHANGED": detail = t("event.formationChanged", { unit: unitName(target), from: cellText(kind.from), to: cellText(kind.to) }); break;
     case "ACTION_STARTED":
     case "ACTION_DECLARED": detail = t("event.actionStarted", { unit: unitName(actor), action: commandText(kind.command) }); break;
+    case "ACTION_ENDED": detail = t("event.actionEnded", { unit: unitName(actor) }); break;
     case "TARGET_LOCKED": detail = t("event.targetLocked", { actor: unitName(actor), target: unitName(target) }); break;
     case "TARGET_CELL_LOCKED": detail = t("event.targetCellLocked", { actor: unitName(actor), cell: cellText(kind.cell) }); break;
+    case "TARGET_AREA_RESOLVED": detail = t("event.targetAreaResolved", { actor: unitName(actor), cells: Array.isArray(kind.cells) ? kind.cells.length : 0, targets: Array.isArray(kind.target_ids) ? kind.target_ids.length : 0 }); break;
     case "RNG_ROLLED": detail = t("event.rng", { result: t(eventBoolean(kind, "success") ? "event.success" : "event.failure") }); break;
     case "DAMAGE_APPLIED": detail = t("event.damage", { actor: unitName(actor), target: unitName(target), amount: formatNumber(Number(eventValue(kind, "amount"))), critical: eventBoolean(kind, "critical") ? t("event.criticalSuffix") : "" }); break;
     case "DAMAGE_EVADED": detail = t("event.damageEvaded", { target: unitName(target) }); break;

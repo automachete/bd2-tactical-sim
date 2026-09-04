@@ -160,10 +160,18 @@ const snapshot = (events: BattleSnapshot["state"]["event_log"] = []): BattleSnap
 });
 
 const preview = (damage: number): PreviewResult => ({
+  actor_id: 1,
+  action_index: 0,
+  command: { type: "NORMAL_ATTACK" },
+  resolved_command: { type: "NORMAL_ATTACK" },
+  target_id: 101,
   anchor: { row: 0, depth: 0 },
   target_side: "ENEMY",
   affected_cells: [{ row: 0, depth: 0 }],
   affected_unit_ids: [],
+  movements: [],
+  actor_events: [],
+  resolved_action_order: [1],
   damage_by_target: [],
   total_damage: damage,
 });
@@ -217,6 +225,17 @@ describe("state async lifecycle", () => {
     pending[1]?.resolve(preview(20));
     await Promise.resolve();
     expect(planning.preview?.total_damage).toBe(20);
+    planning.preview = { ...preview(1), resolved_command: { type: "KNOCKBACK" } };
+    expect(planning.selectedCommand?.type).toBe("NORMAL_ATTACK");
+    planning.preview = { ...preview(0), resolved_command: null };
+    expect(planning.previewActionSkipped).toBe(true);
+    expect(planning.selectedCommand?.type).toBe("NORMAL_ATTACK");
+    planning.preview = {
+      ...preview(0),
+      resolved_command: { type: "NORMAL_ATTACK" },
+      actor_events: [{ sequence: 2, kind: { type: "ACTION_SKIPPED", actor_id: 1 } }],
+    };
+    expect(planning.previewActionSkipped).toBe(true);
 
     planning.requestPreview();
     await vi.advanceTimersByTimeAsync(120);

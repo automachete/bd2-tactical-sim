@@ -25,6 +25,12 @@ pub struct BattleEngine {
     current_skill_actor: Option<UnitId>,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ReservedSpCost {
+    Fixed(i32),
+    Remaining,
+}
+
 impl BattleEngine {
     pub fn new(catalog: Arc<Catalog>, setup: BattleSetup, seed: u64) -> Result<Self> {
         validate_setup(&catalog, &setup)?;
@@ -684,6 +690,7 @@ impl BattleEngine {
                             },
                         )?;
                         self.state.action_sequence += 1;
+                        self.emit(BattleEventKind::ActionEnded { actor_id: id });
                     }
                 }
             }
@@ -751,6 +758,7 @@ impl BattleEngine {
             ));
         }
         let mut reserved_sp = self.state.teams[side.index()].sp;
+        let mut reserved_costs = BTreeMap::new();
         for unit_id in &order {
             let unit = &self.state.units[unit_id];
             if !unit.alive || !unit.can_act {
@@ -777,8 +785,10 @@ impl BattleEngine {
                     ));
                 }
                 if variant.consume_remaining_sp {
+                    reserved_costs.insert(*unit_id, ReservedSpCost::Remaining);
                     reserved_sp = 0;
                 } else {
+                    reserved_costs.insert(*unit_id, ReservedSpCost::Fixed(cost));
                     reserved_sp -= cost;
                 }
             }
@@ -812,19 +822,26 @@ impl BattleEngine {
                 .get(&unit_id)
                 .cloned()
                 .expect("validated turn plan must contain every actionable unit");
-            match self.execute_command(unit_id, command) {
+            let reserved_cost = reserved_costs.get(&unit_id).copied();
+            let action_checkpoint = self.clone();
+            match self.execute_reserved_command(unit_id, command.clone(), reserved_cost) {
                 Ok(()) => {}
                 Err(BattleError::IllegalAction(reason)) => {
+                    *self = action_checkpoint;
+                    self.emit(BattleEventKind::ActionStarted {
+                        actor_id: unit_id,
+                        command,
+                    });
                     self.emit(BattleEventKind::ActionSkipped {
                         actor_id: unit_id,
                         reason,
                     });
-                    self.execute_command(unit_id, UnitCommand::NormalAttack)?;
                 }
                 Err(error) => return Err(error),
             }
             self.state.action_sequence += 1;
             self.tick_action_effects(unit_id);
+            self.emit(BattleEventKind::ActionEnded { actor_id: unit_id });
             self.evaluate_terminal();
             if side == Side::Player
                 && self.state.rules.mode == BattleMode::MonsterChaser
@@ -905,16 +922,10 @@ impl BattleEngine {
                 "unit {actor_id} command is not legal for the current Colosseum action"
             )));
         }
-        match self.execute_command(actor_id, command) {
-            Ok(()) => {}
-            Err(BattleError::IllegalAction(reason)) => {
-                self.emit(BattleEventKind::ActionSkipped { actor_id, reason });
-                self.execute_command(actor_id, UnitCommand::NormalAttack)?;
-            }
-            Err(error) => return Err(error),
-        }
+        self.execute_command(actor_id, command)?;
         self.state.action_sequence += 1;
         self.tick_action_effects(actor_id);
+        self.emit(BattleEventKind::ActionEnded { actor_id });
         self.emit(BattleEventKind::TurnEnded {
             side,
             turn: all_turn,
@@ -1296,6 +1307,7 @@ impl BattleEngine {
                     .or_default() += 1;
                 self.state.action_sequence += 1;
                 self.tick_action_effects(actor_id);
+                self.emit(BattleEventKind::ActionEnded { actor_id });
                 self.evaluate_terminal();
                 if self.state.terminal.is_some() {
                     return Ok(());
@@ -1306,6 +1318,15 @@ impl BattleEngine {
     }
 
     fn execute_command(&mut self, actor_id: UnitId, command: UnitCommand) -> Result<()> {
+        self.execute_reserved_command(actor_id, command, None)
+    }
+
+    fn execute_reserved_command(
+        &mut self,
+        actor_id: UnitId,
+        command: UnitCommand,
+        reserved_sp_cost: Option<ReservedSpCost>,
+    ) -> Result<()> {
         self.emit(BattleEventKind::ActionStarted {
             actor_id,
             command: command.clone(),
@@ -1317,6 +1338,16 @@ impl BattleEngine {
                 self.emit(BattleEventKind::TargetLocked {
                     actor_id,
                     target_id: target,
+                });
+                let target_side = self.state.units[&target].side;
+                let anchor = self.state.units[&target].position;
+                let (cells, target_ids) = self.resolve_target_area(anchor, target_side, &[], false);
+                self.emit(BattleEventKind::TargetAreaResolved {
+                    actor_id,
+                    target_side,
+                    anchor,
+                    cells,
+                    target_ids,
                 });
                 let kind = match self.character_attack_type(actor_id)? {
                     AttackType::Physical => DamageKind::Physical,
@@ -1347,6 +1378,16 @@ impl BattleEngine {
                 self.emit(BattleEventKind::TargetLocked {
                     actor_id,
                     target_id: target,
+                });
+                let target_side = self.state.units[&target].side;
+                let anchor = self.state.units[&target].position;
+                let (cells, target_ids) = self.resolve_target_area(anchor, target_side, &[], false);
+                self.emit(BattleEventKind::TargetAreaResolved {
+                    actor_id,
+                    target_side,
+                    anchor,
+                    cells,
+                    target_ids,
                 });
                 self.apply_raw_damage(actor_id, target, 1, false, 1);
                 if self.state.units.get(&target).is_some_and(|unit| unit.alive) {
@@ -1383,7 +1424,8 @@ impl BattleEngine {
                 }
                 let costume = self.catalog.costumes[&costume_id].clone();
                 let base_cost = adjusted_sp_cost(variant.sp_cost, &effective_modifiers(unit));
-                if !self.state.rules.sp_costs_bypassed
+                if reserved_sp_cost.is_none()
+                    && !self.state.rules.sp_costs_bypassed
                     && self.state.teams[unit.side.index()].sp < base_cost
                 {
                     return Err(BattleError::IllegalAction("insufficient SP".into()));
@@ -1397,25 +1439,28 @@ impl BattleEngine {
                     return Err(BattleError::IllegalAction("costume is on cooldown".into()));
                 }
                 let side = unit.side;
-                let cost = if self.state.rules.sp_costs_bypassed {
-                    0
-                } else if variant.consume_remaining_sp {
-                    self.state.teams[side.index()].sp
-                } else {
-                    base_cost
+                let cost = match reserved_sp_cost {
+                    _ if self.state.rules.sp_costs_bypassed => 0,
+                    Some(ReservedSpCost::Fixed(cost)) => cost,
+                    Some(ReservedSpCost::Remaining) => self.state.teams[side.index()].sp,
+                    None if variant.consume_remaining_sp => self.state.teams[side.index()].sp,
+                    None => base_cost,
                 };
                 self.change_sp(side, -cost, "COSTUME_SKILL");
                 self.current_skill_sp_cost = cost;
                 self.current_skill_base_sp_cost = base_cost;
                 self.current_skill_successful_hits = 0;
                 self.current_skill_actor = Some(actor_id);
-                let (target, targets) = if let Some(cell) = variant.fixed_target_cell {
+                let (target, target_side, anchor, cells, targets) = if let Some(cell) =
+                    variant.fixed_target_cell
+                {
                     let target_side = side.opponent();
                     self.emit(BattleEventKind::TargetCellLocked { actor_id, cell });
-                    let targets = self.targets_in_range_cell(
+                    let (cells, targets) = self.resolve_target_area(
                         cell,
                         target_side,
                         variant.range_override.as_deref().unwrap_or(&costume.range),
+                        false,
                     );
                     let main = self
                         .state
@@ -1427,7 +1472,7 @@ impl BattleEngine {
                         .map(|target| target.id)
                         .or_else(|| targets.first().copied())
                         .unwrap_or(actor_id);
-                    (main, targets)
+                    (main, target_side, cell, cells, targets)
                 } else {
                     let target =
                         self.select_main_target(actor_id, variant.selector, explicit_target)?;
@@ -1436,22 +1481,22 @@ impl BattleEngine {
                         target_id: target,
                     });
                     let target_side = self.state.units[&target].side;
-                    let targets = if variant.target_all {
-                        self.state
-                            .units
-                            .values()
-                            .filter(|unit| unit.alive && unit.side == target_side)
-                            .map(|unit| unit.id)
-                            .collect()
-                    } else {
-                        self.targets_in_range(
-                            target,
-                            target_side,
-                            variant.range_override.as_deref().unwrap_or(&costume.range),
-                        )
-                    };
-                    (target, targets)
+                    let anchor = self.state.units[&target].position;
+                    let (cells, targets) = self.resolve_target_area(
+                        anchor,
+                        target_side,
+                        variant.range_override.as_deref().unwrap_or(&costume.range),
+                        variant.target_all,
+                    );
+                    (target, target_side, anchor, cells, targets)
                 };
+                self.emit(BattleEventKind::TargetAreaResolved {
+                    actor_id,
+                    target_side,
+                    anchor,
+                    cells,
+                    target_ids: targets.clone(),
+                });
                 for operation in variant.operations.clone() {
                     self.execute_operation(actor_id, target, &targets, operation)?;
                 }
@@ -3006,13 +3051,13 @@ impl BattleEngine {
         {
             return Ok(());
         }
-        let (dr, dd) = knockback_delta(direction);
+        let offset = direction.offset();
         let mut destination = target.position;
         let mut occupant = None;
         for step in 1..=distance {
             let candidate = Cell {
-                row: target.position.row + dr * step as i8,
-                depth: target.position.depth + dd * step as i8,
+                row: target.position.row + offset.row * step as i8,
+                depth: target.position.depth + offset.depth * step as i8,
             };
             if !self.state.rules.grid.contains(candidate) {
                 break;
@@ -3190,23 +3235,18 @@ impl BattleEngine {
         Err(BattleError::IllegalAction("no valid target".into()))
     }
 
-    fn targets_in_range(
-        &self,
-        anchor_id: UnitId,
-        side: Side,
-        range: &[crate::Offset],
-    ) -> Vec<UnitId> {
-        let anchor = self.state.units[&anchor_id].position;
-        self.targets_in_range_cell(anchor, side, range)
-    }
-
-    fn targets_in_range_cell(
+    fn resolve_target_area(
         &self,
         anchor: Cell,
         side: Side,
         range: &[crate::Offset],
-    ) -> Vec<UnitId> {
-        let cells: BTreeSet<_> = if range.is_empty() {
+        target_all: bool,
+    ) -> (Vec<Cell>, Vec<UnitId>) {
+        let coordinates: BTreeSet<_> = if target_all {
+            (0..self.state.rules.grid.rows)
+                .flat_map(|row| (0..self.state.rules.grid.depths).map(move |depth| (row, depth)))
+                .collect()
+        } else if range.is_empty() {
             BTreeSet::from([(anchor.row, anchor.depth)])
         } else {
             range
@@ -3214,16 +3254,24 @@ impl BattleEngine {
                 .map(|offset| (anchor.row + offset.row, anchor.depth + offset.depth))
                 .collect()
         };
-        self.state
+        let cells: Vec<_> = coordinates
+            .into_iter()
+            .map(|(row, depth)| Cell { row, depth })
+            .filter(|cell| self.state.rules.grid.contains(*cell))
+            .collect();
+        let occupied: BTreeSet<_> = cells.iter().map(|cell| (cell.row, cell.depth)).collect();
+        let targets = self
+            .state
             .units
             .values()
             .filter(|unit| {
                 unit.alive
                     && unit.side == side
-                    && cells.contains(&(unit.position.row, unit.position.depth))
+                    && occupied.contains(&(unit.position.row, unit.position.depth))
             })
             .map(|unit| unit.id)
-            .collect()
+            .collect();
+        (cells, targets)
     }
 
     fn resolve_variant<'a>(
@@ -5327,6 +5375,7 @@ fn validate_event_history(state: &BattleState) -> Result<()> {
     let mut battle_started = 0_usize;
     let mut battle_ended = Vec::new();
     let mut battle_has_ended = false;
+    let mut active_action = None;
     for (index, event) in state.event_log.iter().enumerate() {
         if event.sequence != index as u64 {
             return Err(BattleError::InvalidScenario(format!(
@@ -5341,6 +5390,64 @@ fn validate_event_history(state: &BattleState) -> Result<()> {
         }
         match &event.kind {
             BattleEventKind::BattleStarted { .. } => battle_started += 1,
+            BattleEventKind::ActionStarted { actor_id, .. } => {
+                if let Some(active) = active_action {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "event log starts action {actor_id} before action {active} ended"
+                    )));
+                }
+                active_action = Some(*actor_id);
+            }
+            BattleEventKind::ActionEnded { actor_id } => {
+                if active_action != Some(*actor_id) {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "event log ends action {actor_id} without a matching start"
+                    )));
+                }
+                active_action = None;
+            }
+            BattleEventKind::TargetAreaResolved {
+                actor_id,
+                target_side,
+                anchor,
+                cells,
+                target_ids,
+            } => {
+                if active_action != Some(*actor_id) {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "event log resolves a target area for inactive actor {actor_id}"
+                    )));
+                }
+                if anchor.row < 0
+                    || anchor.row >= state.rules.grid.rows
+                    || anchor.depth < 0
+                    || anchor.depth >= state.rules.grid.depths
+                {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "TARGET_AREA_RESOLVED event {index} has an out-of-bounds anchor"
+                    )));
+                }
+                let coordinates: Vec<_> = cells.iter().map(|cell| (cell.row, cell.depth)).collect();
+                if cells.iter().any(|cell| !state.rules.grid.contains(*cell))
+                    || coordinates.windows(2).any(|pair| pair[0] >= pair[1])
+                {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "TARGET_AREA_RESOLVED event {index} has invalid or non-canonical cells"
+                    )));
+                }
+                if target_ids.windows(2).any(|pair| pair[0] >= pair[1])
+                    || target_ids.iter().any(|target_id| {
+                        !state
+                            .units
+                            .get(target_id)
+                            .is_some_and(|unit| unit.side == *target_side)
+                    })
+                {
+                    return Err(BattleError::InvalidScenario(format!(
+                        "TARGET_AREA_RESOLVED event {index} has invalid or non-canonical targets"
+                    )));
+                }
+            }
             BattleEventKind::BattleEnded { result } => {
                 battle_has_ended = true;
                 battle_ended.push(result);
@@ -5380,6 +5487,11 @@ fn validate_event_history(state: &BattleState) -> Result<()> {
     if battle_started != 1 {
         return Err(BattleError::InvalidScenario(format!(
             "event log contains {battle_started} BATTLE_STARTED events"
+        )));
+    }
+    if let Some(actor_id) = active_action {
+        return Err(BattleError::InvalidScenario(format!(
+            "event log leaves action {actor_id} unfinished"
         )));
     }
     match (&state.terminal, battle_ended.as_slice()) {
@@ -5948,20 +6060,6 @@ fn modifier_strength(mods: &StatModifiers) -> i64 {
         .saturating_add(mods.attack_flat.unsigned_abs() as i64)
         .saturating_add(mods.magic_flat.unsigned_abs() as i64)
 }
-fn knockback_delta(direction: crate::KnockbackDirection) -> (i8, i8) {
-    use crate::KnockbackDirection::*;
-    match direction {
-        Back => (0, 1),
-        Front => (0, -1),
-        Up => (-1, 0),
-        Down => (1, 0),
-        UpBack => (-1, 1),
-        DownBack => (1, 1),
-        UpFront => (-1, -1),
-        DownFront => (1, -1),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6241,6 +6339,134 @@ mod tests {
     }
 
     #[test]
+    fn accepted_skill_reservations_survive_earlier_team_sp_loss() {
+        for follower_cost in 0..=crate::SP_CAP {
+            for prior_sp_change in [
+                i32::MIN,
+                -crate::SP_CAP,
+                -6,
+                -1,
+                0,
+                1,
+                6,
+                crate::SP_CAP,
+                i32::MAX,
+            ] {
+                let mut owned = (*catalog()).clone();
+                owned.costumes.get_mut("hero_skill").unwrap().variants[0].sp_cost = follower_cost;
+                let mut sp_source = owned.costumes["hero_skill"].clone();
+                sp_source.id = "sp_source".into();
+                sp_source.variants[0].sp_cost = 0;
+                sp_source.variants[0].operations = vec![SkillOperation::ChangeSp {
+                    amount: prior_sp_change,
+                    side: EffectRecipient::ActorSide,
+                }];
+                owned.costumes.insert(sp_source.id.clone(), sp_source);
+                owned
+                    .characters
+                    .get_mut("hero")
+                    .unwrap()
+                    .costume_ids
+                    .push("sp_source".into());
+
+                let mut battle = setup(BattleMode::Normal);
+                battle.rules.initial_sp[Side::Player.index()] = follower_cost;
+                battle.units[0].costume_loadout[0].costume_id = "sp_source".into();
+                let mut second_actor = battle.units[0].clone();
+                second_actor.unit_id = 3;
+                second_actor.position = Cell { row: 1, depth: 0 };
+                second_actor.costume_loadout[0].costume_id = "hero_skill".into();
+                battle.units.push(second_actor);
+                let mut engine = BattleEngine::new(Arc::new(owned), battle, 1).unwrap();
+                let skill = |costume_id: &str| UnitCommand::UseCostume {
+                    costume_id: costume_id.into(),
+                    burst_level: 0,
+                    explicit_target: None,
+                };
+
+                let transition = engine
+                    .step(TeamTurnPlan {
+                        side: Side::Player,
+                        order: vec![1, 3],
+                        commands: BTreeMap::from([
+                            (1, skill("sp_source")),
+                            (3, skill("hero_skill")),
+                        ]),
+                        formation: BTreeMap::new(),
+                    })
+                    .unwrap();
+
+                assert!(
+                    transition.events.iter().any(|event| matches!(
+                        &event.kind,
+                        BattleEventKind::ActionStarted {
+                            actor_id: 3,
+                            command: UnitCommand::UseCostume { costume_id, .. },
+                        } if costume_id == "hero_skill"
+                    )),
+                    "reserved cost {follower_cost} was lost after SP delta {prior_sp_change}"
+                );
+                assert!(
+                    !transition.events.iter().any(|event| matches!(
+                        event.kind,
+                        BattleEventKind::ActionSkipped { actor_id: 3, .. }
+                    )),
+                    "reserved cost {follower_cost} was skipped after SP delta {prior_sp_change}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn accepted_skill_that_becomes_blocked_is_skipped_without_basic_attack_substitution() {
+        let mut owned = (*catalog()).clone();
+        let mut silence = effect_spec("team-silence");
+        silence.polarity = EffectPolarity::Harmful;
+        silence.recipient = EffectRecipient::ActorTeam;
+        silence.tags.insert("SILENCE".into());
+        owned.costumes.get_mut("hero_skill").unwrap().variants[0].operations =
+            vec![SkillOperation::ApplyEffect { effect: silence }];
+        let mut battle = setup(BattleMode::Normal);
+        let mut second_actor = battle.units[0].clone();
+        second_actor.unit_id = 3;
+        second_actor.position = Cell { row: 1, depth: 0 };
+        battle.units.push(second_actor);
+        let mut engine = BattleEngine::new(Arc::new(owned), battle, 1).unwrap();
+        let skill = || UnitCommand::UseCostume {
+            costume_id: "hero_skill".into(),
+            burst_level: 0,
+            explicit_target: None,
+        };
+
+        let transition = engine
+            .step(TeamTurnPlan {
+                side: Side::Player,
+                order: vec![1, 3],
+                commands: BTreeMap::from([(1, skill()), (3, skill())]),
+                formation: BTreeMap::new(),
+            })
+            .unwrap();
+        let second_starts = transition
+            .events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                BattleEventKind::ActionStarted {
+                    actor_id: 3,
+                    command,
+                } => Some(command),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(second_starts, vec![&skill()]);
+        assert!(transition.events.iter().any(|event| matches!(
+            &event.kind,
+            BattleEventKind::ActionSkipped { actor_id: 3, reason }
+                if reason == "actor is silenced"
+        )));
+    }
+
+    #[test]
     fn snapshot_restore_is_bit_exact() {
         let mut first = BattleEngine::new(catalog(), setup(BattleMode::Normal), 99).unwrap();
         let snapshot = first.state_json().unwrap();
@@ -6416,6 +6642,19 @@ mod tests {
             .iter()
             .position(|event| matches!(event.kind, BattleEventKind::BattleEnded { .. }))
             .unwrap();
+        let action_start_index = terminal
+            .event_log
+            .iter()
+            .position(|event| matches!(event.kind, BattleEventKind::ActionStarted { .. }))
+            .unwrap();
+
+        let mut nested_same_actor = terminal.clone();
+        nested_same_actor.event_log.insert(
+            action_start_index + 1,
+            nested_same_actor.event_log[action_start_index].clone(),
+        );
+        resequence(&mut nested_same_actor);
+        assert!(BattleEngine::from_state(Arc::clone(&catalog), nested_same_actor).is_err());
 
         let mut missing_end = terminal.clone();
         missing_end.event_log.remove(end_index);
@@ -6795,25 +7034,176 @@ mod tests {
     }
 
     #[test]
-    fn built_in_knockback_uses_the_actors_character_direction() {
+    fn built_in_knockback_uses_every_character_direction_offset() {
+        for direction in crate::KnockbackDirection::ALL {
+            let mut owned = (*catalog()).clone();
+            owned
+                .characters
+                .get_mut("hero")
+                .unwrap()
+                .knockback_direction = direction;
+            let mut battle_setup = setup(BattleMode::Normal);
+            battle_setup.units[1].position = Cell { row: 1, depth: 1 };
+            let mut engine = BattleEngine::new(Arc::new(owned), battle_setup, 1).unwrap();
+
+            engine
+                .step(TeamTurnPlan {
+                    side: Side::Player,
+                    order: vec![1],
+                    commands: BTreeMap::from([(1, UnitCommand::Knockback)]),
+                    formation: BTreeMap::new(),
+                })
+                .unwrap();
+
+            let offset = direction.offset();
+            let expected = Cell {
+                row: 1 + offset.row,
+                depth: 1 + offset.depth,
+            };
+            assert_eq!(engine.state.units[&2].position, expected, "{direction:?}");
+            assert!(
+                engine.state.event_log.iter().any(|event| matches!(
+                    event.kind,
+                    BattleEventKind::UnitMoved {
+                        unit_id: 2,
+                        from: Cell { row: 1, depth: 1 },
+                        to,
+                    } if to == expected
+                )),
+                "{direction:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn knockback_offsets_use_the_same_local_coordinates_for_both_sides() {
+        for direction in crate::KnockbackDirection::ALL {
+            let mut battle_setup = setup(BattleMode::Normal);
+            battle_setup.units[0].position = Cell { row: 1, depth: 1 };
+            let mut engine = BattleEngine::new(catalog(), battle_setup, 1).unwrap();
+
+            engine.knockback(2, 1, direction, 1, 2_500).unwrap();
+
+            let offset = direction.offset();
+            assert_eq!(
+                engine.state.units[&1].position,
+                Cell {
+                    row: 1 + offset.row,
+                    depth: 1 + offset.depth,
+                },
+                "{direction:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_knockback_direction_stops_at_the_board_edge() {
+        for direction in crate::KnockbackDirection::ALL {
+            let offset = direction.offset();
+            let start = Cell {
+                row: match offset.row.cmp(&0) {
+                    std::cmp::Ordering::Less => 0,
+                    std::cmp::Ordering::Greater => 2,
+                    std::cmp::Ordering::Equal => 1,
+                },
+                depth: match offset.depth.cmp(&0) {
+                    std::cmp::Ordering::Less => 0,
+                    std::cmp::Ordering::Greater => 3,
+                    std::cmp::Ordering::Equal => 1,
+                },
+            };
+            let mut battle_setup = setup(BattleMode::Normal);
+            battle_setup.units[1].position = start;
+            let mut engine = BattleEngine::new(catalog(), battle_setup, 1).unwrap();
+
+            engine.knockback(1, 2, direction, 1, 2_500).unwrap();
+
+            assert_eq!(engine.state.units[&2].position, start, "{direction:?}");
+            assert!(
+                !engine.state.event_log.iter().any(|event| matches!(
+                    event.kind,
+                    BattleEventKind::UnitMoved { unit_id: 2, .. }
+                )),
+                "{direction:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_knockback_direction_stops_before_a_blocked_cell() {
+        for direction in crate::KnockbackDirection::ALL {
+            let offset = direction.offset();
+            let blocked = Cell {
+                row: 1 + offset.row,
+                depth: 1 + offset.depth,
+            };
+            let mut battle_setup = setup(BattleMode::Normal);
+            battle_setup.units[0].position = Cell { row: 0, depth: 3 };
+            battle_setup.units[1].position = Cell { row: 1, depth: 1 };
+            battle_setup
+                .rules
+                .grid
+                .blocked
+                .insert((blocked.row, blocked.depth));
+            let mut engine = BattleEngine::new(catalog(), battle_setup, 1).unwrap();
+
+            engine.knockback(1, 2, direction, 1, 2_500).unwrap();
+
+            assert_eq!(
+                engine.state.units[&2].position,
+                Cell { row: 1, depth: 1 },
+                "{direction:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn target_area_event_is_clipped_deduplicated_block_aware_and_matches_targets() {
         let mut owned = (*catalog()).clone();
-        owned
-            .characters
-            .get_mut("hero")
-            .unwrap()
-            .knockback_direction = crate::KnockbackDirection::DownBack;
-        let mut engine = BattleEngine::new(Arc::new(owned), setup(BattleMode::Normal), 1).unwrap();
+        owned.costumes.get_mut("hero_skill").unwrap().range = vec![
+            Offset { row: -1, depth: 0 },
+            Offset { row: 0, depth: 0 },
+            Offset { row: 0, depth: 0 },
+            Offset { row: 0, depth: 1 },
+            Offset { row: 1, depth: 0 },
+        ];
+        let mut battle_setup = setup(BattleMode::Normal);
+        battle_setup.rules.grid.blocked.insert((0, 1));
+        let mut second_target = battle_setup.units[1].clone();
+        second_target.unit_id = 3;
+        second_target.position = Cell { row: 1, depth: 0 };
+        battle_setup.units.push(second_target);
+        let mut engine = BattleEngine::new(Arc::new(owned), battle_setup, 1).unwrap();
 
         engine
             .step(TeamTurnPlan {
                 side: Side::Player,
                 order: vec![1],
-                commands: BTreeMap::from([(1, UnitCommand::Knockback)]),
+                commands: BTreeMap::from([(
+                    1,
+                    UnitCommand::UseCostume {
+                        costume_id: "hero_skill".into(),
+                        burst_level: 0,
+                        explicit_target: None,
+                    },
+                )]),
                 formation: BTreeMap::new(),
             })
             .unwrap();
 
-        assert_eq!(engine.state.units[&2].position, Cell { row: 1, depth: 1 });
+        assert!(engine.state.event_log.iter().any(|event| matches!(
+            &event.kind,
+            BattleEventKind::TargetAreaResolved {
+                actor_id: 1,
+                target_side: Side::Enemy,
+                anchor: Cell { row: 0, depth: 0 },
+                cells,
+                target_ids,
+            } if cells == &[
+                Cell { row: 0, depth: 0 },
+                Cell { row: 1, depth: 0 },
+            ] && target_ids == &[2, 3]
+        )));
     }
 
     #[test]

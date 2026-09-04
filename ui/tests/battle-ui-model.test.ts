@@ -22,7 +22,6 @@ import {
   playbackDelay,
   plannedBurstSpCost,
   plannedSpCost,
-  projectRangeCells,
   rangePreviewCells,
   reorder,
   selectCommand,
@@ -91,28 +90,36 @@ test("serializeFormation filters disallowed unit ids", () => {
   assert.deepEqual(serializeFormation({ 1: { row: 0, depth: 0 }, 2: { row: 1, depth: 1 } }, [2]), { 2: { row: 1, depth: 1 } });
 });
 
-const knockbackCases: Array<[string, string, Cell]> = [
-  ["BACK", "↑", { row: 0, depth: 1 }],
-  ["FRONT", "↓", { row: 2, depth: 1 }],
-  ["UP", "→", { row: 1, depth: 2 }],
-  ["DOWN", "←", { row: 1, depth: 0 }],
-  ["UP_BACK", "↗", { row: 0, depth: 2 }],
-  ["DOWN_BACK", "↖", { row: 0, depth: 0 }],
-  ["UP_FRONT", "↘", { row: 2, depth: 2 }],
-  ["DOWN_FRONT", "↙", { row: 2, depth: 0 }],
+const knockbackVectorCases: Array<[Cell, string, Cell]> = [
+  [{ row: -1, depth: -1 }, "↖", { row: 0, depth: 0 }],
+  [{ row: -1, depth: 0 }, "↑", { row: 0, depth: 1 }],
+  [{ row: -1, depth: 1 }, "↗", { row: 0, depth: 2 }],
+  [{ row: 0, depth: -1 }, "←", { row: 1, depth: 0 }],
+  [{ row: 0, depth: 1 }, "→", { row: 1, depth: 2 }],
+  [{ row: 1, depth: -1 }, "↙", { row: 2, depth: 0 }],
+  [{ row: 1, depth: 0 }, "↓", { row: 2, depth: 1 }],
+  [{ row: 1, depth: 1 }, "↘", { row: 2, depth: 2 }],
 ];
-for (const [direction, arrow, destination] of knockbackCases) {
-  test(`knockback ${direction} has the game-facing arrow and mini-grid destination`, () => {
-    assert.deepEqual(knockbackPresentation(direction), { direction, arrow, distance: 1, row: destination.row - 1, depth: destination.depth - 1 });
-    const preview = knockbackPreviewCells(direction);
+for (const [offset, arrow, destination] of knockbackVectorCases) {
+  test(`authoritative knockback vector ${offset.row},${offset.depth} has the matching arrow and mini-grid destination`, () => {
+    assert.deepEqual(knockbackPresentation("BACK", offset), { direction: "BACK", arrow, distance: 1, ...offset });
+    const preview = knockbackPreviewCells("BACK", offset);
     assert.deepEqual(preview.origin, { row: 1, depth: 1 });
     assert.deepEqual(preview.destination, destination);
   });
 }
 
-test("unknown or missing knockback directions fail closed", () => {
-  assert.throws(() => knockbackPresentation("INVALID"), /Unsupported knockback direction/);
-  assert.throws(() => knockbackPresentation(undefined), /Unsupported knockback direction/);
+test("all external direction labels are retained without redefining their vectors in the UI", () => {
+  for (const direction of ["BACK", "FRONT", "UP", "DOWN", "UP_BACK", "DOWN_BACK", "UP_FRONT", "DOWN_FRONT"] as const) {
+    assert.equal(knockbackPresentation(direction, { row: 0, depth: 1 }).direction, direction);
+  }
+});
+
+test("unknown directions and missing or invalid authoritative vectors fail closed", () => {
+  assert.throws(() => knockbackPresentation("INVALID", { row: 0, depth: 1 }), /Unsupported knockback direction/);
+  assert.throws(() => knockbackPresentation(undefined, { row: 0, depth: 1 }), /Unsupported knockback direction/);
+  assert.throws(() => knockbackPresentation("BACK", undefined), /Missing authoritative knockback offset/);
+  assert.throws(() => knockbackPresentation("BACK", { row: 0, depth: 0 }), /Unsupported knockback offset/);
 });
 
 const reorderCases: Array<[number, number, number[]]> = [
@@ -287,54 +294,6 @@ test("rangePreviewCells centers relative offsets instead of treating them as abs
 test("range helpers reject missing and malformed battle metadata", () => {
   assert.throws(() => rangePreviewCells(undefined), /array/);
   assert.throws(() => rangePreviewCells([{ row: 0, depth: "unknown" }]), /integer/);
-  assert.throws(
-    () => projectRangeCells(undefined, { row: 0, depth: 0 }),
-    /array/,
-  );
-  assert.throws(
-    () => projectRangeCells([{ row: 0, depth: 0 }], { row: 3, depth: 0 }),
-    /outside/,
-  );
-  assert.throws(
-    () => projectRangeCells([{ row: Number.NaN, depth: 0 }], { row: 0, depth: 0 }),
-    /integer/,
-  );
-});
-
-test("projectRangeCells anchors offsets to the Rust-resolved target and clips board edges", () => {
-  const cells = projectRangeCells(
-    [{ row: -1, depth: 0 }, { row: 0, depth: 0 }, { row: 1, depth: 0 }],
-    { row: 0, depth: 2 },
-  );
-  assert.deepEqual([...cells].sort(), ["0,2", "1,2"]);
-});
-
-test("projectRangeCells can represent an all-target skill", () => {
-  assert.equal(projectRangeCells([], { row: 0, depth: 0 }, { targetAll: true }).size, 12);
-});
-
-test("projectRangeCells agrees with an independent exhaustive reference at every board anchor", () => {
-  const ranges = [
-    [{ row: 0, depth: 0 }],
-    [{ row: -2, depth: 0 }, { row: -1, depth: 0 }, { row: 0, depth: 0 }, { row: 1, depth: 0 }, { row: 2, depth: 0 }],
-    [
-      { row: -1, depth: -1 }, { row: -1, depth: 0 }, { row: -1, depth: 1 },
-      { row: 0, depth: -1 }, { row: 0, depth: 0 }, { row: 0, depth: 1 },
-      { row: 1, depth: -1 }, { row: 1, depth: 0 }, { row: 1, depth: 1 },
-    ],
-    [{ row: 0, depth: -3 }, { row: 0, depth: 0 }, { row: 0, depth: 3 }],
-  ];
-  for (let row = 0; row < 3; row += 1) {
-    for (let depth = 0; depth < 4; depth += 1) {
-      for (const range of ranges) {
-        const expected = new Set(range
-          .map(offset => ({ row: row + offset.row, depth: depth + offset.depth }))
-          .filter(cell => cell.row >= 0 && cell.row < 3 && cell.depth >= 0 && cell.depth < 4)
-          .map(cell => `${cell.row},${cell.depth}`));
-        assert.deepEqual(projectRangeCells(range, { row, depth }), expected);
-      }
-    }
-  }
 });
 
 test("long mixed command-selection sequences never overspend or mutate rejected state", () => {

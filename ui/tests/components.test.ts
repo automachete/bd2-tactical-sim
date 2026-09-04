@@ -50,9 +50,26 @@ describe("declarative presentation components", () => {
       rows: 3,
       depths: 4,
       knockbackDirection: undefined,
+      knockbackOffset: undefined,
     });
 
     expect(container.querySelectorAll("i")).toHaveLength(12);
     expect(container.querySelectorAll("i.hit")).toHaveLength(2);
+  });
+
+  test("renders the simulator-provided knockback vector without reinterpreting it", () => {
+    const { container } = render(MiniRange, {
+      range: [{ row: 0, depth: 0 }],
+      rows: 3,
+      depths: 4,
+      knockbackDirection: "FRONT",
+      knockbackOffset: { row: 0, depth: -1 },
+    });
+
+    expect(container.querySelector(".knockback-value b")).toHaveTextContent("←");
+    expect(container.querySelector(".knockback-grid")).toHaveAttribute("data-knockback-row", "0");
+    expect(container.querySelector(".knockback-grid")).toHaveAttribute("data-knockback-depth", "-1");
+    expect(container.querySelector("i.destination")).toHaveAttribute("data-row", "1");
+    expect(container.querySelector("i.destination")).toHaveAttribute("data-depth", "0");
   });
 });

@@ -131,24 +131,6 @@ describe("preserved UI contracts", () => {
     expect(css).toMatch(/\.field-cell, \.formation-cell[\s\S]*?aspect-ratio:\s*1/u);
     expect(css).not.toMatch(/\.battle-grid\s*\{[^}]*grid-template-rows/u);
   });
-  test("range preview uses the authoritative simulator endpoint", () => {
-    expect(api).toContain('"/api/preview"');
-    expect(state).toContain("projectRangeCells");
-  });
-  test("authoritative preview renders per-target and total predicted damage", () => {
-    expect(header).toContain('id="selected-damage"');
-    expect(board).toContain("preview?.damage_by_target");
-    expect(state).toContain("preview?.total_damage");
-    expect(board).toContain("predicted-damage-${unit.id}");
-    expect(i18n).toContain('"selection.predictedDamage"');
-  });
-  test("knockback cards use each character's external-data direction", () => {
-    expect(presentation).toContain("entityById(catalog, unit.character_id)?.knockback_direction");
-    expect(command).toContain("knockbackDirection={meta.knockback_direction}");
-    for (const direction of ["BACK", "FRONT", "UP", "DOWN", "UP_BACK", "DOWN_BACK", "UP_FRONT", "DOWN_FRONT"]) {
-      expect(i18n).toContain(`"knockback.${direction}"`);
-    }
-  });
   test("battle events are replayed sequentially with visible cues", () => {
     expect(board).toContain('id="battle-cue"');
     expect(board).toContain('id="target-line"');
