@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
+import type { BattleMode, Cell, ModeCapabilities } from "../src/lib/types";
 
 import {
   actionIndices,
@@ -27,22 +28,23 @@ import {
   selectCommand,
   serializeFormation,
   spBreakdown,
-} from "../battle-ui-model.mjs";
+} from "../src/lib/battle-ui-model";
 
 const legal = new Map([
   [1, { commands: [{ type: "NORMAL_ATTACK" }, { type: "USE_COSTUME", costume_id: "a", ui: { sp_cost: 4, burst_sp_cost: 0 } }] }],
   [2, { commands: [{ type: "NORMAL_ATTACK" }, { type: "USE_COSTUME", costume_id: "b", ui: { sp_cost: 3, burst_sp_cost: 0 } }] }],
 ]);
-const legalById = unitId => legal.get(Number(unitId));
-const costumes = { a: { sp_cost: 4 }, b: { sp_cost: 3 } };
-const costumeLookup = id => costumes[id];
+const legalById = (unitId: number | string) => legal.get(Number(unitId));
+const costumes: Record<string, { sp_cost: number }> = { a: { sp_cost: 4 }, b: { sp_cost: 3 } };
+const costumeLookup = (id: string) => costumes[id];
 
 test("cellKey normalizes numeric strings", () => assert.equal(cellKey("1", "2"), "1,2"));
 
-for (const [row, depth, expected] of [
+const validCellCases: Array<[number, number, boolean]> = [
   [0, 0, true], [2, 3, true], [1, 2, true], [-1, 0, false], [3, 0, false],
   [0, 4, false], [0.5, 0, false], [0, Number.NaN, false],
-]) {
+];
+for (const [row, depth, expected] of validCellCases) {
   test(`isValidCell(${row}, ${depth}) is ${expected}`, () => assert.equal(isValidCell(row, depth), expected));
 }
 
@@ -89,7 +91,7 @@ test("serializeFormation filters disallowed unit ids", () => {
   assert.deepEqual(serializeFormation({ 1: { row: 0, depth: 0 }, 2: { row: 1, depth: 1 } }, [2]), { 2: { row: 1, depth: 1 } });
 });
 
-for (const [direction, arrow, destination] of [
+const knockbackCases: Array<[string, string, Cell]> = [
   ["BACK", "↑", { row: 0, depth: 1 }],
   ["FRONT", "↓", { row: 2, depth: 1 }],
   ["UP", "→", { row: 1, depth: 2 }],
@@ -98,7 +100,8 @@ for (const [direction, arrow, destination] of [
   ["DOWN_BACK", "↖", { row: 0, depth: 0 }],
   ["UP_FRONT", "↘", { row: 2, depth: 2 }],
   ["DOWN_FRONT", "↙", { row: 2, depth: 0 }],
-]) {
+];
+for (const [direction, arrow, destination] of knockbackCases) {
   test(`knockback ${direction} has the game-facing arrow and mini-grid destination`, () => {
     assert.deepEqual(knockbackPresentation(direction), { direction, arrow, distance: 1, row: destination.row - 1, depth: destination.depth - 1 });
     const preview = knockbackPreviewCells(direction);
@@ -112,9 +115,10 @@ test("unknown or missing knockback directions fail closed", () => {
   assert.throws(() => knockbackPresentation(undefined), /Unsupported knockback direction/);
 });
 
-for (const [unitId, direction, expected] of [
+const reorderCases: Array<[number, number, number[]]> = [
   [2, -1, [2, 1, 3]], [2, 1, [1, 3, 2]], [1, -1, [1, 2, 3]], [3, 1, [1, 2, 3]], [9, 1, [1, 2, 3]],
-]) {
+];
+for (const [unitId, direction, expected] of reorderCases) {
   test(`reorder ${unitId} by ${direction}`, () => assert.deepEqual(reorder([1, 2, 3], unitId, direction), expected));
 }
 
@@ -335,7 +339,7 @@ test("projectRangeCells agrees with an independent exhaustive reference at every
 
 test("long mixed command-selection sequences never overspend or mutate rejected state", () => {
   let selections = new Map([[1, 0], [2, 0]]);
-  const attempts = [[1, 1], [2, 1], [1, 0], [2, 0], [2, 1], [1, 1], [1, 0]];
+  const attempts: Array<[number, number]> = [[1, 1], [2, 1], [1, 0], [2, 0], [2, 1], [1, 1], [1, 0]];
   for (const [unitId, index] of attempts) {
     const before = new Map(selections);
     const result = selectCommand({ order: [1, 2], selections, legalById, costumeLookup, sp: 6 }, unitId, index);
@@ -345,20 +349,22 @@ test("long mixed command-selection sequences never overspend or mutate rejected 
   }
 });
 
-for (const [mode, formation, expected] of [
-  ["NORMAL", true, { formation: true, mctsOpponent: true, ruleBasedOpponent: false, twoPlayerParties: false, manualPlayer: true }],
-  ["MIRROR_WAR", false, { formation: false, mctsOpponent: true, ruleBasedOpponent: false, twoPlayerParties: false, manualPlayer: true }],
-  ["MONSTER_CHASER", true, { formation: true, mctsOpponent: false, ruleBasedOpponent: true, twoPlayerParties: true, manualPlayer: true }],
+const modeCases: Array<[BattleMode, boolean, ModeCapabilities]> = [
+  ["NORMAL", true, { formation: true, mctsOpponent: true, ruleBasedOpponent: false, automaticBattle: false, twoPlayerParties: false, manualPlayer: true }],
+  ["MIRROR_WAR", false, { formation: false, mctsOpponent: true, ruleBasedOpponent: false, automaticBattle: false, twoPlayerParties: false, manualPlayer: true }],
+  ["MONSTER_CHASER", true, { formation: true, mctsOpponent: false, ruleBasedOpponent: true, automaticBattle: false, twoPlayerParties: true, manualPlayer: true }],
   ["GOLDEN_COLOSSEUM", false, { formation: false, mctsOpponent: false, ruleBasedOpponent: false, automaticBattle: true, twoPlayerParties: false, manualPlayer: false }],
-]) {
+];
+for (const [mode, formation, expected] of modeCases) {
   test(`modeCapabilities describes ${mode}`, () => assert.deepEqual(modeCapabilities(mode, formation), expected));
 }
 
-for (const [key, expected] of [
+const keyboardCases: Array<[string, Cell]> = [
   ["ArrowUp", { row: 0, depth: 2 }], ["ArrowDown", { row: 2, depth: 2 }],
   ["ArrowLeft", { row: 1, depth: 1 }], ["ArrowRight", { row: 1, depth: 3 }],
   ["Escape", { row: 1, depth: 2 }],
-]) {
+];
+for (const [key, expected] of keyboardCases) {
   test(`keyboardTarget handles ${key}`, () => assert.deepEqual(keyboardTarget({ row: 1, depth: 2 }, key), expected));
 }
 
@@ -367,7 +373,8 @@ test("keyboardTarget clamps at all board edges", () => {
   assert.deepEqual(keyboardTarget({ row: 2, depth: 3 }, "ArrowRight"), { row: 2, depth: 3 });
 });
 
-for (const [speed, expected] of [[1, 2], [2, 3], [3, 1], [99, 1]]) {
+const speedCases: Array<[number, number]> = [[1, 2], [2, 3], [3, 1], [99, 1]];
+for (const [speed, expected] of speedCases) {
   test(`nextSpeed maps ${speed} to ${expected}`, () => assert.equal(nextSpeed(speed), expected));
 }
 

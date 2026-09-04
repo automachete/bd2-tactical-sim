@@ -1,6 +1,6 @@
 export const DEFAULT_LOCALE = "ja-JP";
 
-export const resources = {
+export const resources: Record<string, Record<string, string>> = {
   "ja-JP": {
     "app.title": "ブラウンダスト2 戦闘シミュレーター",
     "selection.none": "ユニットを選択",
@@ -406,6 +406,7 @@ export const resources = {
     "error.atLeastOneCostume": "コスチュームを1つ以上装備してください。",
     "error.invalidSetupNumber": "戦闘設定の数値を整数の有効範囲内で入力してください。",
     "fiend.level": "レベル {current} / {selected}",
+    "fiend.emblem": "魔",
     "fiend.title": "モンスターチェイサー",
     "fiend.forecast": "魔物行動予告",
     "fiend.ruleBased": "ルール制御",
@@ -490,25 +491,12 @@ export const resources = {
 
 let activeLocale = DEFAULT_LOCALE;
 
-export const setLocale = locale => {
+export const setLocale = (locale: string): void => {
   if (!resources[locale]) throw new Error(`unsupported locale: ${locale}`);
   activeLocale = locale;
-  document.documentElement.lang = locale;
 };
 
-export const t = (key, values = {}) => {
+export const t = (key: string, values: Readonly<Record<string, string | number>> = {}): string => {
   const template = resources[activeLocale]?.[key] ?? resources[DEFAULT_LOCALE]?.[key] ?? key;
-  return String(template).replace(/\{(\w+)\}/g, (_, name) => String(values[name] ?? `{${name}}`));
-};
-
-export const applyTranslations = (root = document) => {
-  root.querySelectorAll("[data-i18n]").forEach(node => {
-    node.textContent = t(node.dataset.i18n);
-  });
-  root.querySelectorAll("[data-i18n-aria]").forEach(node => {
-    node.setAttribute("aria-label", t(node.dataset.i18nAria));
-  });
-  root.querySelectorAll("[data-i18n-placeholder]").forEach(node => {
-    node.setAttribute("placeholder", t(node.dataset.i18nPlaceholder));
-  });
+  return String(template).replace(/\{(\w+)\}/g, (_match, name: string) => String(values[name] ?? `{${name}}`));
 };

@@ -25,6 +25,12 @@
   font-family: "Segoe UI Variable", "Noto Sans JP", "Yu Gothic UI", sans-serif;
 }
 
+html,
+body,
+#app {
+  height: 100%;
+}
+
 .fire { --element-color: var(--element-fire); --element-surface: #4b2424; }
 .water { --element-color: var(--element-water); --element-surface: #203a52; }
 .wind { --element-color: var(--element-wind); --element-surface: #203f2a; }

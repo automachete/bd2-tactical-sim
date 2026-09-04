@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import shutil
 import threading
 import urllib.error
 import urllib.request
@@ -11,13 +12,13 @@ from pathlib import Path
 import pytest
 from bd2rl._native import Simulator
 from bd2rl.debug_setup import DebugSetupCatalog
-from bd2rl.gui import GuiSession, _preview_footprint, handler_factory
+from bd2rl.gui import GuiSession, _preview_footprint, _production_ui_root, handler_factory
 from bd2rl.mcts import MctsConfig, MctsPlanner
 
 ROOT = Path(__file__).resolve().parents[2]
 DATABASE = ROOT / "data/generated/bd2.sqlite"
 SCENARIOS = ROOT / "data/scenarios"
-UI = ROOT / "ui"
+UI = ROOT / "ui" / "dist"
 FAST_MCTS = MctsConfig(simulations=6, rollout_depth=3, max_branching=8)
 
 
@@ -1449,9 +1450,18 @@ def test_gui_rejects_fractional_turn_payload_without_mutating_battle() -> None:
     assert session.simulator.state_json() == before
 
 
-def test_gui_http_catalog_start_and_turn_round_trip() -> None:
+def test_gui_http_catalog_start_and_turn_round_trip(tmp_path: Path) -> None:
     session = GuiSession(DATABASE, SCENARIOS, 29, FAST_MCTS)
-    server = ThreadingHTTPServer(("127.0.0.1", 0), handler_factory(session, UI))
+    static_root = tmp_path / "dist"
+    (static_root / "assets/character-icons/64").mkdir(parents=True)
+    (static_root / "index.html").write_text("<!doctype html><title>BD2</title>", encoding="utf-8")
+    (static_root / "assets/app.js").write_text("export {};", encoding="utf-8")
+    (static_root / "assets/app.css").write_text(":root {}", encoding="utf-8")
+    shutil.copy2(
+        ROOT / "ui/public/assets/character-icons/64/Lathel.png",
+        static_root / "assets/character-icons/64/Lathel.png",
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler_factory(session, static_root))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base = f"http://127.0.0.1:{server.server_port}"
@@ -1521,7 +1531,7 @@ def test_gui_http_catalog_start_and_turn_round_trip() -> None:
         restored = post("/api/rollback", {})
         assert restored["state"] == started["state"]
 
-        with urllib.request.urlopen(base + "/battle-ui-model.mjs", timeout=10) as response:
+        with urllib.request.urlopen(base + "/assets/app.js", timeout=10) as response:
             assert response.headers.get_content_type() == "text/javascript"
         with urllib.request.urlopen(
             base + "/assets/character-icons/64/Lathel.png", timeout=10
@@ -1532,6 +1542,20 @@ def test_gui_http_catalog_start_and_turn_round_trip() -> None:
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_production_ui_root_requires_a_complete_vite_bundle(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match=r"npm ci.*npm run build"):
+        _production_ui_root(tmp_path)
+
+    dist = tmp_path / "ui/dist"
+    assets = dist / "assets"
+    assets.mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    (assets / "app.js").write_text("export {};", encoding="utf-8")
+    (assets / "app.css").write_text(":root {}", encoding="utf-8")
+
+    assert _production_ui_root(tmp_path) == dist
 
 
 @pytest.mark.parametrize(

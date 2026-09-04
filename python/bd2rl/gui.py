@@ -816,7 +816,10 @@ def handler_factory(session: GuiSession, ui_root: Path) -> type[BaseHTTPRequestH
                 ".css": "text/css; charset=utf-8",
                 ".js": "text/javascript; charset=utf-8",
                 ".mjs": "text/javascript; charset=utf-8",
+                ".json": "application/json; charset=utf-8",
                 ".png": "image/png",
+                ".svg": "image/svg+xml",
+                ".woff2": "font/woff2",
             }.get(path.suffix, "application/octet-stream")
             body = path.read_bytes()
             self.send_response(HTTPStatus.OK)
@@ -894,6 +897,27 @@ def handler_factory(session: GuiSession, ui_root: Path) -> type[BaseHTTPRequestH
     return Handler
 
 
+def _production_ui_root(repository_root: Path) -> Path:
+    ui_root = repository_root / "ui" / "dist"
+    index_path = ui_root / "index.html"
+    asset_root = ui_root / "assets"
+    missing = []
+    if not index_path.is_file():
+        missing.append("index.html")
+    if not asset_root.is_dir() or not any(asset_root.glob("*.js")):
+        missing.append("assets/*.js")
+    if not asset_root.is_dir() or not any(asset_root.glob("*.css")):
+        missing.append("assets/*.css")
+    if missing:
+        joined = ", ".join(missing)
+        raise RuntimeError(
+            f"GUI production bundle is missing or incomplete ({joined}). "
+            "Run `npm ci` and `npm run build` in the `ui` directory, "
+            "then start bd2-play or bd2-gui again."
+        )
+    return ui_root
+
+
 def main() -> None:
     repository_root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description="Run the BrownDust2 simulator debug player")
@@ -923,6 +947,7 @@ def main() -> None:
     parser.add_argument("--mcts-max-branching", type=int, default=24)
     parser.add_argument("--no-open", action="store_true")
     args = parser.parse_args()
+    ui_root = _production_ui_root(repository_root)
     config = MctsConfig(
         simulations=args.mcts_simulations,
         rollout_depth=args.mcts_rollout_depth,
@@ -936,9 +961,7 @@ def main() -> None:
         args.saved_setup_directory,
         args.character_profile_path,
     )
-    server = ThreadingHTTPServer(
-        (args.host, args.port), handler_factory(session, repository_root / "ui")
-    )
+    server = ThreadingHTTPServer((args.host, args.port), handler_factory(session, ui_root))
     url = f"http://{args.host}:{args.port}/"
     print(f"BrownDust2 simulator debug player: {url}")
     if not args.no_open:

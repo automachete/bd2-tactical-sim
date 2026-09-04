@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -32,6 +33,24 @@ from bd2rl.env import (
     EnvConfig,
     terminal_reward_for,
 )
+
+
+def test_training_import_does_not_load_gui_or_http_server() -> None:
+    probe = """
+import json
+import sys
+import bd2rl.train
+forbidden = [name for name in sys.modules if name == 'bd2rl.gui' or name.startswith('http.server')]
+print(json.dumps(forbidden))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert json.loads(completed.stdout) == []
+
 
 ROOT = Path(__file__).resolve().parents[2]
 DATABASE = ROOT / "data/generated/bd2.sqlite"

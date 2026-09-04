@@ -74,10 +74,14 @@ cargo run -p bd2-data --bin bd2-data -- inspect data/generated/bd2.sqlite
 ## GUIでプレイする
 
 ```powershell
+cd ui
+npm ci
+npm run build
+cd ..
 .\.venv\Scripts\bd2-play.exe
 ```
 
-既定では`http://127.0.0.1:8765/`を開きます。ブラウザを自動で開かない場合は`--no-open`、ポートを変更する場合は`--port`を指定できます。`bd2-gui.exe`も同じ画面を起動します。
+GUIはSvelte 5、TypeScript、Viteで実装されています。`bd2-play`と`bd2-gui`は`ui/dist`の本番成果物だけを配信し、成果物がない場合はビルド手順を示して停止します。既定では`http://127.0.0.1:8765/`を開きます。ブラウザを自動で開かない場合は`--no-open`、ポートを変更する場合は`--port`を指定できます。開発時はPython側を`bd2-play --no-open --port 8766`で起動し、別端末で`cd ui; npm run dev`を実行します。Viteは`/api`をそのPythonサーバーへ転送します。
 
 ### 戦闘操作
 
@@ -143,7 +147,7 @@ GPUの認識、学習、評価は個別のコマンドで実行します。
 | `crates/bd2-py` | RustコアのPython拡張 |
 | `python/bd2rl` | Gymnasium環境、並列環境、PPO、評価、MCTS、GUIサーバー |
 | `tools` | データ同期、検証、シナリオ生成、ブラウザテスト |
-| `ui` | 戦闘GUIとUIテスト |
+| `ui` | Svelte 5 / TypeScript製の戦闘GUI、Vite構成、UIテスト |
 | `assets/character-icons` | キャラクタートークンの原寸データと識別性QA資料 |
 | `docs` | 設計書、調査記録、検証資料 |
 
@@ -155,7 +159,7 @@ GPUの認識、学習、評価は個別のコマンドで実行します。
 
 - 原寸画像: `assets/character-icons/source`
 - 識別性QA資料: `assets/character-icons/qa`
-- GUI用64px画像: `ui/assets/character-icons/64`
+- GUI用64px画像: `ui/public/assets/character-icons/64`
 
 ## テスト
 
@@ -188,8 +192,10 @@ node --check tools/sync-bd2db.mjs
 node --check tools/build-current-scenarios.mjs
 node --check tools/validate-catalog.mjs
 node --check tools/validate-character-icons.mjs
-node --check ui/app.js
-node --test ui/tests/*.test.mjs
+cd ui
+npm ci
+npm run verify
+cd ..
 node tools/validate-catalog.mjs data/generated/catalog.json
 node tools/validate-bd2db-equipment.mjs data/generated/catalog.json data/generated/equipment-oracle.json
 node tools/validate-character-icons.mjs
