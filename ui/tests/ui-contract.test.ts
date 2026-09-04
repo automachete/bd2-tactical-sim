@@ -17,7 +17,10 @@ const css = read("src/styles.css");
 const i18n = read("src/lib/i18n.ts");
 const battleModel = read("src/lib/battle-ui-model.ts");
 const api = read("src/lib/api.ts");
-const state = read("src/lib/battle-state.svelte.ts");
+const setupModel = read("src/lib/setup-model.ts");
+const state = [
+  "app", "catalog", "dialog", "execution", "feedback", "planning", "playback", "profile", "session", "setup",
+].map((name) => read(`src/lib/state/${name}-state.svelte.ts`)).join("\n");
 const app = read("src/App.svelte");
 const board = read("src/components/BattleBoard.svelte");
 const order = read("src/components/ActionOrder.svelte");
@@ -77,11 +80,11 @@ describe("preserved UI contracts", () => {
   });
   test("has automatic skill reservation", () => {
     expect(header).toContain('id="auto-reserve"');
-    expect(header).toContain("aria-pressed={model.autoReserveEnabled}");
+    expect(header).toContain("aria-pressed={planning.autoReserveEnabled}");
   });
   test("has automatic turn start", () => {
     expect(header).toContain('id="auto-turn"');
-    expect(header).toContain("aria-pressed={model.autoTurnEnabled}");
+    expect(header).toContain("aria-pressed={execution.autoTurnEnabled}");
   });
   test("has a localized speed control", () => {
     expect(header).toContain('id="speed"');
@@ -107,18 +110,18 @@ describe("preserved UI contracts", () => {
     for (const key of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape"]) expect(board).toContain(key);
   });
   test("battle execution sends planned formation to the simulator", () => {
-    expect(state).toContain("battleApi.step(");
+    expect(state).toContain("this.api.step(");
     expect(state).toContain("serializeFormation(this.plannedFormation");
   });
   test("Mirror War uses the simulator capability lock", () => {
-    expect(board).toContain("model.capabilities.formation");
-    expect(state).toContain("this.capabilities.formation");
+    expect(board).toContain("session.capabilities.formation");
+    expect(state).toContain("this.session.capabilities.formation");
   });
   test("formation editor supports occupied-cell swapping", () => {
-    expect(state).toMatch(/occupiedIndex[\s\S]+occupied\.row = source\.row/u);
+    expect(setupModel).toMatch(/occupiedIndex[\s\S]+occupied\.row = source\.row/u);
   });
   test("actionable order cards are draggable and inactive cards are disabled", () => {
-    expect(order).toContain("draggable={actionable && model.capabilities.manualPlayer}");
+    expect(order).toContain("draggable={actionable && session.capabilities.manualPlayer}");
     expect(order).toContain("disabled={!actionable}");
   });
   test("attack order has no visible up/down button implementation", () => {
@@ -149,18 +152,18 @@ describe("preserved UI contracts", () => {
   test("battle events are replayed sequentially with visible cues", () => {
     expect(board).toContain('id="battle-cue"');
     expect(board).toContain('id="target-line"');
-    expect(state).toContain("private async playEvents");
+    expect(state).toContain("async playEvents");
     expect(state).toContain('case "DAMAGE_APPLIED"');
     expect(state).toContain("return this.animationSleep");
   });
   test("speed and pause control the playback state", () => {
     expect(state).toContain("remaining -= (now - previous) * this.speed");
-    expect(state).toContain("this.paused = this.executing");
+    expect(state).toContain("this.playback.setPaused(this.playback.executing)");
   });
   test("five-star unit addition opens a searchable character picker", () => {
     expect(picker).toContain('id="character-picker"');
     expect(picker).toContain('id="character-search"');
-    expect(picker).toContain("model.catalog?.characters");
+    expect(picker).toContain("catalog.catalog?.characters");
     expect(picker).toContain("character-option-${character.id}");
   });
   test("UI copy is managed through the Japanese i18n resource", () => {
@@ -216,10 +219,10 @@ describe("preserved UI contracts", () => {
     expect(api).toContain('"/api/load-setup"');
   });
   test("automatic turn start is cancellable", () => expect(state).toContain("window.clearTimeout(this.autoTimer)"));
-  test("terminal state disables turn execution", () => expect(footer).toContain("Boolean(model.snapshot?.state.terminal)"));
+  test("terminal state disables turn execution", () => expect(footer).toContain("Boolean(session.snapshot?.state.terminal)"));
   test("server-side rollback is wired to the pause menu", () => {
     expect(api).toContain('"/api/rollback"');
-    expect(pause).toContain("model.rollbackBattle");
+    expect(pause).toContain("dialogs.rollbackBattle");
   });
   test("battle log and terminal cues localize engine enums instead of exposing raw JSON", () => {
     expect(production).not.toContain("JSON.stringify(kind)");

@@ -1,19 +1,21 @@
 <script lang="ts">
-  import type { BattleState } from "../../lib/battle-state.svelte";
   import { t } from "../../lib/i18n";
   import { modal } from "../../lib/modal";
   import { effectLabel, elementClass, formatNumber } from "../../lib/presentation";
+  import type { CatalogState } from "../../lib/state/catalog-state.svelte";
+  import type { DialogState } from "../../lib/state/dialog-state.svelte";
+  import type { PlaybackState } from "../../lib/state/playback-state.svelte";
   import Avatar from "../Avatar.svelte";
 
-  let { model }: { model: BattleState } = $props();
-  let unit = $derived(model.inspectedUnitId === null ? undefined : model.units[String(model.inspectedUnitId)]);
-  let character = $derived(unit ? model.entity(unit.character_id) : undefined);
+  let { catalog, dialogs, playback }: { catalog: CatalogState; dialogs: DialogState; playback: PlaybackState } = $props();
+  let unit = $derived(dialogs.inspectedUnitId === null ? undefined : playback.units[String(dialogs.inspectedUnitId)]);
+  let character = $derived(unit ? catalog.entity(unit.character_id) : undefined);
 </script>
 
-{#if model.dialog === "inspect" && unit}
-  <dialog use:modal class="sim-dialog inspect-dialog" id="inspect-dialog" onclose={() => model.close("inspect")}>
+{#if dialogs.dialog === "inspect" && unit}
+  <dialog use:modal class="sim-dialog inspect-dialog" id="inspect-dialog" onclose={() => dialogs.close("inspect")}>
     <section class="dialog-frame compact-dialog">
-      <button class="dialog-close floating-close" type="button" aria-label={t("inspect.closeAria")} onclick={() => model.close("inspect")}>×</button>
+      <button class="dialog-close floating-close" type="button" aria-label={t("inspect.closeAria")} onclick={() => dialogs.close("inspect")}>×</button>
       <div id="inspect-content">
         <div class="inspect-head">
           <Avatar {character} className={`unit-emblem ${elementClass(character?.element)}`} />

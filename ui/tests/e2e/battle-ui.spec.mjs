@@ -738,6 +738,7 @@ test("complex plan keeps formation, order, SP, resolved footprint, and actual hi
 });
 
 test("rapid mixed reservations converge on one latest authoritative target preview", async ({ page, request }) => {
+  await expect(page.locator("#enemy-field .target-preview")).toHaveCount(1);
   let previewRequests = 0;
   page.on("request", requestEvent => {
     if (requestEvent.url().endsWith("/api/preview")) previewRequests += 1;

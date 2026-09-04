@@ -1,33 +1,33 @@
 <script lang="ts">
-  import type { BattleState } from "../../lib/battle-state.svelte";
   import { t } from "../../lib/i18n";
+  import type { CatalogState } from "../../lib/state/catalog-state.svelte";
+  import type { SetupState } from "../../lib/state/setup-state.svelte";
   import type { GoldenBlessingLoadout, GoldenSideBlessings } from "../../lib/types";
 
-  let { model }: { model: BattleState } = $props();
+  let { catalog, setup }: { catalog: CatalogState; setup: SetupState } = $props();
   const configurations: Array<[number, keyof GoldenSideBlessings, string, string]> = [
     [0, "going_first", "player-first", "golden.playerFirst"],
     [0, "going_second", "player-second", "golden.playerSecond"],
     [1, "going_first", "enemy-first", "golden.enemyFirst"],
     [1, "going_second", "enemy-second", "golden.enemySecond"],
   ];
-  let config = $derived(model.draft?.golden_colosseum);
-  let definitions = $derived((model.catalog?.blessings ?? []).filter((item) => !new Set(config?.banned_blessing_ids ?? []).has(item.id)));
+  let config = $derived(setup.draft?.golden_colosseum);
+  let definitions = $derived((catalog.catalog?.blessings ?? []).filter((item) => !new Set(config?.banned_blessing_ids ?? []).has(item.id)));
 
   const change = (sideIndex: number, initiative: keyof GoldenSideBlessings, mutate: (loadout: GoldenBlessingLoadout) => void): void => {
-    const loadout = model.draft?.golden_colosseum?.side_blessings[sideIndex]?.[initiative];
-    if (loadout) mutate(loadout);
+    setup.mutateGoldenLoadout(sideIndex, initiative, mutate);
   };
   const spent = (loadout: GoldenBlessingLoadout): number => loadout.selected.reduce((sum, selected) => {
-    const definition = model.catalog?.blessings.find((item) => item.id === selected.blessing_id);
+    const definition = catalog.catalog?.blessings.find((item) => item.id === selected.blessing_id);
     return sum + (definition?.levels.find((level) => level.level === selected.level)?.point_cost ?? 0);
   }, 0);
 </script>
 
-{#if config && model.draft}
+{#if config && setup.draft}
   <section class="golden-settings" id="golden-settings" data-testid="golden-settings">
     <header>
       <div><small>{t("golden.caption")}</small><b id="golden-season">{config.season_label}</b></div>
-      <span id="golden-rule-summary">{t("golden.summary", { rows: model.draft.grid.rows, depths: model.draft.grid.depths, members: model.draft.grid.deployment_limit, blocked: config.undeployable_grid_count, attempts: config.weekly_attempts, refills: config.refill_limit, rating: config.starting_rating, death: config.death_time_all_turn })}</span>
+      <span id="golden-rule-summary">{t("golden.summary", { rows: setup.draft.grid.rows, depths: setup.draft.grid.depths, members: setup.draft.grid.deployment_limit, blocked: config.undeployable_grid_count, attempts: config.weekly_attempts, refills: config.refill_limit, rating: config.starting_rating, death: config.death_time_all_turn })}</span>
     </header>
     <div class="golden-loadouts" id="golden-loadouts">
       {#each configurations as [sideIndex, initiative, testId, labelKey] (testId)}

@@ -1,13 +1,20 @@
 <script lang="ts">
-  import { flushSync } from "svelte";
-  import { SvelteMap } from "svelte/reactivity";
-  import { reorder } from "../lib/battle-ui-model";
-  import type { BattleState } from "../lib/battle-state.svelte";
+  import { flushSync, onDestroy } from "svelte";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { t } from "../lib/i18n";
   import { commandPresentation, elementClass, formatNumber } from "../lib/presentation";
+  import type { CatalogState } from "../lib/state/catalog-state.svelte";
+  import type { PlanningState } from "../lib/state/planning-state.svelte";
+  import type { PlaybackState } from "../lib/state/playback-state.svelte";
+  import type { SessionState } from "../lib/state/session-state.svelte";
   import Avatar from "./Avatar.svelte";
 
-  let { model }: { model: BattleState } = $props();
+  let { catalog, planning, playback, session }: {
+    catalog: CatalogState;
+    planning: PlanningState;
+    playback: PlaybackState;
+    session: SessionState;
+  } = $props();
 
   let dragId = $state<number | null>(null);
   let dropId = $state<number | null>(null);
@@ -16,6 +23,20 @@
   let pointer = $state<{ unitId: number; pointerId: number; startX: number; startY: number; active: boolean } | null>(null);
   let suppressClick = $state(false);
   const cards = new SvelteMap<number, HTMLElement>();
+  const timers = new SvelteSet<number>();
+
+  const defer = (operation: () => void): void => {
+    const timer = window.setTimeout(() => {
+      timers.delete(timer);
+      operation();
+    }, 0);
+    timers.add(timer);
+  };
+
+  onDestroy(() => {
+    for (const timer of timers) window.clearTimeout(timer);
+    timers.clear();
+  });
 
   const register = (node: HTMLElement, unitId: number): { destroy: () => void } => {
     cards.set(unitId, node);
@@ -33,7 +54,7 @@
   };
 
   const pointerDown = (event: PointerEvent, unitId: number): void => {
-    if (event.pointerType === "mouse" || event.button !== 0 || !model.capabilities.manualPlayer) return;
+    if (event.pointerType === "mouse" || event.button !== 0 || !session.capabilities.manualPlayer) return;
     pointer = { unitId, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, active: false };
     (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
   };
@@ -55,34 +76,31 @@
     dropId = null;
     if (current.active) {
       suppressClick = true;
-      window.setTimeout(() => { suppressClick = false; }, 0);
+      defer(() => { suppressClick = false; });
     }
-    if (target && target.unitId !== current.unitId) model.moveOrder(current.unitId, target.unitId, target.after);
+    if (target && target.unitId !== current.unitId) planning.moveOrder(current.unitId, target.unitId, target.after);
   };
 
   const keyboardMove = (event: KeyboardEvent, unitId: number): void => {
     if (!event.altKey || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
     event.preventDefault();
-    const next = reorder(model.plannedOrder, unitId, event.key === "ArrowUp" ? -1 : 1);
-    if (next.some((value, index) => value !== model.plannedOrder[index])) {
-      model.plannedOrder = next;
-      model.requestPreview();
-      window.setTimeout(() => cards.get(unitId)?.focus(), 0);
+    if (planning.moveOrderBy(unitId, event.key === "ArrowUp" ? -1 : 1)) {
+      defer(() => cards.get(unitId)?.focus());
     }
   };
 </script>
 
 <section class="order-panel" aria-labelledby="order-heading">
   <div class="panel-heading">
-    <span><small>{t(model.mode === "GOLDEN_COLOSSEUM" ? "golden.actionCaption" : "order.caption")}</small><b id="order-heading">{t(model.mode === "GOLDEN_COLOSSEUM" ? "golden.actionOrder" : "order.title")}</b></span>
-    <span class="drag-hint">{t(model.mode === "GOLDEN_COLOSSEUM" ? "golden.orderFixed" : "order.dragHint")}</span>
+    <span><small>{t(session.mode === "GOLDEN_COLOSSEUM" ? "golden.actionCaption" : "order.caption")}</small><b id="order-heading">{t(session.mode === "GOLDEN_COLOSSEUM" ? "golden.actionOrder" : "order.title")}</b></span>
+    <span class="drag-hint">{t(session.mode === "GOLDEN_COLOSSEUM" ? "golden.orderFixed" : "order.dragHint")}</span>
   </div>
   <div
     class="ally-order"
     class:drop-at-end={dropAtEnd}
     id="ally-rail"
     role="list"
-    aria-label={model.capabilities.automaticBattle ? t("golden.pendingAria", { side: t(`battle.side.${model.snapshot?.state.active_side ?? "PLAYER"}`) }) : t("order.listAria")}
+    aria-label={session.capabilities.automaticBattle ? t("golden.pendingAria", { side: t(`battle.side.${session.snapshot?.state.active_side ?? "PLAYER"}`) }) : t("order.listAria")}
     data-testid="ally-order"
     ondragover={(event) => {
       if (dragId === null || event.target !== event.currentTarget) return;
@@ -98,35 +116,35 @@
       const moving = dragId;
       dragId = null;
       dropAtEnd = false;
-      const finalTarget = model.plannedOrder.findLast((id) => id !== moving);
-      if (finalTarget !== undefined) model.moveOrder(moving, finalTarget, true);
+      const finalTarget = planning.plannedOrder.findLast((id) => id !== moving);
+      if (finalTarget !== undefined) planning.moveOrder(moving, finalTarget, true);
     }}
   >
-    {#each model.plannedOrder as unitId, index (unitId)}
-      {@const unit = model.units[String(unitId)]}
+    {#each planning.plannedOrder as unitId, index (unitId)}
+      {@const unit = playback.units[String(unitId)]}
       {#if unit}
-        {@const character = model.entity(unit.character_id)}
-        {@const legal = model.legalFor(unit.id)}
+        {@const character = catalog.entity(unit.character_id)}
+        {@const legal = session.legalFor(unit.id)}
         {@const actionable = Boolean(legal?.commands.length)}
-        {@const command = legal?.commands[model.selectedCommandIndex(unit.id)]}
-        {@const meta = model.catalog ? commandPresentation(model.catalog, unit, command) : null}
+        {@const command = legal?.commands[planning.selectedCommandIndex(unit.id)]}
+        {@const meta = catalog.catalog ? commandPresentation(catalog.catalog, unit, command) : null}
         <button
           use:register={unit.id}
           type="button"
-          draggable={actionable && model.capabilities.manualPlayer}
+          draggable={actionable && session.capabilities.manualPlayer}
           disabled={!actionable}
-          class={`order-card ${elementClass(character?.element)} ${model.selectedUnitId === unit.id ? "selected" : ""} ${actionable ? "" : "inactive"}`}
+          class={`order-card ${elementClass(character?.element)} ${planning.selectedUnitId === unit.id ? "selected" : ""} ${actionable ? "" : "inactive"}`}
           class:dragging={dragId === unit.id || pointer?.unitId === unit.id && pointer.active}
           class:drop-before={dropId === unit.id && !dropAfter}
           class:drop-after={dropId === unit.id && dropAfter}
           data-unit-id={unit.id}
           data-testid={`order-unit-${unit.id}`}
-          aria-label={model.capabilities.automaticBattle
+          aria-label={session.capabilities.automaticBattle
             ? t("golden.pendingCardAria", { order: index + 1, name: character?.name ?? unit.character_id, action: actionable ? meta?.name ?? t("golden.awaitingAction") : t("golden.awaitingAction") })
             : t("order.cardAria", { order: index + 1, name: character?.name ?? unit.character_id, action: meta?.name ?? t("action.cannotAct") })}
-          onclick={(event) => { if (suppressClick) event.preventDefault(); else flushSync(() => { model.selectUnit(unit.id); }); }}
+          onclick={(event) => { if (suppressClick) event.preventDefault(); else flushSync(() => { planning.selectUnit(unit.id); }); }}
           ondragstart={(event) => {
-            if (!model.capabilities.manualPlayer) { event.preventDefault(); return; }
+            if (!session.capabilities.manualPlayer) { event.preventDefault(); return; }
             dragId = unit.id;
             event.dataTransfer?.setData("text/plain", String(unit.id));
           }}
@@ -143,7 +161,7 @@
             event.stopPropagation();
             const moving = dragId;
             dragId = null;
-            if (moving !== null) model.moveOrder(moving, unit.id, dropAfter);
+            if (moving !== null) planning.moveOrder(moving, unit.id, dropAfter);
             dropId = null;
           }}
           ondragend={() => { dragId = null; dropId = null; dropAtEnd = false; }}
@@ -157,9 +175,9 @@
           <Avatar {character} className="small-emblem" />
           <span class="order-copy">
             <b>{character?.name ?? unit.character_id}</b>
-            <small>{model.mode === "GOLDEN_COLOSSEUM" ? model.costume(unit.costume_loadout.find((item) => item.enabled !== false)?.costume_id ?? "")?.name ?? "" : meta?.name ?? ""} · HP {formatNumber(unit.hp)}</small>
+            <small>{session.mode === "GOLDEN_COLOSSEUM" ? catalog.costume(unit.costume_loadout.find((item) => item.enabled !== false)?.costume_id ?? "")?.name ?? "" : meta?.name ?? ""} · HP {formatNumber(unit.hp)}</small>
           </span>
-          <span class="reserved-mark">{model.selectedCommandIndex(unit.id) > 0 ? "◆" : ""}</span>
+          <span class="reserved-mark">{planning.selectedCommandIndex(unit.id) > 0 ? "◆" : ""}</span>
         </button>
       {/if}
     {/each}

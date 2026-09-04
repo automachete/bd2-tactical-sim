@@ -1,19 +1,27 @@
 <script lang="ts">
-  import type { BattleState } from "../lib/battle-state.svelte";
   import { t } from "../lib/i18n";
   import { elementClass, formatNumber } from "../lib/presentation";
+  import type { CatalogState } from "../lib/state/catalog-state.svelte";
+  import type { DialogState } from "../lib/state/dialog-state.svelte";
+  import type { PlaybackState } from "../lib/state/playback-state.svelte";
+  import type { SessionState } from "../lib/state/session-state.svelte";
   import Avatar from "./Avatar.svelte";
 
-  let { model }: { model: BattleState } = $props();
+  let { catalog, dialogs, playback, session }: {
+    catalog: CatalogState;
+    dialogs: DialogState;
+    playback: PlaybackState;
+    session: SessionState;
+  } = $props();
 
-  let monster = $derived(model.monsterState);
+  let monster = $derived(playback.monsterState);
   let monsterTotal = $derived(monster?.level_hp_segments.reduce((sum, value) => sum + value, 0) ?? 0);
   let monsterPercent = $derived(monster ? Math.max(0, 100 * monster.battle_hp_remaining / Math.max(1, monsterTotal)) : 0);
-  let controller = $derived(model.snapshot?.enemy_controller === "RULE_BASED"
+  let controller = $derived(session.snapshot?.enemy_controller === "RULE_BASED"
     ? t("controller.rule")
-    : model.snapshot?.enemy_controller === "COLOSSEUM_AUTO" ? t("controller.golden") : t("controller.mcts"));
+    : session.snapshot?.enemy_controller === "COLOSSEUM_AUTO" ? t("controller.golden") : t("controller.mcts"));
   let aiReport = $derived.by(() => {
-    const report = model.snapshot?.last_ai;
+    const report = session.snapshot?.last_ai;
     if (!report) return t("ai.idle");
     if (report.controller === "MCTS") return t("ai.mctsReport", {
       simulations: report.simulations ?? 0,
@@ -30,15 +38,15 @@
     <span id="controller-label">{controller}</span>
   </div>
   <div class="enemy-list" id="enemy-rail" class:hidden={Boolean(monster)}>
-    {#each model.enemyUnits.filter((unit) => !monster || unit.can_act) as unit (unit.id)}
-      {@const character = model.entity(unit.character_id)}
+    {#each playback.enemyUnits.filter((unit) => !monster || unit.can_act) as unit (unit.id)}
+      {@const character = catalog.entity(unit.character_id)}
       {@const hp = Math.max(0, 100 * unit.hp / Math.max(1, unit.base_stats.max_hp))}
       <button
         type="button"
         class={`enemy-card ${elementClass(character?.element)}`}
         data-unit-id={unit.id}
         data-testid={`enemy-unit-${unit.id}`}
-        onclick={() => { model.inspectedUnitId = unit.id; model.open("inspect"); }}
+        onclick={() => dialogs.inspect(unit.id)}
       >
         <Avatar {character} />
         <span>
@@ -56,7 +64,7 @@
       <span class="fiend-hp-text" id="fiend-hp-text">{formatNumber(monster.battle_hp_remaining)} / {formatNumber(monsterTotal)}</span>
       <div class="forecast-title"><b>{t("fiend.forecast")}</b><span>{t("fiend.ruleBased")}</span></div>
       <ol class="forecast-list" id="forecast-list">
-        {#each model.catalog?.monster_skills ?? [] as skill, index (`${skill.name}:${index}`)}
+        {#each catalog.catalog?.monster_skills ?? [] as skill, index (`${skill.name}:${index}`)}
           <li><span>{index + 1}</span><div><b>{skill.name}</b><small>{skill.condition || t("fiend.sequence")} · {skill.operation_summary}</small></div></li>
         {/each}
       </ol>

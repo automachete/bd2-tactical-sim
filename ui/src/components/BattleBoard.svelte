@@ -1,21 +1,39 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { SvelteMap } from "svelte/reactivity";
   import { cellKey, keyboardTarget, occupantAt } from "../lib/battle-ui-model";
-  import type { BattleState } from "../lib/battle-state.svelte";
   import { t } from "../lib/i18n";
   import { elementClass, formatNumber } from "../lib/presentation";
+  import type { CatalogState } from "../lib/state/catalog-state.svelte";
+  import type { DialogState } from "../lib/state/dialog-state.svelte";
+  import type { FeedbackState } from "../lib/state/feedback-state.svelte";
+  import type { PlanningState } from "../lib/state/planning-state.svelte";
+  import type { PlaybackState } from "../lib/state/playback-state.svelte";
+  import type { SessionState } from "../lib/state/session-state.svelte";
   import type { BattleUnit, Cell, Side } from "../lib/types";
   import Avatar from "./Avatar.svelte";
 
-  let { model }: { model: BattleState } = $props();
+  let { catalog, dialogs, feedback, planning, playback, session }: {
+    catalog: CatalogState;
+    dialogs: DialogState;
+    feedback: FeedbackState;
+    planning: PlanningState;
+    playback: PlaybackState;
+    session: SessionState;
+  } = $props();
 
   let dragId = $state<number | null>(null);
   let dropCell = $state<Cell | null>(null);
   let pointer = $state<{ unitId: number; pointerId: number; startX: number; startY: number; active: boolean } | null>(null);
   let keyboard = $state<{ unitId: number; row: number; depth: number } | null>(null);
   const playerCells = new SvelteMap<string, HTMLElement>();
+  let focusTimer: number | undefined;
 
-  let grid = $derived(model.snapshot?.state.rules.grid ?? { rows: 3, depths: 4, deployment_limit: 5, blocked: [] });
+  onDestroy(() => {
+    if (focusTimer !== undefined) window.clearTimeout(focusTimer);
+  });
+
+  let grid = $derived(session.snapshot?.state.rules.grid ?? { rows: 3, depths: 4, deployment_limit: 5, blocked: [] });
   let playerDepths = $derived(Array.from({ length: grid.depths }, (_, index) => grid.depths - index - 1));
   let enemyDepths = $derived(Array.from({ length: grid.depths }, (_, index) => index));
 
@@ -23,9 +41,9 @@
     const depths = side === "PLAYER" ? playerDepths : enemyDepths;
     return Array.from({ length: grid.rows }, (_, row) => depths.map((depth) => ({ row, depth }))).flat();
   };
-  const unitsFor = (side: Side): BattleUnit[] => (side === "PLAYER" ? model.playerUnits : model.enemyUnits).filter((unit) => unit.alive);
+  const unitsFor = (side: Side): BattleUnit[] => (side === "PLAYER" ? playback.playerUnits : playback.enemyUnits).filter((unit) => unit.alive);
   const unitAt = (side: Side, row: number, depth: number): BattleUnit | undefined => unitsFor(side).find((unit) => {
-    const position = side === "PLAYER" && !model.executing ? model.effectivePosition(unit) : unit.position;
+    const position = side === "PLAYER" && !playback.executing ? planning.effectivePosition(unit) : unit.position;
     return position.row === row && position.depth === depth;
   });
   const blocked = (row: number, depth: number): boolean => grid.blocked.some(([blockedRow, blockedDepth]) => blockedRow === row && blockedDepth === depth);
@@ -44,7 +62,7 @@
     return null;
   };
   const beginPointer = (event: PointerEvent, unit: BattleUnit): void => {
-    if (!model.capabilities.formation || event.button !== 0) return;
+    if (!session.capabilities.formation || event.button !== 0) return;
     pointer = { unitId: unit.id, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, active: false };
     (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
   };
@@ -61,18 +79,22 @@
     dropCell = null;
     if (target) {
       event.preventDefault();
-      model.moveBattleUnit(current.unitId, target.row, target.depth);
+      planning.moveBattleUnit(current.unitId, target.row, target.depth);
     }
   };
   const beginKeyboard = (unit: BattleUnit): void => {
-    if (!model.capabilities.formation) {
-      model.showError(t("error.runtimeFormationLocked"));
+    if (!session.capabilities.formation) {
+      feedback.showError(t("error.runtimeFormationLocked"));
       return;
     }
-    const position = model.effectivePosition(unit);
+    const position = planning.effectivePosition(unit);
     keyboard = { unitId: unit.id, row: position.row, depth: position.depth };
-    model.announce(t("formation.pickup", { name: model.entity(unit.character_id)?.name ?? unit.character_id }));
-    window.setTimeout(() => playerCells.get(cellKey(position.row, position.depth))?.focus(), 0);
+    feedback.announce(t("formation.pickup", { name: catalog.entity(unit.character_id)?.name ?? unit.character_id }));
+    if (focusTimer !== undefined) window.clearTimeout(focusTimer);
+    focusTimer = window.setTimeout(() => {
+      focusTimer = undefined;
+      playerCells.get(cellKey(position.row, position.depth))?.focus();
+    }, 0);
   };
   const keyboardMove = (event: KeyboardEvent): void => {
     if (!keyboard) return;
@@ -81,27 +103,27 @@
       const target = keyboardTarget(keyboard, event.key, grid.rows, grid.depths);
       keyboard = { ...keyboard, ...target };
       playerCells.get(cellKey(target.row, target.depth))?.focus();
-      model.announce(t("formation.keyboardTarget", { row: target.row + 1, depth: target.depth + 1 }));
+      feedback.announce(t("formation.keyboardTarget", { row: target.row + 1, depth: target.depth + 1 }));
     } else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       const target = keyboard;
       keyboard = null;
-      model.moveBattleUnit(target.unitId, target.row, target.depth);
+      planning.moveBattleUnit(target.unitId, target.row, target.depth);
     } else if (event.key === "Escape") {
       event.preventDefault();
       keyboard = null;
-      model.announce(t("formation.cancelled"));
+      feedback.announce(t("formation.cancelled"));
     }
   };
-  const forecastFor = (unitId: number) => model.preview?.damage_by_target.find((item) => item.target_id === unitId);
+  const forecastFor = (unitId: number) => planning.preview?.damage_by_target.find((item) => item.target_id === unitId);
 </script>
 
 <svelte:window onkeydown={keyboardMove} />
 
 <div class="turn-banner">
-  <span id="mode-label">{t(`mode.${model.mode}`)}</span>
-  <strong id="turn-label">{t("battle.turn", { turn: model.snapshot?.state.game_turn ?? 1 })}</strong>
-  <span id="team-label">{t("party.team", { number: model.activeParty })}</span>
+  <span id="mode-label">{t(`mode.${session.mode}`)}</span>
+  <strong id="turn-label">{t("battle.turn", { turn: session.snapshot?.state.game_turn ?? 1 })}</strong>
+  <span id="team-label">{t("party.team", { number: playback.activeParty })}</span>
 </div>
 
 <div class="topdown-stage" data-testid="topdown-stage">
@@ -110,7 +132,7 @@
     <section class={`board-side ${typedSide === "PLAYER" ? "player-side" : "enemy-side"}`} aria-labelledby={`${typedSide.toLowerCase()}-board-heading`}>
       <div class="board-label">
         <b id={`${typedSide.toLowerCase()}-board-heading`}>{t(typedSide === "PLAYER" ? "board.ally" : "board.enemy")}</b>
-        <span id={typedSide === "PLAYER" ? "formation-state" : undefined}>{typedSide === "PLAYER" ? t(model.capabilities.formation ? "board.formationEditable" : "board.formationLocked") : t("board.previewHint")}</span>
+        <span id={typedSide === "PLAYER" ? "formation-state" : undefined}>{typedSide === "PLAYER" ? t(session.capabilities.formation ? "board.formationEditable" : "board.formationLocked") : t("board.previewHint")}</span>
       </div>
       <div
         class={`battle-grid ${typedSide === "PLAYER" ? "player-grid" : "enemy-grid"}`}
@@ -123,19 +145,19 @@
         {#each cellList(typedSide) as cell (`${typedSide}-${cell.row}-${cell.depth}`)}
           {@const unit = unitAt(typedSide, cell.row, cell.depth)}
           {@const isBlocked = blocked(cell.row, cell.depth)}
-          {@const playbackCell = model.playbackTargetCell}
-          {@const playbackCellTarget = model.executing && playbackCell?.side === typedSide && playbackCell.row === cell.row && playbackCell.depth === cell.depth}
-          {@const previewed = model.preview?.target_side === typedSide && model.previewCells.has(cellKey(cell.row, cell.depth)) || playbackCellTarget}
-          {@const anchored = model.preview?.target_side === typedSide && model.preview?.anchor?.row === cell.row && model.preview.anchor.depth === cell.depth || model.executing && unit?.id === model.playbackTargetId || playbackCellTarget}
-          {@const occupied = unit ? model.previewTargetIds.has(unit.id) : false}
+          {@const playbackCell = playback.playbackTargetCell}
+          {@const playbackCellTarget = playback.executing && playbackCell?.side === typedSide && playbackCell.row === cell.row && playbackCell.depth === cell.depth}
+          {@const previewed = planning.preview?.target_side === typedSide && planning.previewCells.has(cellKey(cell.row, cell.depth)) || playbackCellTarget}
+          {@const anchored = planning.preview?.target_side === typedSide && planning.preview?.anchor?.row === cell.row && planning.preview.anchor.depth === cell.depth || playback.executing && unit?.id === playback.playbackTargetId || playbackCellTarget}
+          {@const occupied = unit ? planning.previewTargetIds.has(unit.id) : false}
           <div
             use:registerPlayerCell={typedSide === "PLAYER" ? cell : { row: -1, depth: -1 }}
             tabindex="0"
             class="field-cell"
-            class:locked={typedSide === "PLAYER" && !model.capabilities.formation}
+            class:locked={typedSide === "PLAYER" && !session.capabilities.formation}
             class:blocked={isBlocked}
-            class:drop-valid={typedSide === "PLAYER" && dropCell?.row === cell.row && dropCell.depth === cell.depth && !occupantAt(model.plannedFormation, cell.row, cell.depth, dragId ?? pointer?.unitId ?? null)}
-            class:drop-swap={typedSide === "PLAYER" && dropCell?.row === cell.row && dropCell.depth === cell.depth && Boolean(occupantAt(model.plannedFormation, cell.row, cell.depth, dragId ?? pointer?.unitId ?? null))}
+            class:drop-valid={typedSide === "PLAYER" && dropCell?.row === cell.row && dropCell.depth === cell.depth && !occupantAt(planning.plannedFormation, cell.row, cell.depth, dragId ?? pointer?.unitId ?? null)}
+            class:drop-swap={typedSide === "PLAYER" && dropCell?.row === cell.row && dropCell.depth === cell.depth && Boolean(occupantAt(planning.plannedFormation, cell.row, cell.depth, dragId ?? pointer?.unitId ?? null))}
             class:keyboard-target={typedSide === "PLAYER" && keyboard?.row === cell.row && keyboard.depth === cell.depth}
             class:target-preview={previewed}
             class:target-anchor={anchored}
@@ -148,7 +170,7 @@
             aria-label={t("formation.cellAria", { side: t(`battle.side.${typedSide}`), row: cell.row + 1, depth: cell.depth + 1 })}
             aria-disabled={isBlocked ? "true" : undefined}
             ondragover={(event) => {
-              if (typedSide !== "PLAYER" || dragId === null || !model.capabilities.formation) return;
+              if (typedSide !== "PLAYER" || dragId === null || !session.capabilities.formation) return;
               event.preventDefault();
               dropCell = cell;
             }}
@@ -159,28 +181,28 @@
               const moving = dragId ?? Number(event.dataTransfer?.getData("text/plain"));
               dragId = null;
               dropCell = null;
-              if (Number.isFinite(moving)) model.moveBattleUnit(moving, cell.row, cell.depth);
+              if (Number.isFinite(moving)) planning.moveBattleUnit(moving, cell.row, cell.depth);
             }}
           >
             {#if unit}
-              {@const character = model.entity(unit.character_id)}
+              {@const character = catalog.entity(unit.character_id)}
               {@const hp = Math.max(0, 100 * unit.hp / Math.max(1, unit.base_stats.max_hp))}
               <button
                 type="button"
                 class={`battle-token ${elementClass(character?.element)} ${typedSide === "ENEMY" ? "enemy-token" : ""}`}
-                class:selected={model.selectedUnitId === unit.id}
-                class:actor-focus={model.playbackActorId === unit.id}
-                class:targeted={model.playbackTargetId === unit.id}
+                class:selected={planning.selectedUnitId === unit.id}
+                class:actor-focus={playback.playbackActorId === unit.id}
+                class:targeted={playback.playbackTargetId === unit.id}
                 class:pointer-dragging={pointer?.unitId === unit.id && pointer.active}
-                class:playback-created={model.playbackCreated.has(unit.id)}
-                draggable={typedSide === "PLAYER" && model.capabilities.formation && unit.alive}
+                class:playback-created={playback.playbackCreated.has(unit.id)}
+                draggable={typedSide === "PLAYER" && session.capabilities.formation && unit.alive}
                 data-unit-id={unit.id}
                 data-testid={`${typedSide.toLowerCase()}-token-${unit.id}`}
                 aria-label={t(typedSide === "PLAYER" ? "formation.playerTokenAria" : "formation.enemyTokenAria", { name: character?.name ?? unit.character_id, hp: unit.hp })}
                 aria-grabbed={typedSide === "PLAYER" && (dragId === unit.id || pointer?.unitId === unit.id && pointer.active)}
-                onclick={() => typedSide === "PLAYER" ? model.selectUnit(unit.id) : (model.inspectedUnitId = unit.id, model.open("inspect"))}
+                onclick={() => typedSide === "PLAYER" ? planning.selectUnit(unit.id) : dialogs.inspect(unit.id)}
                 ondragstart={(event) => {
-                  if (typedSide !== "PLAYER" || !model.capabilities.formation) { event.preventDefault(); model.showError(t("error.formationLocked")); return; }
+                  if (typedSide !== "PLAYER" || !session.capabilities.formation) { event.preventDefault(); feedback.showError(t("error.formationLocked")); return; }
                   dragId = unit.id;
                   event.dataTransfer?.setData("text/plain", String(unit.id));
                 }}
@@ -192,7 +214,7 @@
                 onpointercancel={() => { pointer = null; dropCell = null; }}
               >
                 <Avatar {character} />
-                <span class="token-copy"><b>{character?.name ?? unit.character_id}</b><small>{model.mode === "GOLDEN_COLOSSEUM" ? `${model.costume(unit.costume_loadout.find((item) => item.enabled !== false)?.costume_id ?? "")?.name ?? ""} · ` : ""}HP {formatNumber(unit.hp)}</small></span>
+                <span class="token-copy"><b>{character?.name ?? unit.character_id}</b><small>{session.mode === "GOLDEN_COLOSSEUM" ? `${catalog.costume(unit.costume_loadout.find((item) => item.enabled !== false)?.costume_id ?? "")?.name ?? ""} · ` : ""}HP {formatNumber(unit.hp)}</small></span>
                 <span class="mini-hp"><i style:width={`${hp}%`}></i></span>
               </button>
               {@const forecast = forecastFor(unit.id)}
@@ -214,12 +236,12 @@
     {/if}
   {/each}
   <svg class="target-line hidden" id="target-line" aria-hidden="true"><line x1="0" y1="0" x2="0" y2="0"></line></svg>
-  <div class="battle-cue" class:hidden={!model.cue.title && !model.cue.detail} id="battle-cue" role="status" aria-live="assertive"><small id="cue-turn">{model.cue.turn}</small><strong id="cue-title">{model.cue.title}</strong><span id="cue-detail">{model.cue.detail}</span></div>
+  <div class="battle-cue" class:hidden={!playback.cue.title && !playback.cue.detail} id="battle-cue" role="status" aria-live="assertive"><small id="cue-turn">{playback.cue.turn}</small><strong id="cue-title">{playback.cue.title}</strong><span id="cue-detail">{playback.cue.detail}</span></div>
   <div class="floating-layer" id="floating-layer" aria-hidden="true">
-    {#each model.floating as item (item.id)}
+    {#each playback.floating as item (item.id)}
       <span class={`floating-number ${item.className}`}>{item.text}</span>
     {/each}
   </div>
 </div>
 
-<div class="interaction-message" id="tip-banner" role="status" aria-live="polite">{model.tip}</div>
+<div class="interaction-message" id="tip-banner" role="status" aria-live="polite">{feedback.tip}</div>

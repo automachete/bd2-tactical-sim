@@ -1,33 +1,46 @@
 <script lang="ts">
   import { CURRENT_SP_CAP } from "../lib/battle-ui-model";
-  import type { BattleState } from "../lib/battle-state.svelte";
   import { t } from "../lib/i18n";
+  import type { DialogState } from "../lib/state/dialog-state.svelte";
+  import type { ExecutionState } from "../lib/state/execution-state.svelte";
+  import type { FeedbackState } from "../lib/state/feedback-state.svelte";
+  import type { PlanningState } from "../lib/state/planning-state.svelte";
+  import type { PlaybackState } from "../lib/state/playback-state.svelte";
+  import type { SessionState } from "../lib/state/session-state.svelte";
 
-  let { model, fullscreenTarget }: { model: BattleState; fullscreenTarget: HTMLElement | null } = $props();
+  let { dialogs, execution, feedback, fullscreenTarget, planning, playback, session }: {
+    dialogs: DialogState;
+    execution: ExecutionState;
+    feedback: FeedbackState;
+    fullscreenTarget: HTMLElement | null;
+    planning: PlanningState;
+    playback: PlaybackState;
+    session: SessionState;
+  } = $props();
 
-  let bypassed = $derived(model.mode === "GOLDEN_COLOSSEUM");
-  let breakdown = $derived(model.sp);
-  let disabled = $derived(Boolean(model.snapshot?.state.terminal)
-    || model.busy
-    || model.executing
-    || (!bypassed && model.snapshot?.state.active_side !== "PLAYER")
+  let bypassed = $derived(session.mode === "GOLDEN_COLOSSEUM");
+  let breakdown = $derived(planning.sp);
+  let disabled = $derived(Boolean(session.snapshot?.state.terminal)
+    || feedback.busy
+    || playback.executing
+    || (!bypassed && session.snapshot?.state.active_side !== "PLAYER")
     || (!bypassed && breakdown.remaining < 0)
-    || model.plannedOrder.length === 0);
+    || planning.plannedOrder.length === 0);
 
   const toggleFullscreen = async (): Promise<void> => {
     try {
       if (!document.fullscreenElement) await fullscreenTarget?.requestFullscreen();
       else await document.exitFullscreen();
     } catch (error) {
-      model.showError(error);
+      feedback.showError(error);
     }
   };
 </script>
 
 <footer class="battle-footer">
   <div class="footer-tools">
-    <button class="hud-button" id="open-formation" type="button" onclick={() => model.open("formation")}><span>▦</span><span>{t("footer.preparation")}</span></button>
-    <button class="hud-button" id="open-character-profiles" type="button" data-testid="open-character-profiles" onclick={() => model.open("profiles")}><span>◇</span><span>{t("footer.characterProfiles")}</span></button>
+    <button class="hud-button" id="open-formation" type="button" onclick={() => dialogs.open("formation")}><span>▦</span><span>{t("footer.preparation")}</span></button>
+    <button class="hud-button" id="open-character-profiles" type="button" data-testid="open-character-profiles" onclick={() => dialogs.openProfiles()}><span>◇</span><span>{t("footer.characterProfiles")}</span></button>
     <button class="hud-button" id="screen-toggle" type="button" onclick={toggleFullscreen}><span>□</span><span>{t("footer.fullscreen")}</span></button>
   </div>
   <section
@@ -53,18 +66,18 @@
       {/each}
     </div>
   </section>
-  <button class="battle-button" id="execute" type="button" data-testid="battle-start" {disabled} onclick={model.executePlan}><span id="battle-turn">{t("battle.turn", { turn: model.snapshot?.state.game_turn ?? 1 })}</span><b>{t("footer.battle")}</b><i>{t("footer.start")}</i></button>
+  <button class="battle-button" id="execute" type="button" data-testid="battle-start" {disabled} onclick={execution.executePlan}><span id="battle-turn">{t("battle.turn", { turn: session.snapshot?.state.game_turn ?? 1 })}</span><b>{t("footer.battle")}</b><i>{t("footer.start")}</i></button>
 </footer>
 
-{#if model.snapshot?.state.terminal && !model.executing}
+{#if session.snapshot?.state.terminal && !playback.executing}
   <section class="terminal" id="terminal" role="alertdialog" aria-modal="true">
     <small>{t("battle.result")}</small>
-    <strong id="terminal-outcome">{t(`battle.outcome.${model.snapshot.state.terminal.outcome}`)}</strong>
-    <span id="terminal-reason">{t(`battle.reason.${model.snapshot.state.terminal.reason}`)}</span>
+    <strong id="terminal-outcome">{t(`battle.outcome.${session.snapshot.state.terminal.outcome}`)}</strong>
+    <span id="terminal-reason">{t(`battle.reason.${session.snapshot.state.terminal.reason}`)}</span>
     <div class="terminal-actions">
-      <button id="terminal-rollback" type="button" disabled={!model.canRollback} onclick={model.rollbackBattle}>{t("battle.previousTurn")}</button>
-      <button id="terminal-log" class="secondary" type="button" data-testid="terminal-log" onclick={() => model.open("log")}>{t("battle.viewLog")}</button>
-      <button id="terminal-reset" type="button" onclick={model.resetBattle}>{t("battle.retry")}</button>
+      <button id="terminal-rollback" type="button" disabled={!playback.canRollback} onclick={execution.rollbackBattle}>{t("battle.previousTurn")}</button>
+      <button id="terminal-log" class="secondary" type="button" data-testid="terminal-log" onclick={() => dialogs.open("log")}>{t("battle.viewLog")}</button>
+      <button id="terminal-reset" type="button" onclick={execution.resetBattle}>{t("battle.retry")}</button>
     </div>
   </section>
 {/if}
